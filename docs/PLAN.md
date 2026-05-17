@@ -75,7 +75,7 @@ shyake/
    为 awk/jq 脚本设计. 
    - `--debug`: 输出详细的 Curl 握手信息与内部变量到 stderr.
    - `--no-color` / `NO_COLOR=1`: 禁用颜色. 
-   当前计划先不做终端颜色输出, 后续可能会做 自定义 ANSI 16 色 / 256 色.
+   当前计划先不做终端颜色输出, 后续可能会做 自定义 ANSI 16 色 / 256 色主题.
 
 1. `shyake init`
 
@@ -112,6 +112,9 @@ CHECK_COLUMNS=id,sender,subject,size,date
 
 任何人可自行部署 Worker 实例, 注册时需指定实例. 
 仅 localhost 允许 `http://`, 否则必须 `https://`.
+
+实例拥有者可以在 `wrangler.toml` 中配置 `REGISTRATION_ENABLED = true`. 
+如果设置为 `false`, 则 Worker 会拒绝所有新的注册请求. 
 
 为防止冒充, 实例拥有者可以在 `wrangler.toml` 中配置 `RESERVED_USERNAMES`.
 例如: `admin,system,support,noreply,shyake`), Worker 会拒绝这些注册请求.
@@ -338,17 +341,14 @@ rm -rf ~/.config/shyake/*
 
 采用 Server-to-Server 路由模式. 客户端只与自己所在的实例通信. 
 跨实例发信时, 客户端将加密且签名好的 Payload POST 给自己的实例 Worker.
-发件人的 Worker 收到后存入本地数据库, 随后在后台使用 `fetch` 
-转发 Payload 给目标实例的 Worker.
-
-这保护了客户端的 IP, 并确保了双边数据的原子性和一致性.
+发件人的 Worker 收到后存入本地数据库, 随后在后台使用 `fetch` 转发 Payload 
+给目标实例的 Worker. 确保了双边数据的原子性和一致性.
 
 Server-to-Server 验证:
 
 目标实例接收到外域实例转发的 POST 请求后, 向发件人所在实例发起 HTTP GET 
-获取其公钥进行验签. 
-
-信件在投递成功后, 在发件人实例和收件人实例数据库中会各保存一份.
+获取其公钥进行验签. 信件在投递成功后, 
+在发件人实例和收件人实例的数据库中会各保存一份.
 
 开启或关闭联邦网络:
 
@@ -395,5 +395,3 @@ Hashcash PoW (20-bit): 所有写操作均需提供 PoW.
 
 
 Copyright (c) 2026 Salmonization
-
-EOF
