@@ -29,16 +29,17 @@
 
 ```
 shyake/
-├── client/              # C client
+├── client/             # C client
 │   ├── src/
 │   ├── include/
 │   └── Makefile
-├── server/              # TypeScript server
+├── server/             # TypeScript server
 │   ├── src/
 │   ├── migrations/
-│   └── wrangler.toml    # deployment document
+│   └── wrangler.toml
 ├── docs/
-│   └── DEPLOY.md
+│   ├── PLAN.md
+│   └── DEPLOY.md       # deployment document
 ├── LICENSE
 └── README.md
 ```
