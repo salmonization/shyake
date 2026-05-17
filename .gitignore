@@ -1,1 +1,13 @@
 .DS_Store
+
+client/obj/
+client/bin/
+
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+*.bin
+*.pem
+*.key
