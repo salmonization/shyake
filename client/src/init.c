@@ -105,8 +105,8 @@ int cmd_init(void)
         if (kem) {
             uint8_t *public_key = malloc(kem->length_public_key);
             uint8_t *secret_key = malloc(kem->length_secret_key);
-            if (OQS_KEM_keypair(kem, public_key, secret_key)
-                == OQS_SUCCESS) {
+            if (OQS_KEM_keypair(kem, public_key, secret_key) ==
+                OQS_SUCCESS) {
                 sprintf(path_sk, "%s/kem_sk.bin", config_dir);
                 save_file(path_pk, public_key, kem->length_public_key);
                 save_file(path_sk, secret_key, kem->length_secret_key);
@@ -128,8 +128,8 @@ int cmd_init(void)
         if (sig) {
             uint8_t *public_key = malloc(sig->length_public_key);
             uint8_t *secret_key = malloc(sig->length_secret_key);
-            if (OQS_SIG_keypair(sig, public_key, secret_key)
-                == OQS_SUCCESS) {
+            if (OQS_SIG_keypair(sig, public_key, secret_key) ==
+                OQS_SUCCESS) {
                 sprintf(path_sk, "%s/sig_sk.bin", config_dir);
                 save_file(path_pk, public_key, sig->length_public_key);
                 save_file(path_sk, secret_key, sig->length_secret_key);

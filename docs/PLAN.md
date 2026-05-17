@@ -47,8 +47,8 @@ shyake/
 ### 三. 数据库结构
 
 1.  `users`: 
-    * `username` (TEXT, PRIMARY KEY, 匹配正则 `^[a-zA-Z0-9_]{4,}$` 
-    且必须包含至少一个字母)
+    * `username` (TEXT, PRIMARY KEY, 匹配正则
+    `^(?=.*[a-zA-Z])[a-zA-Z0-9_]{4,16}$`)
     * `kem_pubkey` (TEXT/BLOB, 后量子加密公钥)
     * `sig_pubkey` (TEXT/BLOB, 后量子签名公钥)
     * `created_at` (INTEGER)
