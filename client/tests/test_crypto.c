@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <oqs/oqs.h>
-#include "crypto.h"
+#include "../src/lib/crypto.h"
 
 int test_kem(void)
 {

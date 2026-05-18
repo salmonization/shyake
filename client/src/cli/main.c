@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include "shyake.h"
 
+int cmd_init(void);
+
 int main(int argc, char *argv[])
 {
     if (argc < 2) {

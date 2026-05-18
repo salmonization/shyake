@@ -6,7 +6,6 @@
 #include <pwd.h>
 #include <unistd.h>
 #include <errno.h>
-#include <oqs/oqs.h>
 
 #include "shyake.h"
 
@@ -27,16 +26,7 @@ static const char *default_config =
     "# Disable colors (1 = disable)\n"
     "# NO_COLOR=0\n";
 
-static int save_file(const char *path, const uint8_t *data, size_t len)
-{
-    FILE *f = fopen(path, "wb");
-    if (!f) return -1;
-    size_t written = fwrite(data, 1, len, f);
-    fclose(f);
-    return written == len ? 0 : -1;
-}
-
-static char *get_config_dir(void)
+char *get_config_dir(void)
 {
     const char *homedir;
     if ((homedir = getenv("HOME")) == NULL) {
@@ -97,54 +87,25 @@ int cmd_init(void)
 
     free(config_file);
 
-    char path_pk[512], path_sk[512];
+    shyake_config cfg = {
+        .config_dir = config_dir,
+        .instance_url = "https://shyake.eee.coffee"
+    };
 
-    sprintf(path_pk, "%s/kem_pk.bin", config_dir);
-    if (stat(path_pk, &st) == -1) {
-        OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
-        if (kem) {
-            uint8_t *public_key = malloc(kem->length_public_key);
-            uint8_t *secret_key = malloc(kem->length_secret_key);
-            if (OQS_KEM_keypair(kem, public_key, secret_key) ==
-                OQS_SUCCESS) {
-                sprintf(path_sk, "%s/kem_sk.bin", config_dir);
-                save_file(path_pk, public_key, kem->length_public_key);
-                save_file(path_sk, secret_key, kem->length_secret_key);
-                printf("Generated ML-KEM-768 keypair.\n");
-            } else {
-                fprintf(stderr, "Failed to generate ML-KEM-768 keypair.\n");
-            }
-            free(public_key);
-            free(secret_key);
-            OQS_KEM_free(kem);
-        }
-    } else {
-        printf("KEM keypair already exists. Skipping.\n");
+    shyake_ctx *ctx = shyake_init_ctx(&cfg);
+    if (!ctx) {
+        fprintf(stderr, "Failed to initialize shyake context.\n");
+        free(config_dir);
+        return 1;
     }
 
-    sprintf(path_pk, "%s/sig_pk.bin", config_dir);
-    if (stat(path_pk, &st) == -1) {
-        OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
-        if (sig) {
-            uint8_t *public_key = malloc(sig->length_public_key);
-            uint8_t *secret_key = malloc(sig->length_secret_key);
-            if (OQS_SIG_keypair(sig, public_key, secret_key) ==
-                OQS_SUCCESS) {
-                sprintf(path_sk, "%s/sig_sk.bin", config_dir);
-                save_file(path_pk, public_key, sig->length_public_key);
-                save_file(path_sk, secret_key, sig->length_secret_key);
-                printf("Generated ML-DSA-65 keypair.\n");
-            } else {
-                fprintf(stderr, "Failed to generate ML-DSA-65 keypair.\n");
-            }
-            free(public_key);
-            free(secret_key);
-            OQS_SIG_free(sig);
-        }
+    if (shyake_generate_keys(ctx) == 0) {
+        printf("Keys generated successfully.\n");
     } else {
-        printf("SIG keypair already exists. Skipping.\n");
+        fprintf(stderr, "Failed to generate keys.\n");
     }
 
+    shyake_free_ctx(ctx);
     free(config_dir);
 
     return 0;
