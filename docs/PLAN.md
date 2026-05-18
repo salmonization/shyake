@@ -1,8 +1,12 @@
 
 ## Shyake - E2EE digital mailer
 
-创建日期: 2026-04-25 23:24 UTC+8
-最后更新: 2026-05-18 11:37 UTC+8
+Copyright (c) 2026 Salmonization
+
+<table>
+<tr><td>创建日期</td><td>2026-04-25 23:24 UTC+8</td></tr>
+<tr><td>最后更新</td><td>2026-05-18 11:37 UTC+8</td></tr>
+</table>
 
 ### Overview
 
@@ -20,7 +24,7 @@
    - 密码学: `liboqs`, ML-KEM & ML-DSA
 
 服务端 (TypeScript + CF Worker + D1):
-   - 框架: Cloudflare Workers (`fetch` API)
+   - 框架: Cloudflare Workers (Hono)
    - 数据库: Cloudflare D1
    - 验签: `liboqs` 中的 ML-DSA 相关部分, 编译为 `.wasm` 模块
 
@@ -136,9 +140,14 @@ CHECK_COLUMNS=id,sender,subject,size,date
    * 将完整 Payload 附带 PoW 经 `libcurl` 发送 `POST /api/mail`
    到自己所属的 Worker 实例. Worker 校验通过后分配唯一 `mail_id` 落库.
 
-如果接收方 Worker 发现收到的 `recipient_kem_fingerprint` 与数据库中其
-当前公钥指纹不匹配, 则直接拒收并返回错误. 客户端收到此错误后触发拉取新
-公钥的逻辑.
+如果接收方 Worker 发现收到的 `recipient_kem_fingerprint`
+与数据库中其当前公钥指纹不匹配, 则直接拒收并返回错误 `KEY_MISMATCH`.
+客户端收到此错误后触发:
+
+```
+FATAL: Remote public key of recipient has changed!
+RUN 'shyake fingerprint <username>' to inspect and update trust.
+```
 
 参数 `-s, --subject` 用于指定 subject, 如无此参数则将文件或 stdin 第一行作为
 subject. Subject 不可以超过 128 Bytes, 应在发信前检查.
@@ -278,8 +287,10 @@ shyake block shyake.example.com
 shyake fingerprint
 ```
 
-查询他人: 网络比对, 强制向目标服务器拉取最新的公钥,
+查询他人: 网络比对, 强制向实例拉取最新的公钥,
 重新计算指纹, 然后与本地 known_hosts 进行比对, 输出诊断报告.
+
+外部用户, 依然采用实例间通信拉取最新的公钥.
 
 ```bash
 shyake fingerprint flat_white@shyake.eee.coffee
@@ -306,6 +317,12 @@ shyake fingerprint flat_white@shyake.eee.coffee
 |         E        |
 |                  |
 +------------------+
+```
+
+如果收件人轮换了密钥, 发件人可以用 `--update` 更新本地公钥指纹:
+
+```bash
+shyake fingerprint flat_white@shyake.eee.coffee --update
 ```
 
 9. `shyake rotate`
@@ -369,12 +386,9 @@ TOFU 不需要在第一次发信时阻断式询问, 默认信任第一次,
 获取后计算指纹并静默追加到 `known_hosts`. 然后发信.
 
 非首次通信: 默认直接信任并使用本地 `known_hosts` 中缓存的公钥进行加密,
-不再主动发起额外的网络请求.
-
-只有当遇到以下情况时, 客户端才去拉取新公钥并进行指纹变更校验,
-如不一致则阻断:
-* 服务端明确返回诸如公钥已轮换或失效等错误码.
-* 用户主动要求验证或更新.
+不再主动发起额外的网络请求, 除非收到:
+1. `KEY_MISMATCH`: 收件人公钥已轮换 (HTTP 409)
+2. `USER_DESTROYED`: 收件人已销毁账号 (HTTP 410)
 
 OOB 验证通过 `fingerprint` 命令进行.
 
@@ -391,6 +405,3 @@ Hashcash PoW (20-bit): 所有写操作均需提供 PoW.
 私钥进行数字签名覆盖. Worker 接收到请求时, 除了验证签名合法性, 还会验证
 `timestamp` 是否处于合理的时间窗口内, 例如与服务器当前时间误差不超过 5 分钟.
 这避免了攻击者截获旧的合法包并在未来进行恶意重放.
-
-
-Copyright (c) 2026 Salmonization
