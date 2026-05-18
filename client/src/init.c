@@ -42,7 +42,7 @@ static char *get_config_dir(void)
     if ((homedir = getenv("HOME")) == NULL) {
         homedir = getpwuid(getuid())->pw_dir;
     }
-    
+
     char *path = malloc(strlen(homedir) + 32);
     if (!path) return NULL;
     sprintf(path, "%s/.config/shyake", homedir);
@@ -72,7 +72,7 @@ int cmd_init(void)
         free(base_dir);
 
         if (mkdir(config_dir, 0700) == -1 && errno != EEXIST) {
-            fprintf(stderr, "Failed to create directory %s: %s\n", 
+            fprintf(stderr, "Failed to create directory %s: %s\n",
                     config_dir, strerror(errno));
             free(config_dir);
             return 1;

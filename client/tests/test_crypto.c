@@ -41,9 +41,9 @@ int test_sig(void)
 
     int ret = 0;
     if (OQS_SIG_keypair(sig, pk, sk) != OQS_SUCCESS) ret = 1;
-    if (OQS_SIG_sign(sig, signature, &signature_len, 
+    if (OQS_SIG_sign(sig, signature, &signature_len,
         message, message_len, sk) != OQS_SUCCESS) ret = 1;
-    if (OQS_SIG_verify(sig, message, message_len, signature, 
+    if (OQS_SIG_verify(sig, message, message_len, signature,
         signature_len, pk) != OQS_SUCCESS) ret = 1;
 
     free(pk); free(sk); free(signature);
@@ -64,12 +64,12 @@ int test_chacha20_poly1305(void)
     uint8_t mac[POLY1305_MAC_SIZE];
     uint8_t decrypted[64];
 
-    if (chacha20_poly1305_encrypt(key, nonce, plaintext, plaintext_len, 
+    if (chacha20_poly1305_encrypt(key, nonce, plaintext, plaintext_len,
         aad, aad_len, ciphertext, mac) != 0) {
         return 1;
     }
 
-    if (chacha20_poly1305_decrypt(key, nonce, ciphertext, plaintext_len, 
+    if (chacha20_poly1305_decrypt(key, nonce, ciphertext, plaintext_len,
         aad, aad_len, mac, decrypted) != 0) {
         return 1;
     }
@@ -80,7 +80,7 @@ int test_chacha20_poly1305(void)
 
     // Test tamper
     ciphertext[0] ^= 1;
-    if (chacha20_poly1305_decrypt(key, nonce, ciphertext, plaintext_len, 
+    if (chacha20_poly1305_decrypt(key, nonce, ciphertext, plaintext_len,
         aad, aad_len, mac, decrypted) == 0) {
         return 1; // should fail
     }
@@ -96,14 +96,14 @@ int main(void)
         printf("KEM test failed\n");
         return 1;
     }
-    
+
     if (test_sig() == 0) {
         printf("SIG test passed\n");
     } else {
         printf("SIG test failed\n");
         return 1;
     }
-    
+
     if (test_chacha20_poly1305() == 0) {
         printf("ChaCha20-Poly1305 test passed\n");
     } else {
