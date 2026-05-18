@@ -5,7 +5,7 @@ Copyright (c) 2026 Salmonization
 
 <table>
 <tr><td>创建日期</td><td>2026-04-25 23:24 UTC+8</td></tr>
-<tr><td>最后更新</td><td>2026-05-18 11:37 UTC+8</td></tr>
+<tr><td>最后更新</td><td>2026-05-18 19:12 UTC+8</td></tr>
 </table>
 
 ### Overview
@@ -18,6 +18,8 @@ Copyright (c) 2026 Salmonization
 
 客户端 (C):
    - 标准: C99/C11, POSIX.1-2008
+   - 架构: 核心逻辑 (`lib/`) 与 CLI 交互 (`cli/`) 分离
+   - 产物: 动态库 `libshyake.so` 及全静态链接的 `shyake`
    - CLI 解析: POSIX `getopt`, `stdin`
    - 网络: `libcurl`
    - JSON: `cJSON`
@@ -35,6 +37,8 @@ Copyright (c) 2026 Salmonization
 shyake/
 ├── client/             # C client
 │   ├── src/
+│   │   ├── lib/        # core logic
+│   │   └── cli/        # CLI interaction logic
 │   ├── include/
 │   └── Makefile
 ├── server/             # TypeScript server
@@ -405,3 +409,18 @@ Hashcash PoW (20-bit): 所有写操作均需提供 PoW.
 私钥进行数字签名覆盖. Worker 接收到请求时, 除了验证签名合法性, 还会验证
 `timestamp` 是否处于合理的时间窗口内, 例如与服务器当前时间误差不超过 5 分钟.
 这避免了攻击者截获旧的合法包并在未来进行恶意重放.
+
+### 九. 二次开发
+
+客户端架构解耦, 以支持第三方语言的 FFI 调用: 
+
+核心逻辑如网络通信, 密码学, 统一收敛至 `src/lib/`. 
+`src/cli/` 负责命令行解析, 配置文件管理, 终端交互. 
+
+对外仅通过 `include/shyake.h` 暴露不透明指针, 隐藏内部状态以防止 ABI 破裂.
+内部状态结构体必须定义在私有头文件 `src/lib/internal.h` 中.
+
+`Makefile` 同时构建静态库 `libshyake.a` 与动态库 `libshyake.so`. `shyake`
+CLI 可执行文件静态链接 `libshyake.a` 以实现单文件分发.
+
+`libshyake.so` 提供给外部程序作二次开发调用.
