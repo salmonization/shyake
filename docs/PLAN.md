@@ -2,7 +2,7 @@
 ## Shyake - E2EE digital mailer
 
 创建日期: 2026-04-25 23:24 UTC+8
-最后更新: 2026-05-17 20:35 UTC+8
+最后更新: 2026-05-18 11:37 UTC+8
 
 ### Overview
 
@@ -55,15 +55,14 @@ shyake/
     * `created_at` (INTEGER)
 
 2.  `mail`:
-    * `mail_id` (TEXT, PRIMARY KEY, 10位 base58)
-    * `sender` (TEXT, 关联 `users.username`)
-    * `recipient` (TEXT, 关联 `users.username`)
+    * `mail_id` (TEXT, PRIMARY KEY, 10位 base58, 由服务端分配并保证 UNIQUE)
+    * `sender` (TEXT, 无硬外键约束. 本实例用户不含域名, 外部用户含域名)
+    * `recipient` (TEXT, 无硬外键约束. 本实例用户不含域名, 外部用户含域名)
     * `enc_key_sender` (TEXT/BLOB, 使用发件人 KEM 公钥封装的对称密钥)
     * `enc_key_recipient` (TEXT/BLOB, 使用收件人 KEM 公钥封装的对称密钥)
     * `enc_subject` (TEXT, 对称加密后的主题)
     * `enc_body` (TEXT, 对称加密后的正文内容)
-    * `size` (INTEGER, 主题加正文的长度, 字节数, 可设置限制, 
-    默认设置为不超过 128 KiB, 可在 wrangler.toml 中更改)
+    * `size` (INTEGER, 正文的明文字节数, 用于 UI 显示)
     * `signature` (TEXT, 发件人对该记录的数字签名)
     * `timestamp` (INTEGER)
 
@@ -133,9 +132,9 @@ CHECK_COLUMNS=id,sender,subject,size,date
    * 使用发送方自己的 KEM 公钥封装该对称密钥, 存入 `enc_key_sender`.
    * 使用自己的 DSA 私钥对数据进行签名. 为防重放攻击, 签名必须覆盖:
    `sender`, `recipient`, `recipient_kem_fingerprint`, `enc_subject`,
-   `enc_body`, `timestamp`, `size` 以及 UNIQUE `mail_id`.
+   `enc_body`, `timestamp` 和 `size`. 注: mail_id 由服务端分配不签名.
    * 将完整 Payload 附带 PoW 经 `libcurl` 发送 `POST /api/mail` 
-   到自己所属的 Worker 实例.
+   到自己所属的 Worker 实例. Worker 校验通过后分配唯一 `mail_id` 落库.
 
 如果接收方 Worker 发现收到的 `recipient_kem_fingerprint` 与数据库中其
 当前公钥指纹不匹配, 则直接拒收并返回错误. 客户端收到此错误后触发拉取新
