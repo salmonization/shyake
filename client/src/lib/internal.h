@@ -5,13 +5,15 @@
 
 /* Internal context definition hidden from the public ABI */
 struct shyake_ctx {
-    char *instance_url;
-    char *config_dir;
-    
-    /* 
-     * In the future, long-lived resources like CURLM (connection pool) 
-     * or cached keys can be stored here.
-     */
+	char *instance_url;
+	char *config_dir;
+	char *username;
+	char *time_format;
+	char *time_format_recent;
+	char *check_columns;
+	int plain;
+	int debug;
+	int no_color;
 };
 
 #endif /* SHYAKE_INTERNAL_H */

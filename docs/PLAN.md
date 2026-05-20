@@ -112,10 +112,15 @@ CHECK_COLUMNS=id,sender,subject,size,date
 # NO_COLOR=0
 ```
 
+用户名与密钥对强绑定, 注册后存入单独文件 `~/.config/shyake/username`,
+不在 `config` 中出现, 以避免误导用户随意修改.
+
 2. `shyake register -u <username> -i "shyake.eee.coffee"`
 
 逻辑: 将用户名和两把公钥打包. 使用签名私钥对 Payload 签名, 附带 PoW,
 发送 `POST /api/register` 到 Worker. Worker 验证签名, 查重并落库.
+注册成功后将 `username` 写入 `~/.config/shyake/username`,
+并更新 `config` 中的 `INSTANCE`.
 
 任何人可自行部署 Worker 实例, 注册时需指定实例.
 仅 localhost 允许 `http://`, 否则必须 `https://`.
@@ -184,7 +189,7 @@ Worker 校验后返回所有属于该用户的信件元数据.
 进而解密 `enc_subject`, 在 stdout 输出.
 
 扩展 option:
-   - `-c, --count`: 只打印计数
+   - `--count`: 只打印计数
    - `--json`: 以 json 格式输出
    - `--csv`: 以 csv 格式输出
    - `--no-header`: 不显示 header row
@@ -211,7 +216,7 @@ fQBjZnvJ56 flat_white This is subject, hello! 51   2026-04-11 14:30
 Total: 1 item
 ```
 
-其中 header row 的 `Mail ID` `Sender` 等均需使用转义字符加粗且下划线.
+其中 header row 的 `Mail ID` `Sender` 等均需使用转义字符下划线(不加粗).
 `Size` 项如果超过 1023 则开始使用 K 显示, 如 `10K`.
 `Sender` 项如果是外部实例用户, 应在末尾显示一个 `@` 符号但不显示其实例域名.
 如 `bean@`.
@@ -242,7 +247,17 @@ Size:       51
 Date:       2026-04-11 14:30
 ```
 
-5. `shyake fetch [--raw] <id>`
+5. `shyake whoami`
+
+逻辑: 读取本地状态, 无需网络请求.
+
+```
+Username: flat_white
+Instance: https://shyake.eee.coffee
+Config:   /home/user/.config/shyake
+```
+
+6. `shyake fetch [--raw] <id>`
 
 默认输出信件元数据和正文.
 
@@ -259,13 +274,13 @@ Hello, world!                         (stdout)
 如果使用 `--raw` 参数, 则仅将解密后的 `enc_body` 数据流输出到 `stdout`,
 不打印任何元数据和空行. 此模式为管道传输设计 (例如直接解压 tarball).
 
-6. `shyake burn <id>`
+7. `shyake burn <id>`
 
 逻辑: 发件人或收件人均可发起. 通过 DSA 签名证明身份,
 Worker 校验请求者是否为 `sender` 或 `recipient`,
 如果是则在 D1 中 `DELETE`.
 
-7. `shyake block <username>`
+8. `shyake block <username>`
 
 逻辑: 封锁某账户或实例. 可以用 `unblock` 解除封锁.
 
@@ -281,7 +296,7 @@ shyake unblock bot1010@shyake.example.com
 shyake block shyake.example.com
 ```
 
-8. `shyake fingerprint`
+9. `shyake fingerprint`
 
 诊断和验真工具, 必须每次都重新计算, 并且展示本地和远程的状态对比.
 
@@ -329,12 +344,12 @@ shyake fingerprint flat_white@shyake.eee.coffee
 shyake fingerprint flat_white@shyake.eee.coffee --update
 ```
 
-9. `shyake rotate`
+10. `shyake rotate`
 
 逻辑: 轮换自己的公私钥对. 生成新的 `liboqs` 密钥对, 并将新的公钥使用旧的
 DSA 私钥进行签名, 证明所有权, 然后提交给 Worker 进行平滑更新.
 
-10. `shyake destroy`
+11. `shyake destroy`
 
 ```
 WARNING: This will permanently delete your KEYS and ALL MESSAGES sent to or

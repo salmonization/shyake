@@ -1,0 +1,22 @@
+name = "shyake-server"
+main = "src/index.ts"
+compatibility_date = "2024-04-05"
+
+# env variables
+[vars]
+INSTANCE_DOMAIN = "shyake.eee.coffee"
+REGISTRATION_ENABLED = true
+RESERVED_USERNAMES = "admin,system,support,noreply,shyake,root,postmaster"
+FEDERATION_ENABLED = true
+MAX_MAIL_SIZE = 196608 # 192 KiB
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shyake-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallbacks = []

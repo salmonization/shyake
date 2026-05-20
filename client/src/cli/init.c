@@ -39,38 +39,53 @@ char *get_config_dir(void)
     return path;
 }
 
-int cmd_init(void)
+/* mkdir -p equivalent for a single path */
+static int
+mkdir_p(const char *path)
 {
-    char *config_dir = get_config_dir();
+    char tmp[512];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    size_t len = strlen(tmp);
+    if (len > 0 && tmp[len - 1] == '/')
+        tmp[len - 1] = '\0';
+
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, 0700) == -1 && errno != EEXIST)
+                return -1;
+            *p = '/';
+        }
+    }
+    if (mkdir(tmp, 0700) == -1 && errno != EEXIST)
+        return -1;
+    return 0;
+}
+
+int cmd_init(const char *config_dir)
+{
+    char *allocated = NULL;
     if (!config_dir) {
-        fprintf(stderr, "Failed to determine config directory.\n");
-        return 1;
+        allocated = get_config_dir();
+        if (!allocated) {
+            fprintf(stderr, "Failed to determine config directory.\n");
+            return 1;
+        }
+        config_dir = allocated;
     }
 
     struct stat st = {0};
     if (stat(config_dir, &st) == -1) {
-        // Try creating ~/.config first if it doesn't exist
-        char *base_dir = malloc(strlen(config_dir) + 1);
-        strcpy(base_dir, config_dir);
-        char *last_slash = strrchr(base_dir, '/');
-        if (last_slash) {
-            *last_slash = '\0';
-            if (stat(base_dir, &st) == -1) {
-                mkdir(base_dir, 0700);
-            }
-        }
-        free(base_dir);
-
-        if (mkdir(config_dir, 0700) == -1 && errno != EEXIST) {
+        if (mkdir_p(config_dir) == -1) {
             fprintf(stderr, "Failed to create directory %s: %s\n",
                     config_dir, strerror(errno));
-            free(config_dir);
+            free(allocated);
             return 1;
         }
     }
 
-    char *config_file = malloc(strlen(config_dir) + 16);
-    sprintf(config_file, "%s/config", config_dir);
+    char config_file[512];
+    snprintf(config_file, sizeof(config_file), "%s/config", config_dir);
 
     if (stat(config_file, &st) == -1) {
         FILE *f = fopen(config_file, "w");
@@ -85,8 +100,6 @@ int cmd_init(void)
         printf("Config file %s already exists. Skipping.\n", config_file);
     }
 
-    free(config_file);
-
     shyake_config cfg = {
         .config_dir = config_dir,
         .instance_url = "https://shyake.eee.coffee"
@@ -95,7 +108,7 @@ int cmd_init(void)
     shyake_ctx *ctx = shyake_init_ctx(&cfg);
     if (!ctx) {
         fprintf(stderr, "Failed to initialize shyake context.\n");
-        free(config_dir);
+        free(allocated);
         return 1;
     }
 
@@ -106,7 +119,7 @@ int cmd_init(void)
     }
 
     shyake_free_ctx(ctx);
-    free(config_dir);
+    free(allocated);
 
     return 0;
 }
