@@ -1,5 +1,5 @@
 
-## Shyake - E2EE digital mailer
+## Shyake - E2EE Mailing System with PQC
 
 Copyright (c) 2026 Salmonization
 
@@ -240,11 +240,11 @@ No mail found.
 ```
 
 ```
-FROM:       flat_white
-TO:         salmon
-SUBJ:       This is subject, hello!
-SIZE:       51
-DATE:       2026-04-11 14:30
+FROM: flat_white
+TO:   salmon
+SUBJ: This is subject, hello!
+SIZE: 51
+DATE: 2026-04-11 14:30
 ```
 
 5. `shyake whoami`
