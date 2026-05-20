@@ -225,8 +225,8 @@ Total: 1 item
 
 ```bash
 shyake check sent
-shyake check -c inbox
-shyake check inbox fQBjZnvJ56
+shyake check inbox --count
+shyake check fQBjZnvJ56
 ```
 
 输出:
@@ -240,11 +240,11 @@ No mail found.
 ```
 
 ```
-Sender:     flat_white
-Recipient:  salmon
-Subject:    This is subject, hello!
-Size:       51
-Date:       2026-04-11 14:30
+FROM:       flat_white
+TO:         salmon
+SUBJ:       This is subject, hello!
+SIZE:       51
+DATE:       2026-04-11 14:30
 ```
 
 5. `shyake whoami`
@@ -252,9 +252,9 @@ Date:       2026-04-11 14:30
 逻辑: 读取本地状态, 无需网络请求.
 
 ```
-Username: flat_white
-Instance: https://shyake.eee.coffee
-Config:   /home/user/.config/shyake
+USERNAME: flat_white
+INSTANCE: https://shyake.eee.coffee
+CONFIG:   /home/user/.config/shyake
 ```
 
 6. `shyake fetch [--raw] <id>`
@@ -263,6 +263,7 @@ Config:   /home/user/.config/shyake
 
 ```
 FROM: flat_white@shyake.caffeine.ink  (stdout)
+TO:   salmon                          (stdout)  
 DATE: 2026-04-11 14:30                (stdout)
 SUBJ: This is subject, hello!         (stdout)
                                       (stdout 空行)
