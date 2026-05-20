@@ -5,7 +5,7 @@ Copyright (c) 2026 Salmonization
 
 <table>
 <tr><td>创建日期</td><td>2026-04-25 23:24 UTC+8</td></tr>
-<tr><td>最后更新</td><td>2026-05-18 19:12 UTC+8</td></tr>
+<tr><td>最后更新</td><td>2026-05-21 01:12 UTC+8</td></tr>
 </table>
 
 ### Overview
@@ -112,8 +112,7 @@ CHECK_COLUMNS=id,sender,subject,size,date
 # NO_COLOR=0
 ```
 
-用户名与密钥对强绑定, 注册后存入单独文件 `~/.config/shyake/username`,
-不在 `config` 中出现, 以避免误导用户随意修改.
+注册后用户名存入单独文件 `~/.config/shyake/username`.
 
 2. `shyake register -u <username> -i "shyake.eee.coffee"`
 
