@@ -273,12 +273,12 @@ int main(int argc, char *argv[])
         const char *inst = app_cfg->instance
             ? app_cfg->instance : "https://shyake.eee.coffee";
         if (stored_username) {
-            printf("Username: %s\n", stored_username);
+            printf("USERNAME: %s\n", stored_username);
         } else {
-            printf("Username: (not registered)\n");
+            printf("USERNAME: (not registered)\n");
         }
-        printf("Instance: %s\n", inst);
-        printf("Config:   %s\n", config_dir);
+        printf("INSTANCE: %s\n", inst);
+        printf("CONFIG:   %s\n", config_dir);
         free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
@@ -429,24 +429,22 @@ int main(int argc, char *argv[])
 
     if (strcmp(cmd, "check") == 0) {
         if (argc < 3) {
-            fprintf(stderr, "Usage: shyake check <inbox|sent>\n");
-            free(stored_username);
-            free_app_config(app_cfg);
-            free(config_dir);
-            return EXIT_FAILURE;
-        }
-        const char *type = argv[2];
-        if (strcmp(type, "inbox") != 0 && strcmp(type, "sent") != 0) {
-            fprintf(stderr, "Type must be inbox or sent.\n");
+            fprintf(stderr,
+                    "Usage: shyake check <inbox|sent|id>\n");
             free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
         }
 
+        const char *arg = argv[2];
+        int is_list = (strcmp(arg, "inbox") == 0 ||
+                       strcmp(arg, "sent") == 0);
+
         const char *inst = app_cfg->instance
             ? app_cfg->instance : "https://shyake.eee.coffee";
-        const char *user = stored_username ? stored_username : "salmon";
+        const char *user = stored_username
+            ? stored_username : "salmon";
 
         shyake_config cfg = {
             .config_dir = config_dir,
@@ -461,7 +459,17 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_check(ctx, type);
+        int ret;
+        if (is_list) {
+            /* check inbox/sent [<id>] */
+            if (argc >= 4)
+                ret = shyake_check_one(ctx, argv[3]);
+            else
+                ret = shyake_check(ctx, arg);
+        } else {
+            /* check <id> directly */
+            ret = shyake_check_one(ctx, arg);
+        }
 
         shyake_free_ctx(ctx);
         free(stored_username);
@@ -520,6 +528,67 @@ int main(int argc, char *argv[])
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
         int ret = shyake_fetch(ctx, mail_id, raw);
 
+        shyake_free_ctx(ctx);
+        free(stored_username);
+        free_app_config(app_cfg);
+        free(config_dir);
+        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (strcmp(cmd, "burn") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "Usage: shyake burn <id>\n");
+            free(stored_username);
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+        const char *mail_id = argv[2];
+        const char *inst = app_cfg->instance
+            ? app_cfg->instance : "https://shyake.eee.coffee";
+        const char *user = stored_username ? stored_username : "salmon";
+
+        shyake_config cfg = {
+            .config_dir = config_dir,
+            .instance_url = inst,
+            .username = user,
+            .plain = global_plain,
+            .debug = global_debug,
+            .no_color = global_no_color || app_cfg->no_color
+        };
+        shyake_ctx *ctx = shyake_init_ctx(&cfg);
+        int ret = shyake_burn(ctx, mail_id);
+        shyake_free_ctx(ctx);
+        free(stored_username);
+        free_app_config(app_cfg);
+        free(config_dir);
+        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (strcmp(cmd, "block") == 0 || strcmp(cmd, "unblock") == 0) {
+        int is_unblock = strcmp(cmd, "unblock") == 0;
+        if (argc < 3) {
+            fprintf(stderr, "Usage: shyake %s <target>\n", cmd);
+            free(stored_username);
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+        const char *target = argv[2];
+        const char *inst = app_cfg->instance
+            ? app_cfg->instance : "https://shyake.eee.coffee";
+        const char *user = stored_username ? stored_username : "salmon";
+
+        shyake_config cfg = {
+            .config_dir = config_dir,
+            .instance_url = inst,
+            .username = user,
+            .plain = global_plain,
+            .debug = global_debug,
+            .no_color = global_no_color || app_cfg->no_color
+        };
+        shyake_ctx *ctx = shyake_init_ctx(&cfg);
+        int ret = shyake_block(ctx, target, is_unblock);
         shyake_free_ctx(ctx);
         free(stored_username);
         free_app_config(app_cfg);

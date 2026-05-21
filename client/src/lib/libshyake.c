@@ -102,6 +102,43 @@ format_size(char *buf, size_t buf_len, int size)
         snprintf(buf, buf_len, "%d", size);
 }
 
+static void
+print_word_wrap(const char *text, int indent, int width)
+{
+    // word-wrap text with aligned continuation indent
+    int avail = width - indent;
+    if (avail < 20)
+        avail = 20;
+
+    int len = (int)strlen(text);
+    int pos = 0;
+    int first = 1;
+
+    while (pos < len) {
+        if (!first)
+            printf("\n%*s", indent, "");
+        first = 0;
+
+        int remain = len - pos;
+        if (remain <= avail) {
+            printf("%.*s", remain, text + pos);
+            pos += remain;
+        } else {
+            /* find last space within avail */
+            int cut = avail;
+            while (cut > 0 && text[pos + cut] != ' ')
+                cut--;
+            if (cut == 0)
+                cut = avail;
+            printf("%.*s", cut, text + pos);
+            pos += cut;
+            while (pos < len && text[pos] == ' ')
+                pos++;
+        }
+    }
+    printf("\n");
+}
+
 static int save_file(const char *path, const uint8_t *data, size_t len)
 {
     FILE *f = fopen(path, "wb");
@@ -771,10 +808,10 @@ static char* decrypt_from_b64(const uint8_t *key, const char *b64)
 }
 
 static struct curl_slist*
-create_auth_headers(shyake_ctx *ctx, const char *endpoint,
-                    const char *username)
+create_signed_headers(shyake_ctx *ctx, const char *method,
+                      const char *endpoint, const char *username)
 {
-    // sign request and mint PoW
+    // sign request with given method and mint PoW
     time_t now = time(NULL);
     char timestamp[32];
     snprintf(timestamp, sizeof(timestamp), "%ld", now);
@@ -783,15 +820,15 @@ create_auth_headers(shyake_ctx *ctx, const char *endpoint,
     size_t ssk_len;
     snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
     uint8_t *ssk = load_file(path, &ssk_len);
-    if (!ssk) {
+    if (!ssk)
         return NULL;
-    }
 
-    char message[256];
-    snprintf(message, sizeof(message), "GET:%s:%s:%s", endpoint, username,
-             timestamp);
+    char message[512];
+    snprintf(message, sizeof(message), "%s:%s:%s:%s",
+             method, endpoint, username, timestamp);
 
     OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
+    if (!sig) { free(ssk); return NULL; }
     uint8_t *signature = malloc(sig->length_signature);
     size_t sig_len;
     OQS_SIG_sign(sig, signature, &sig_len, (uint8_t*)message,
@@ -802,16 +839,17 @@ create_auth_headers(shyake_ctx *ctx, const char *endpoint,
 
     struct curl_slist *headers = NULL;
     char header_buf[8192];
-    snprintf(header_buf, sizeof(header_buf), "X-Shyake-Username: %s",
-             username);
+    snprintf(header_buf, sizeof(header_buf),
+             "X-Shyake-Username: %s", username);
     headers = curl_slist_append(headers, header_buf);
-    snprintf(header_buf, sizeof(header_buf), "X-Shyake-Timestamp: %s",
-             timestamp);
+    snprintf(header_buf, sizeof(header_buf),
+             "X-Shyake-Timestamp: %s", timestamp);
     headers = curl_slist_append(headers, header_buf);
-    snprintf(header_buf, sizeof(header_buf), "X-Shyake-Signature: %s",
-             sig_b64);
+    snprintf(header_buf, sizeof(header_buf),
+             "X-Shyake-Signature: %s", sig_b64);
     headers = curl_slist_append(headers, header_buf);
-    snprintf(header_buf, sizeof(header_buf), "X-Shyake-Pow: %s", pow);
+    snprintf(header_buf, sizeof(header_buf),
+             "X-Shyake-Pow: %s", pow);
     headers = curl_slist_append(headers, header_buf);
 
     free(ssk);
@@ -820,6 +858,13 @@ create_auth_headers(shyake_ctx *ctx, const char *endpoint,
     free(pow);
     OQS_SIG_free(sig);
     return headers;
+}
+
+static struct curl_slist*
+create_auth_headers(shyake_ctx *ctx, const char *endpoint,
+                    const char *username)
+{
+    return create_signed_headers(ctx, "GET", endpoint, username);
 }
 
 int shyake_check(shyake_ctx *ctx, const char *type)
@@ -859,9 +904,18 @@ int shyake_check(shyake_ctx *ctx, const char *type)
             if (json) {
                 cJSON *mail_array = cJSON_GetObjectItem(json, "mail");
                 if (cJSON_IsArray(mail_array)) {
-                    setup_pager(ctx->plain);
-
                     int count = cJSON_GetArraySize(mail_array);
+
+                    if (count == 0) {
+                        printf("No mail found.\n");
+                        cJSON_Delete(json);
+                        free(resp.data);
+                        curl_slist_free_all(headers);
+                        curl_easy_cleanup(curl);
+                        return 0;
+                    }
+
+                    setup_pager(ctx->plain);
 
                     char path[512];
                     size_t ksk_len;
@@ -1066,7 +1120,11 @@ int shyake_check(shyake_ctx *ctx, const char *type)
                     http_code, resp.data);
             ret = -1;
         }
-    } else ret = -1;
+    } else {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
+        ret = -1;
+    }
     
     free(resp.data);
     curl_slist_free_all(headers);
@@ -1177,6 +1235,226 @@ int shyake_fetch(shyake_ctx *ctx, const char *mail_id, int raw)
         }
     } else ret = -1;
     
+    free(resp.data);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return ret;
+}
+
+int shyake_check_one(shyake_ctx *ctx, const char *mail_id)
+{
+    if (!ctx || !mail_id) return -1;
+    const char *username = ctx->username ? ctx->username : "salmon";
+
+    char endpoint[128];
+    snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
+    char url[512];
+    snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
+
+    CURL *curl = curl_easy_init();
+    if (!curl) return -1;
+
+    struct curl_slist *headers = create_auth_headers(ctx, endpoint, username);
+    if (!headers) { curl_easy_cleanup(curl); return -1; }
+
+    struct curl_response resp = { .data = malloc(1), .size = 0 };
+    resp.data[0] = '\0';
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+
+    CURLcode res = curl_easy_perform(curl);
+    int ret = 0;
+
+    if (res == CURLE_OK) {
+        long http_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code == 200) {
+            cJSON *json = cJSON_Parse(resp.data);
+            if (json) {
+                /* resolve which enc_key to use */
+                const char *snd = cJSON_GetObjectItem(
+                    json, "sender")->valuestring;
+                const char *rec = cJSON_GetObjectItem(
+                    json, "recipient")->valuestring;
+                int ts = cJSON_GetObjectItem(
+                    json, "timestamp")->valueint;
+                int sz = cJSON_GetObjectItem(
+                    json, "size")->valueint;
+
+                const char *enc_key_field =
+                    (strcmp(username, snd) == 0) ?
+                    "enc_key_sender" : "enc_key_recipient";
+                const char *enc_key = cJSON_GetObjectItem(
+                    json, enc_key_field)->valuestring;
+                const char *enc_sub = cJSON_GetObjectItem(
+                    json, "enc_subject")->valuestring;
+
+                time_t t = ts;
+                struct tm *tm_info = localtime(&t);
+                char date[32];
+                strftime(date, sizeof(date), "%Y-%m-%d %H:%M", tm_info);
+
+                /* decrypt subject */
+                char path[512];
+                size_t ksk_len;
+                snprintf(path, sizeof(path), "%s/kem_sk.bin",
+                         ctx->config_dir);
+                uint8_t *ksk = load_file(path, &ksk_len);
+                char *sub = NULL;
+                if (ksk) {
+                    uint8_t *sym_key = kem_decapsulate_key(
+                        enc_key, ksk);
+                    if (sym_key) {
+                        sub = decrypt_from_b64(sym_key, enc_sub);
+                        free(sym_key);
+                    }
+                    free(ksk);
+                }
+
+                const char *c_lbl = ctx->no_color ? "" : "\033[1;36m";
+                const char *c_rs  = ctx->no_color ? "" : "\033[0m";
+
+                /* value column starts at position 6: "FROM: " */
+                int tw = get_terminal_width();
+                const char *sub_text = sub
+                    ? sub : "(decryption failed)";
+
+                printf("%sFROM:%s %s\n", c_lbl, c_rs, snd);
+                printf("%sTO:%s   %s\n", c_lbl, c_rs, rec);
+                printf("%sSUBJ:%s ", c_lbl, c_rs);
+                print_word_wrap(sub_text, 6, tw);
+                printf("%sSIZE:%s %d\n", c_lbl, c_rs, sz);
+                printf("%sDATE:%s %s\n", c_lbl, c_rs, date);
+
+
+                free(sub);
+                cJSON_Delete(json);
+            }
+        } else if (http_code == 404) {
+            fprintf(stderr, "Mail not found.\n");
+            ret = -1;
+        } else {
+            fprintf(stderr, "Failed (HTTP %ld): %s\n",
+                    http_code, resp.data);
+            ret = -1;
+        }
+    } else ret = -1;
+
+    free(resp.data);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return ret;
+}
+
+int shyake_burn(shyake_ctx *ctx, const char *mail_id)
+{
+    if (!ctx || !mail_id) return -1;
+    const char *username = ctx->username ? ctx->username : "salmon";
+
+    char endpoint[128];
+    snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
+    char url[512];
+    snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
+
+    CURL *curl = curl_easy_init();
+    if (!curl) return -1;
+
+    struct curl_slist *headers = create_signed_headers(
+        ctx, "DELETE", endpoint, username);
+    if (!headers) { curl_easy_cleanup(curl); return -1; }
+
+    struct curl_response resp = { .data = malloc(1), .size = 0 };
+    resp.data[0] = '\0';
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+
+    CURLcode res = curl_easy_perform(curl);
+    int ret = 0;
+
+    if (res == CURLE_OK) {
+        long http_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code == 200) {
+            printf("Mail burned.\n");
+        } else if (http_code == 404) {
+            fprintf(stderr, "Mail not found.\n");
+            ret = -1;
+        } else if (http_code == 403) {
+            fprintf(stderr, "Permission denied.\n");
+            ret = -1;
+        } else {
+            fprintf(stderr, "Failed (HTTP %ld): %s\n",
+                    http_code, resp.data);
+            ret = -1;
+        }
+    } else ret = -1;
+
+    free(resp.data);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return ret;
+}
+
+int shyake_block(shyake_ctx *ctx, const char *target, int unblock)
+{
+    if (!ctx || !target) return -1;
+    const char *username = ctx->username ? ctx->username : "salmon";
+    const char *method = unblock ? "DELETE" : "POST";
+    const char *endpoint = "/api/block";
+
+    char url[512];
+    snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
+
+    CURL *curl = curl_easy_init();
+    if (!curl) return -1;
+
+    struct curl_slist *headers = create_signed_headers(
+        ctx, method, endpoint, username);
+    if (!headers) { curl_easy_cleanup(curl); return -1; }
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    /* build JSON body */
+    cJSON *body_json = cJSON_CreateObject();
+    cJSON_AddStringToObject(body_json, "target", target);
+    char *body_str = cJSON_PrintUnformatted(body_json);
+    cJSON_Delete(body_json);
+
+    struct curl_response resp = { .data = malloc(1), .size = 0 };
+    resp.data[0] = '\0';
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body_str);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+
+    CURLcode res = curl_easy_perform(curl);
+    int ret = 0;
+
+    if (res == CURLE_OK) {
+        long http_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code == 200 || http_code == 201) {
+            if (unblock)
+                printf("%s unblocked.\n", target);
+            else
+                printf("%s blocked.\n", target);
+        } else {
+            fprintf(stderr, "Failed (HTTP %ld): %s\n",
+                    http_code, resp.data);
+            ret = -1;
+        }
+    } else ret = -1;
+
+    free(body_str);
     free(resp.data);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);

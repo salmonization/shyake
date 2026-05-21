@@ -173,6 +173,19 @@ app.post('/api/mail', async (c) => {
         return c.json({ error: 'Signature verification failed' }, 401);
     }
 
+    /* check if sender is blocked by recipient */
+    const senderLocal = sender.includes('@')
+        ? sender.split('@')[0] : sender;
+    const senderDomain = sender.includes('@')
+        ? sender.split('@')[1] : c.env.INSTANCE_DOMAIN;
+    const blockCheck = await c.env.DB.prepare(
+        'SELECT 1 FROM blocks WHERE blocker = ? AND ' +
+        '(blocked = ? OR blocked = ?)'
+    ).bind(recipient, senderLocal, senderDomain).first();
+    if (blockCheck) {
+        return c.json({ error: 'Recipient has blocked this sender' }, 403);
+    }
+
     const charset = '123456789ABCDEFGHJKLMNPQRSTUVWXYZ' +
                     'abcdefghijkmnopqrstuvwxyz';
     let mail_id = '';
@@ -336,5 +349,118 @@ app.get('/api/pubkey/:username', async (c) => {
     }
     return c.json(user);
 });
+
+/* burn: DELETE /api/mail/:id */
+app.delete('/api/mail/:id', async (c) => {
+    const id = c.req.param('id');
+    const username = c.req.header('X-Shyake-Username');
+    const timestamp = c.req.header('X-Shyake-Timestamp');
+    const signature = c.req.header('X-Shyake-Signature');
+    const pow = c.req.header('X-Shyake-Pow');
+
+    if (!username || !timestamp || !signature || !pow)
+        return c.json({ error: 'Missing auth headers' }, 401);
+
+    const isPowValid = await verifyPoW(pow, 20);
+    if (!isPowValid)
+        return c.json({ error: 'Invalid Proof of Work' }, 403);
+
+    const clientTs = parseInt(timestamp, 10);
+    const serverTs = Math.floor(Date.now() / 1000);
+    if (Math.abs(serverTs - clientTs) > 300)
+        return c.json({ error: 'Timestamp out of window' }, 403);
+
+    const user = await c.env.DB.prepare(
+        'SELECT sig_pubkey FROM users WHERE username = ?'
+    ).bind(username).first();
+    if (!user) return c.json({ error: 'User not found' }, 401);
+
+    await initWasm(wasmModule);
+    try {
+        const message =
+            `DELETE:/api/mail/${id}:${username}:${timestamp}`;
+        const msgBytes = new TextEncoder().encode(message);
+        const sigUrl = toBase64Url(signature);
+        const pkUrl = toBase64Url(user.sig_pubkey as string);
+        if (!verifySignature(pkUrl, msgBytes, sigUrl))
+            return c.json({ error: 'Invalid signature' }, 401);
+    } catch (e) {
+        return c.json({ error: 'Signature verification failed' }, 401);
+    }
+
+    const mail = await c.env.DB.prepare(
+        'SELECT mail_id FROM mail WHERE mail_id = ? AND ' +
+        '(sender = ? OR recipient = ?)'
+    ).bind(id, username, username).first();
+    if (!mail) return c.json({ error: 'Mail not found' }, 404);
+
+    await c.env.DB.prepare(
+        'DELETE FROM mail WHERE mail_id = ?'
+    ).bind(id).run();
+    return c.json({ message: 'Mail burned' }, 200);
+});
+
+/* block/unblock: POST /api/block and DELETE /api/block */
+async function handleBlock(
+    c: any, unblock: boolean
+): Promise<Response> {
+    const username = c.req.header('X-Shyake-Username');
+    const timestamp = c.req.header('X-Shyake-Timestamp');
+    const signature = c.req.header('X-Shyake-Signature');
+    const pow = c.req.header('X-Shyake-Pow');
+
+    if (!username || !timestamp || !signature || !pow)
+        return c.json({ error: 'Missing auth headers' }, 401);
+
+    const isPowValid = await verifyPoW(pow, 20);
+    if (!isPowValid)
+        return c.json({ error: 'Invalid Proof of Work' }, 403);
+
+    const clientTs = parseInt(timestamp, 10);
+    const serverTs = Math.floor(Date.now() / 1000);
+    if (Math.abs(serverTs - clientTs) > 300)
+        return c.json({ error: 'Timestamp out of window' }, 403);
+
+    const user = await c.env.DB.prepare(
+        'SELECT sig_pubkey FROM users WHERE username = ?'
+    ).bind(username).first();
+    if (!user) return c.json({ error: 'User not found' }, 401);
+
+    await initWasm(wasmModule);
+    const method = unblock ? 'DELETE' : 'POST';
+    try {
+        const message =
+            `${method}:/api/block:${username}:${timestamp}`;
+        const msgBytes = new TextEncoder().encode(message);
+        const sigUrl = toBase64Url(signature);
+        const pkUrl = toBase64Url(user.sig_pubkey as string);
+        if (!verifySignature(pkUrl, msgBytes, sigUrl))
+            return c.json({ error: 'Invalid signature' }, 401);
+    } catch (e) {
+        return c.json({ error: 'Signature verification failed' }, 401);
+    }
+
+    const body = await c.req.json();
+    const { target } = body;
+    if (!target)
+        return c.json({ error: 'Missing target' }, 400);
+
+    if (unblock) {
+        await c.env.DB.prepare(
+            'DELETE FROM blocks WHERE blocker = ? AND blocked = ?'
+        ).bind(username, target).run();
+        return c.json({ message: 'Unblocked' }, 200);
+    } else {
+        const ts = Math.floor(Date.now() / 1000);
+        await c.env.DB.prepare(
+            'INSERT OR REPLACE INTO blocks (blocker, blocked, created_at)' +
+            ' VALUES (?, ?, ?)'
+        ).bind(username, target, ts).run();
+        return c.json({ message: 'Blocked' }, 201);
+    }
+}
+
+app.post('/api/block', (c) => handleBlock(c, false));
+app.delete('/api/block', (c) => handleBlock(c, true));
 
 export default app;

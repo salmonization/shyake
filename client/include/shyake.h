@@ -69,6 +69,25 @@ int shyake_check(shyake_ctx *ctx, const char *type);
  */
 int shyake_fetch(shyake_ctx *ctx, const char *mail_id, int raw);
 
+/*
+ * View metadata of a single mail by ID (no body decryption).
+ * Returns 0 on success, non-zero on failure.
+ */
+int shyake_check_one(shyake_ctx *ctx, const char *mail_id);
+
+/*
+ * Delete a mail by ID (sender or recipient may burn).
+ * Returns 0 on success, non-zero on failure.
+ */
+int shyake_burn(shyake_ctx *ctx, const char *mail_id);
+
+/*
+ * Block or unblock a target (username or instance domain).
+ * unblock=0 to block, unblock=1 to unblock.
+ * Returns 0 on success, non-zero on failure.
+ */
+int shyake_block(shyake_ctx *ctx, const char *target, int unblock);
+
 /* Future E2EE and network operations will be added here */
 
 #endif /* SHYAKE_H */
