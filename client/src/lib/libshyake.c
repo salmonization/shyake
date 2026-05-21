@@ -394,15 +394,12 @@ int shyake_register(shyake_ctx *ctx, const char *username)
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-            /* TODO: Remove this 10s timeout before release to support 
-             * poor networks (let user Ctrl+C) */
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
             printf("Registering as %s at %s...\n", username,
                    ctx->instance_url);
             CURLcode res = curl_easy_perform(curl);
             if (res != CURLE_OK) {
-                fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                fprintf(stderr, "Network error: %s\n",
                         curl_easy_strerror(res));
                 ret = -1;
             } else {
@@ -503,6 +500,9 @@ static char* fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient)
             return kem_pk;
         }
         return NULL;
+    } else if (res != CURLE_OK) {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
     }
     
     free(resp.data);
@@ -712,13 +712,10 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-        /* TODO: Remove this 10s timeout before release to support 
-         * poor networks (let user Ctrl+C) */
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
         CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            fprintf(stderr, "Network error: %s\n",
                     curl_easy_strerror(res));
             ret = -1;
         } else {
@@ -1334,7 +1331,11 @@ int shyake_fetch(shyake_ctx *ctx, const char *mail_id, int raw)
                     http_code, resp.data);
             ret = -1;
         }
-    } else ret = -1;
+    } else {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
+        ret = -1;
+    }
     
     free(resp.data);
     curl_slist_free_all(headers);
@@ -1443,7 +1444,11 @@ int shyake_check_one(shyake_ctx *ctx, const char *mail_id)
                     http_code, resp.data);
             ret = -1;
         }
-    } else ret = -1;
+    } else {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
+        ret = -1;
+    }
 
     free(resp.data);
     curl_slist_free_all(headers);
@@ -1496,7 +1501,11 @@ int shyake_burn(shyake_ctx *ctx, const char *mail_id)
                     http_code, resp.data);
             ret = -1;
         }
-    } else ret = -1;
+    } else {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
+        ret = -1;
+    }
 
     free(resp.data);
     curl_slist_free_all(headers);
@@ -1554,7 +1563,11 @@ int shyake_block(shyake_ctx *ctx, const char *target, int unblock)
                     http_code, resp.data);
             ret = -1;
         }
-    } else ret = -1;
+    } else {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
+        ret = -1;
+    }
 
     free(body_str);
     free(resp.data);
