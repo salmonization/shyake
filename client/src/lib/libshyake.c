@@ -867,7 +867,8 @@ create_auth_headers(shyake_ctx *ctx, const char *endpoint,
     return create_signed_headers(ctx, "GET", endpoint, username);
 }
 
-int shyake_check(shyake_ctx *ctx, const char *type)
+int shyake_check(shyake_ctx *ctx, const char *type,
+                 const shyake_check_opts *opts)
 {
     if (!ctx || !type)
         return -1;
@@ -906,8 +907,8 @@ int shyake_check(shyake_ctx *ctx, const char *type)
                 if (cJSON_IsArray(mail_array)) {
                     int count = cJSON_GetArraySize(mail_array);
 
-                    if (count == 0) {
-                        printf("No mail found.\n");
+                    if (opts && opts->count_only) {
+                        printf("%d\n", count);
                         cJSON_Delete(json);
                         free(resp.data);
                         curl_slist_free_all(headers);
@@ -915,7 +916,22 @@ int shyake_check(shyake_ctx *ctx, const char *type)
                         return 0;
                     }
 
-                    setup_pager(ctx->plain);
+                    if (count == 0) {
+                        if (opts && opts->json_out) {
+                            printf("[]\n");
+                        } else if (!(opts && opts->csv_out)) {
+                            printf("No mail found.\n");
+                        }
+                        cJSON_Delete(json);
+                        free(resp.data);
+                        curl_slist_free_all(headers);
+                        curl_easy_cleanup(curl);
+                        return 0;
+                    }
+
+                    if (!opts || (!opts->json_out && !opts->csv_out)) {
+                        setup_pager(ctx->plain);
+                    }
 
                     char path[512];
                     size_t ksk_len;
@@ -942,7 +958,8 @@ int shyake_check(shyake_ctx *ctx, const char *type)
                                 ->valuestring
                             : cJSON_GetObjectItem(item, "sender")
                                 ->valuestring;
-                        int sz  = cJSON_GetObjectItem(item, "size")->valueint;
+                        int sz  = cJSON_GetObjectItem(
+                            item, "size")->valueint;
                         int ts  = cJSON_GetObjectItem(item, "timestamp")
                             ->valueint;
 
@@ -987,6 +1004,80 @@ int shyake_check(shyake_ctx *ctx, const char *type)
                     }
                     free(ksk);
 
+                    if (opts && opts->json_out) {
+                        cJSON *out_arr = cJSON_CreateArray();
+                        for (int i = 0; i < count; i++) {
+                            cJSON *obj = cJSON_CreateObject();
+                            cJSON_AddStringToObject(obj, "mail_id",
+                                                    rows_id[i]);
+                            cJSON_AddStringToObject(obj, is_sent ?
+                                                    "recipient" :
+                                                    "sender", rows_snd[i]);
+                            cJSON_AddStringToObject(obj, "subject",
+                                                    rows_sub[i]);
+                            cJSON_AddStringToObject(obj, "size",
+                                                    rows_sz[i]);
+                            cJSON_AddStringToObject(obj, "date",
+                                                    rows_dt[i]);
+                            cJSON_AddItemToArray(out_arr, obj);
+                        }
+                        char *out_str = cJSON_Print(out_arr);
+                        printf("%s\n", out_str);
+                        free(out_str);
+                        cJSON_Delete(out_arr);
+                        
+                        for (int i = 0; i < count; i++) {
+                            free(rows_id[i]); free(rows_snd[i]);
+                            free(rows_sub[i]); free(rows_sz[i]);
+                            free(rows_dt[i]);
+                        }
+                        free(rows_id); free(rows_snd); free(rows_sub);
+                        free(rows_sz); free(rows_dt); free(rows_szbig);
+                        
+                        cJSON_Delete(json);
+                        free(resp.data);
+                        curl_slist_free_all(headers);
+                        curl_easy_cleanup(curl);
+                        return 0;
+                    }
+
+                    if (opts && opts->csv_out) {
+                        if (!opts->no_header) {
+                            printf("Mail ID,%s,Subject,Size,Date\n",
+                                   is_sent ? "Recipient" : "Sender");
+                        }
+                        for (int i = 0; i < count; i++) {
+                            /* Escape quotes in subject for CSV */
+                            char escaped_sub[2048] = {0};
+                            int p = 0;
+                            for (int j = 0; rows_sub[i][j] && p < 2040;
+                                 j++) {
+                                if (rows_sub[i][j] == '"') {
+                                    escaped_sub[p++] = '"';
+                                    escaped_sub[p++] = '"';
+                                } else {
+                                    escaped_sub[p++] = rows_sub[i][j];
+                                }
+                            }
+                            printf("%s,%s,\"%s\",%s,%s\n", rows_id[i],
+                                   rows_snd[i], escaped_sub, rows_sz[i],
+                                   rows_dt[i]);
+                        }
+                        for (int i = 0; i < count; i++) {
+                            free(rows_id[i]); free(rows_snd[i]);
+                            free(rows_sub[i]); free(rows_sz[i]);
+                            free(rows_dt[i]);
+                        }
+                        free(rows_id); free(rows_snd); free(rows_sub);
+                        free(rows_sz); free(rows_dt); free(rows_szbig);
+                        
+                        cJSON_Delete(json);
+                        free(resp.data);
+                        curl_slist_free_all(headers);
+                        curl_easy_cleanup(curl);
+                        return 0;
+                    }
+
                     /* compute column widths */
                     int w_id  = 7;  /* "Mail ID" */
                     int w_snd = is_sent ? 9 : 6;
@@ -1028,31 +1119,33 @@ int shyake_check(shyake_ctx *ctx, const char *type)
 
                     /* print underlined header (per-word underline) */
                     const char *col2_hdr = is_sent ? "Recipient" : "Sender";
-                    if (ctx->no_color) {
-                        printf("%-*s %-*s %-*s %-*s %s\n",
-                               w_id,  "Mail ID",
-                               w_snd, col2_hdr,
-                               w_sub, "Subject",
-                               w_sz,  "Size",
-                                      "Date");
-                    } else {
-                        printf("%s", c_rs);
-                        /* Column 0: Mail ID */
-                        printf("%s%sMail ID%s%-*s ",
-                               c_w, ul_on, ul_off, w_id - 7, "");
-                        /* Column 1: Sender / Recipient */
-                        printf("%s%s%s%s%-*s ",
-                               c_w, ul_on, col2_hdr, ul_off,
-                               w_snd - (int)strlen(col2_hdr), "");
-                        /* Column 2: Subject */
-                        printf("%s%sSubject%s%-*s ",
-                               c_w, ul_on, ul_off, w_sub - 7, "");
-                        /* Column 3: Size */
-                        printf("%s%sSize%s%-*s ",
-                               c_w, ul_on, ul_off, w_sz - 4, "");
-                        /* Column 4: Date */
-                        printf("%s%sDate%s\n",
-                               c_w, ul_on, ul_off);
+                    if (!opts || !opts->no_header) {
+                        if (ctx->no_color) {
+                            printf("%-*s %-*s %-*s %-*s %s\n",
+                                   w_id,  "Mail ID",
+                                   w_snd, col2_hdr,
+                                   w_sub, "Subject",
+                                   w_sz,  "Size",
+                                          "Date");
+                        } else {
+                            printf("%s", c_rs);
+                            /* Column 0: Mail ID */
+                            printf("%s%sMail ID%s%-*s ",
+                                   c_w, ul_on, ul_off, w_id - 7, "");
+                            /* Column 1: Sender / Recipient */
+                            printf("%s%s%s%s%-*s ",
+                                   c_w, ul_on, col2_hdr, ul_off,
+                                   w_snd - (int)strlen(col2_hdr), "");
+                            /* Column 2: Subject */
+                            printf("%s%sSubject%s%-*s ",
+                                   c_w, ul_on, ul_off, w_sub - 7, "");
+                            /* Column 3: Size */
+                            printf("%s%sSize%s%-*s ",
+                                   c_w, ul_on, ul_off, w_sz - 4, "");
+                            /* Column 4: Date */
+                            printf("%s%sDate%s\n",
+                                   c_w, ul_on, ul_off);
+                        }
                     }
 
                     if (count == 0) {
@@ -1082,7 +1175,8 @@ int shyake_check(shyake_ctx *ctx, const char *type)
                         int len_snd = (int)strlen(rows_snd[i]);
                         if (len_snd > 0 &&
                             rows_snd[i][len_snd - 1] == '@') {
-                            printf("%s%.*s", c_cy, len_snd - 1, rows_snd[i]);
+                            printf("%s%.*s", c_cy, len_snd - 1,
+                                   rows_snd[i]);
                             printf("%s@", c_w);
                         } else {
                             printf("%s%s", c_cy, rows_snd[i]);
@@ -1109,8 +1203,10 @@ int shyake_check(shyake_ctx *ctx, const char *type)
 
                     (void)bold; /* reserved for future use */
 
-                    printf("\nTotal: %d item%s\n", count,
-                           count == 1 ? "" : "s");
+                    if (!opts || !opts->no_header) {
+                        printf("\nTotal: %d item%s\n", count,
+                               count == 1 ? "" : "s");
+                    }
                     wait_pager();
                 }
                 cJSON_Delete(json);
@@ -1212,11 +1308,16 @@ int shyake_fetch(shyake_ctx *ctx, const char *mail_id, int raw)
                     const char *c_lbl = ctx->no_color ? "" : "\033[1;36m";
                     const char *c_val = ctx->no_color ? "" : "\033[0m";
 
+                    int tw = get_terminal_width();
+                    const char *sub_text = sub
+                        ? sub : "(decryption failed)";
+
                     printf("%sFROM:%s  %s\n", c_lbl, c_val, snd);
                     printf("%sTO:%s    %s\n", c_lbl, c_val, rec);
                     printf("%sDATE:%s  %s\n", c_lbl, c_val, date);
-                    printf("%sSUBJ:%s  %s\n\n", c_lbl, c_val,
-                           sub ? sub : "(decryption failed)");
+                    printf("%sSUBJ:%s  ", c_lbl, c_val);
+                    print_word_wrap(sub_text, 7, tw);
+                    printf("\n");
                     if (bdy) {
                         printf("%s\n", bdy);
                     } else {
@@ -1254,7 +1355,8 @@ int shyake_check_one(shyake_ctx *ctx, const char *mail_id)
     CURL *curl = curl_easy_init();
     if (!curl) return -1;
 
-    struct curl_slist *headers = create_auth_headers(ctx, endpoint, username);
+    struct curl_slist *headers = create_auth_headers(
+        ctx, endpoint, username);
     if (!headers) { curl_easy_cleanup(curl); return -1; }
 
     struct curl_response resp = { .data = malloc(1), .size = 0 };

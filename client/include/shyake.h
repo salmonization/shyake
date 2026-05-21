@@ -54,12 +54,21 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
                 const char *subject, const uint8_t *body,
                 size_t body_len);
 
+/* Check options */
+typedef struct {
+    int count_only;
+    int json_out;
+    int csv_out;
+    int no_header;
+} shyake_check_opts;
+
 /* 
  * Check inbox or sent mail.
  * type: "inbox" or "sent".
  * Returns 0 on success, non-zero on failure.
  */
-int shyake_check(shyake_ctx *ctx, const char *type);
+int shyake_check(shyake_ctx *ctx, const char *type,
+                 const shyake_check_opts *opts);
 
 /* 
  * Fetch and read a specific mail by ID.

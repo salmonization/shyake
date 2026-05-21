@@ -307,7 +307,8 @@ int main(int argc, char *argv[])
         }
 
         if (!username) {
-            fprintf(stderr, "Error: -u <username> is required for register.\n");
+            fprintf(stderr, "Error: -u <username> is required "
+                            "for register.\n");
             free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
@@ -363,7 +364,8 @@ int main(int argc, char *argv[])
         }
 
         if (!recipient) {
-            fprintf(stderr, "Error: -t <recipient> is required for send.\n");
+            fprintf(stderr, "Error: -t <recipient> is required "
+                            "for send.\n");
             free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
@@ -430,7 +432,7 @@ int main(int argc, char *argv[])
     if (strcmp(cmd, "check") == 0) {
         if (argc < 3) {
             fprintf(stderr,
-                    "Usage: shyake check <inbox|sent|id>\n");
+                    "Usage: shyake check <inbox|sent|id> [options]\n");
             free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
@@ -440,6 +442,29 @@ int main(int argc, char *argv[])
         const char *arg = argv[2];
         int is_list = (strcmp(arg, "inbox") == 0 ||
                        strcmp(arg, "sent") == 0);
+
+        shyake_check_opts chk_opts = {0};
+        if (is_list) {
+            static struct option check_options[] = {
+                {"count", no_argument, 0, 'C'},
+                {"json", no_argument, 0, 'J'},
+                {"csv", no_argument, 0, 'S'},
+                {"no-header", no_argument, 0, 'H'},
+                {0, 0, 0, 0}
+            };
+            int opt, opt_idx = 0;
+            optind = 3;
+            while ((opt = getopt_long(argc, argv, "", check_options,
+                                      &opt_idx)) != -1) {
+                switch (opt) {
+                    case 'C': chk_opts.count_only = 1; break;
+                    case 'J': chk_opts.json_out = 1; break;
+                    case 'S': chk_opts.csv_out = 1; break;
+                    case 'H': chk_opts.no_header = 1; break;
+                    default: break;
+                }
+            }
+        }
 
         const char *inst = app_cfg->instance
             ? app_cfg->instance : "https://shyake.eee.coffee";
@@ -461,11 +486,7 @@ int main(int argc, char *argv[])
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
         int ret;
         if (is_list) {
-            /* check inbox/sent [<id>] */
-            if (argc >= 4)
-                ret = shyake_check_one(ctx, argv[3]);
-            else
-                ret = shyake_check(ctx, arg);
+            ret = shyake_check(ctx, arg, &chk_opts);
         } else {
             /* check <id> directly */
             ret = shyake_check_one(ctx, arg);
