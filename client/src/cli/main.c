@@ -40,6 +40,7 @@ char *global_config_dir = NULL;
 
 typedef struct {
     char *instance;
+    char *username;
     char *time_format;
     char *time_format_recent;
     char *check_columns;
@@ -69,6 +70,7 @@ free_app_config(app_config *config)
     if (!config)
         return;
     free(config->instance);
+    free(config->username);
     free(config->time_format);
     free(config->time_format_recent);
     free(config->check_columns);
@@ -113,6 +115,9 @@ read_config(const char *config_dir)
         if (strcmp(key, "INSTANCE") == 0) {
             free(cfg->instance);
             cfg->instance = strdup(val);
+        } else if (strcmp(key, "USERNAME") == 0) {
+            free(cfg->username);
+            cfg->username = strdup(val);
         } else if (strcmp(key, "TIME_FORMAT") == 0) {
             free(cfg->time_format);
             cfg->time_format = strdup(val);
@@ -130,41 +135,10 @@ read_config(const char *config_dir)
     return cfg;
 }
 
-static char*
-read_username(const char *config_dir)
-{
-    // read registered username from dedicated file
-    char path[512];
-    snprintf(path, sizeof(path), "%s/username", config_dir);
-    FILE *f = fopen(path, "r");
-    if (!f)
-        return NULL;
 
-    char buf[256];
-    if (!fgets(buf, sizeof(buf), f)) {
-        fclose(f);
-        return NULL;
-    }
-    fclose(f);
-    return strdup(trim_whitespace(buf));
-}
 
 static int
-write_username(const char *config_dir, const char *username)
-{
-    // persist username to dedicated file
-    char path[512];
-    snprintf(path, sizeof(path), "%s/username", config_dir);
-    FILE *f = fopen(path, "w");
-    if (!f)
-        return -1;
-    fprintf(f, "%s\n", username);
-    fclose(f);
-    return 0;
-}
-
-static int
-update_config_instance(const char *config_dir, const char *instance)
+update_config_user_and_instance(const char *config_dir, const char *username, const char *instance)
 {
     // update INSTANCE key in config file in-place
     char path[512];
@@ -197,9 +171,12 @@ update_config_instance(const char *config_dir, const char *instance)
         if (strcmp(key, "INSTANCE") == 0) {
             free(lines[i]);
             char new_line[1024];
-            snprintf(new_line, sizeof(new_line), "INSTANCE=%s\n", instance);
+            snprintf(new_line, sizeof(new_line), "INSTANCE=%s\nUSERNAME=%s\n", instance, username);
             lines[i] = strdup(new_line);
             has_instance = 1;
+        } else if (strcmp(key, "USERNAME") == 0) {
+            free(lines[i]);
+            lines[i] = strdup(""); // clear old USERNAME line
         }
     }
 
@@ -267,19 +244,16 @@ int main(int argc, char *argv[])
     char *config_dir = global_config_dir
         ? strdup(global_config_dir) : get_config_dir();
     app_config *app_cfg = read_config(config_dir);
-    char *stored_username = read_username(config_dir);
 
     if (strcmp(cmd, "whoami") == 0) {
-        const char *inst = app_cfg->instance
-            ? app_cfg->instance : "https://shyake.eee.coffee";
-        if (stored_username) {
-            printf("USERNAME: %s\n", stored_username);
+        const char *inst = app_cfg->instance;
+        if (app_cfg->username) {
+            printf("USERNAME: %s\n", app_cfg->username);
         } else {
             printf("USERNAME: (not registered)\n");
         }
         printf("INSTANCE: %s\n", inst);
         printf("CONFIG:   %s\n", config_dir);
-        free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
         return EXIT_SUCCESS;
@@ -309,16 +283,21 @@ int main(int argc, char *argv[])
         if (!username) {
             fprintf(stderr, "Error: -u <username> is required "
                             "for register.\n");
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
         }
 
         const char *inst = instance ? instance :
-            (app_cfg->instance ? app_cfg->instance
-                               : "https://shyake.eee.coffee");
+            (app_cfg->instance);
 
+        
+        if (!inst) {
+            fprintf(stderr, "Missing INSTANCE in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
         shyake_config cfg = {
             .config_dir = config_dir,
             .instance_url = inst,
@@ -331,12 +310,11 @@ int main(int argc, char *argv[])
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
         int ret = shyake_register(ctx, username);
         if (ret == 0) {
-            write_username(config_dir, username);
-            update_config_instance(config_dir, inst);
+            
+            update_config_user_and_instance(config_dir, username, inst);
         }
 
         shyake_free_ctx(ctx);
-        free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
         return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -366,7 +344,6 @@ int main(int argc, char *argv[])
         if (!recipient) {
             fprintf(stderr, "Error: -t <recipient> is required "
                             "for send.\n");
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -374,7 +351,6 @@ int main(int argc, char *argv[])
 
         if (subject && strlen(subject) > 128) {
             fprintf(stderr, "Error: Subject cannot exceed 128 bytes.\n");
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -385,7 +361,6 @@ int main(int argc, char *argv[])
             in_file = fopen(argv[optind], "rb");
             if (!in_file) {
                 fprintf(stderr, "Failed to open file: %s\n", argv[optind]);
-                free(stored_username);
                 free_app_config(app_cfg);
                 free(config_dir);
                 return EXIT_FAILURE;
@@ -399,16 +374,21 @@ int main(int argc, char *argv[])
 
         if (!body) {
             fprintf(stderr, "Failed to read message body.\n");
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
         }
 
-        const char *inst = app_cfg->instance
-            ? app_cfg->instance : "https://shyake.eee.coffee";
-        const char *user = stored_username ? stored_username : "salmon";
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
 
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
         shyake_config cfg = {
             .config_dir = config_dir,
             .instance_url = inst,
@@ -422,7 +402,6 @@ int main(int argc, char *argv[])
         int ret = shyake_send(ctx, recipient, subject, body, body_len);
 
         shyake_free_ctx(ctx);
-        free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
         free(body);
@@ -433,7 +412,6 @@ int main(int argc, char *argv[])
         if (argc < 3) {
             fprintf(stderr,
                     "Usage: shyake check <inbox|sent|id> [options]\n");
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -466,11 +444,16 @@ int main(int argc, char *argv[])
             }
         }
 
-        const char *inst = app_cfg->instance
-            ? app_cfg->instance : "https://shyake.eee.coffee";
-        const char *user = stored_username
-            ? stored_username : "salmon";
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
 
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
         shyake_config cfg = {
             .config_dir = config_dir,
             .instance_url = inst,
@@ -493,7 +476,6 @@ int main(int argc, char *argv[])
         }
 
         shyake_free_ctx(ctx);
-        free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
         return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -524,16 +506,21 @@ int main(int argc, char *argv[])
 
         if (!mail_id) {
             fprintf(stderr, "Error: mail_id is required for fetch.\n");
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
         }
 
-        const char *inst = app_cfg->instance
-            ? app_cfg->instance : "https://shyake.eee.coffee";
-        const char *user = stored_username ? stored_username : "salmon";
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
 
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
         shyake_config cfg = {
             .config_dir = config_dir,
             .instance_url = inst,
@@ -550,7 +537,6 @@ int main(int argc, char *argv[])
         int ret = shyake_fetch(ctx, mail_id, raw);
 
         shyake_free_ctx(ctx);
-        free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
         return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -559,16 +545,21 @@ int main(int argc, char *argv[])
     if (strcmp(cmd, "burn") == 0) {
         if (argc < 3) {
             fprintf(stderr, "Usage: shyake burn <id>\n");
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
         }
         const char *mail_id = argv[2];
-        const char *inst = app_cfg->instance
-            ? app_cfg->instance : "https://shyake.eee.coffee";
-        const char *user = stored_username ? stored_username : "salmon";
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
 
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
         shyake_config cfg = {
             .config_dir = config_dir,
             .instance_url = inst,
@@ -580,7 +571,6 @@ int main(int argc, char *argv[])
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
         int ret = shyake_burn(ctx, mail_id);
         shyake_free_ctx(ctx);
-        free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
         return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -590,16 +580,21 @@ int main(int argc, char *argv[])
         int is_unblock = strcmp(cmd, "unblock") == 0;
         if (argc < 3) {
             fprintf(stderr, "Usage: shyake %s <target>\n", cmd);
-            free(stored_username);
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
         }
         const char *target = argv[2];
-        const char *inst = app_cfg->instance
-            ? app_cfg->instance : "https://shyake.eee.coffee";
-        const char *user = stored_username ? stored_username : "salmon";
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
 
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
         shyake_config cfg = {
             .config_dir = config_dir,
             .instance_url = inst,
@@ -611,14 +606,139 @@ int main(int argc, char *argv[])
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
         int ret = shyake_block(ctx, target, is_unblock);
         shyake_free_ctx(ctx);
-        free(stored_username);
         free_app_config(app_cfg);
         free(config_dir);
         return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
+    if (strcmp(cmd, "rotate") == 0) {
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
+
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+        shyake_config cfg = {
+            .config_dir = config_dir,
+            .instance_url = inst,
+            .username = user,
+            .plain = global_plain,
+            .debug = global_debug,
+            .no_color = global_no_color || app_cfg->no_color
+        };
+
+        shyake_ctx *ctx = shyake_init_ctx(&cfg);
+        int ret = shyake_rotate(ctx);
+
+        shyake_free_ctx(ctx);
+        free_app_config(app_cfg);
+        free(config_dir);
+        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (strcmp(cmd, "fingerprint") == 0) {
+        int do_update = 0;
+        const char *target_user = NULL;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--update") == 0) {
+                do_update = 1;
+            } else if (!target_user) {
+                target_user = argv[i];
+            }
+        }
+        
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
+
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+        shyake_config cfg = {
+            .config_dir = config_dir,
+            .instance_url = inst,
+            .username = user,
+            .plain = global_plain,
+            .debug = global_debug,
+            .no_color = global_no_color || app_cfg->no_color
+        };
+
+        shyake_ctx *ctx = shyake_init_ctx(&cfg);
+        int ret = shyake_fingerprint(ctx, target_user, do_update);
+
+        shyake_free_ctx(ctx);
+        free_app_config(app_cfg);
+        free(config_dir);
+        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (strcmp(cmd, "destroy") == 0) {
+        const char *inst = app_cfg->instance;
+        const char *user = app_cfg->username;
+
+        printf("WARNING: This will permanently delete your KEYS and ALL "
+               "MESSAGES sent to or\n");
+        printf("from you. And your username will be locked forever and "
+               "cannot be registered\n");
+        printf("again. Type your username to confirm: ");
+        fflush(stdout);
+
+        char buf[256];
+        if (!fgets(buf, sizeof(buf), stdin)) {
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+
+        char *input = trim_whitespace(buf);
+        if (strcmp(input, user) != 0) {
+            fprintf(stderr, "Username mismatch. Aborted.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+
+        
+        if (!inst || !user) {
+            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+        shyake_config cfg = {
+            .config_dir = config_dir,
+            .instance_url = inst,
+            .username = user,
+            .plain = global_plain,
+            .debug = global_debug,
+            .no_color = global_no_color || app_cfg->no_color
+        };
+
+        shyake_ctx *ctx = shyake_init_ctx(&cfg);
+        int ret = shyake_destroy(ctx);
+
+        shyake_free_ctx(ctx);
+        free_app_config(app_cfg);
+
+        if (ret == 0) {
+            char cmd_buf[512];
+            snprintf(cmd_buf, sizeof(cmd_buf), "rm -rf %s/*", config_dir);
+            system(cmd_buf);
+            printf("Local configuration and keys securely deleted.\n");
+        }
+
+        free(config_dir);
+        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
     fprintf(stderr, "Unknown command: %s\n", cmd);
-    free(stored_username);
     free_app_config(app_cfg);
     free(config_dir);
     return EXIT_FAILURE;

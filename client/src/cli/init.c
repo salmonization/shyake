@@ -11,7 +11,8 @@
 
 static const char *default_config =
     "# shyake global configuration file\n\n"
-    "INSTANCE=https://shyake.eee.coffee\n\n"
+    "INSTANCE=\n"
+    "USERNAME=\n\n"
     "# Date & Time format (strftime format)\n"
     "# RECENT: less than 180 days old.\n"
     "# ISO 8601 format\n"
@@ -102,7 +103,8 @@ int cmd_init(const char *config_dir)
 
     shyake_config cfg = {
         .config_dir = config_dir,
-        .instance_url = "https://shyake.eee.coffee"
+        .instance_url = "",
+        .username = ""
     };
 
     shyake_ctx *ctx = shyake_init_ctx(&cfg);

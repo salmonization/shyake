@@ -557,10 +557,16 @@ base64_decode(const char *b64, size_t *out_len)
 }
 
 static char* kem_encapsulate_key(const uint8_t *kem_pk,
+                                 size_t kem_pk_len,
                                  const uint8_t *sym_key)
 {
     OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
     if (!kem) return NULL;
+    
+    if (kem_pk_len != kem->length_public_key) {
+        OQS_KEM_free(kem);
+        return NULL;
+    }
     
     uint8_t *ct = malloc(kem->length_ciphertext);
     uint8_t *ss = malloc(kem->length_shared_secret);
@@ -588,17 +594,57 @@ static char* kem_encapsulate_key(const uint8_t *kem_pk,
     return b64;
 }
 
+
+static char* get_known_host(const char *config_dir, const char *username)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s/known_hosts", config_dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+
+    char line[8192];
+    while (fgets(line, sizeof(line), f)) {
+        char user[256];
+        char fp[256];
+        char pk[8192];
+        if (sscanf(line, "%255s %255s %8191s", user, fp, pk) == 3) {
+            if (strcmp(user, username) == 0) {
+                fclose(f);
+                return strdup(pk);
+            }
+        }
+    }
+    fclose(f);
+    return NULL;
+}
+
+static void add_known_host(const char *config_dir, const char *username,
+                           const char *fp, const char *pk_b64)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s/known_hosts", config_dir);
+    FILE *f = fopen(path, "a");
+    if (!f) return;
+    fprintf(f, "%s %s %s\n", username, fp, pk_b64);
+    fclose(f);
+}
+
 int shyake_send(shyake_ctx *ctx, const char *recipient,
                 const char *subject, const uint8_t *body,
                 size_t body_len)
 {
     if (!ctx || !recipient || !body || body_len == 0) return -1;
     
-    printf("Fetching public key for %s...\n", recipient);
-    char *recip_pk_b64 = fetch_recipient_pubkey(ctx, recipient);
+    int is_new_host = 0;
+    char *recip_pk_b64 = get_known_host(ctx->config_dir, recipient);
     if (!recip_pk_b64) {
-        fprintf(stderr, "Failed to fetch recipient public key.\n");
-        return -1;
+        printf("Fetching public key for %s...\n", recipient);
+        recip_pk_b64 = fetch_recipient_pubkey(ctx, recipient);
+        if (!recip_pk_b64) {
+            fprintf(stderr, "Failed to fetch recipient public key.\n");
+            return -1;
+        }
+        is_new_host = 1;
     }
     
     size_t recip_pk_len;
@@ -608,6 +654,18 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
         return -1;
     }
     
+    /* Calculate recipient fingerprint (SHA256 of KEM PK) */
+    unsigned char fingerprint[SHA256_DIGEST_LENGTH];
+    SHA256(recip_pk, recip_pk_len, fingerprint);
+    char fp_hex[SHA256_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(fp_hex + (i * 2), "%02x", fingerprint[i]);
+    }
+
+    if (is_new_host) {
+        add_known_host(ctx->config_dir, recipient, fp_hex, recip_pk_b64);
+    }
+
     /* Load sender keys */
     size_t my_kpk_len, my_ssk_len;
     char path[512];
@@ -621,21 +679,16 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
         return -1;
     }
     
-    /* Calculate recipient fingerprint (SHA256 of KEM PK) */
-    unsigned char fingerprint[SHA256_DIGEST_LENGTH];
-    SHA256(recip_pk, recip_pk_len, fingerprint);
-    char fp_hex[SHA256_DIGEST_LENGTH * 2 + 1];
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        sprintf(fp_hex + (i * 2), "%02x", fingerprint[i]);
-    }
-    
     /* Generate 32-byte symmetric message key */
     uint8_t sym_key[32];
+    size_t read_bytes = 0;
     FILE *urandom = fopen("/dev/urandom", "rb");
     if (urandom) {
-        fread(sym_key, 1, 32, urandom);
+        read_bytes = fread(sym_key, 1, 32, urandom);
         fclose(urandom);
-    } else {
+    }
+    if (read_bytes != 32) {
+        fprintf(stderr, "Failed to generate symmetric key from /dev/urandom\n");
         free(recip_pk_b64); free(recip_pk); free(my_kpk); free(my_ssk);
         return -1;
     }
@@ -646,8 +699,18 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
     char *enc_body = encrypt_to_b64(sym_key, body, body_len);
     
     /* Encapsulate key for recipient and sender */
-    char *enc_key_recipient = kem_encapsulate_key(recip_pk, sym_key);
-    char *enc_key_sender = kem_encapsulate_key(my_kpk, sym_key);
+    char *enc_key_recipient = kem_encapsulate_key(recip_pk, recip_pk_len, sym_key);
+    char *enc_key_sender = kem_encapsulate_key(my_kpk, my_kpk_len, sym_key);
+    
+    if (!enc_key_recipient || !enc_key_sender) {
+        fprintf(stderr, "Failed to encapsulate symmetric key. "
+                        "Public key may be invalid or corrupted.\n");
+        free(recip_pk_b64); free(recip_pk); free(my_kpk); free(my_ssk);
+        free(enc_subject); free(enc_body);
+        if (enc_key_recipient) free(enc_key_recipient);
+        if (enc_key_sender) free(enc_key_sender);
+        return -1;
+    }
     
     time_t now = time(NULL);
     char timestamp[32];
@@ -655,7 +718,7 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
     
     /* TODO: implement the sender name logic properly (requires reading 
      * config or local state for the username) */
-    const char *sender = ctx->username ? ctx->username : "salmon";
+    const char *sender = ctx->username;
     
     cJSON *signed_obj = cJSON_CreateObject();
     cJSON_AddStringToObject(signed_obj, "sender", sender);
@@ -723,6 +786,15 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
             if (http_code == 200 || http_code == 201) {
                 printf("Your mail was sent.\n");
+            } else if (http_code == 409) {
+                fprintf(stderr, "\nFATAL: Remote public key of recipient "
+                                "has changed!\n");
+                fprintf(stderr, "RUN 'shyake fingerprint <username>' to "
+                                "inspect and update trust.\n");
+                ret = -1;
+            } else if (http_code == 410) {
+                fprintf(stderr, "\nFATAL: Recipient no longer exists.\n");
+                ret = -1;
             } else {
                 fprintf(stderr, "Send failed (HTTP %ld): %s\n",
                         http_code, resp.data);
@@ -869,7 +941,7 @@ int shyake_check(shyake_ctx *ctx, const char *type,
 {
     if (!ctx || !type)
         return -1;
-    const char *username = ctx->username ? ctx->username : "salmon";
+    const char *username = ctx->username;
     
     char endpoint[128];
     snprintf(endpoint, sizeof(endpoint), "/api/mail?type=%s", type);
@@ -1229,7 +1301,7 @@ int shyake_fetch(shyake_ctx *ctx, const char *mail_id, int raw)
 {
     if (!ctx || !mail_id)
         return -1;
-    const char *username = ctx->username ? ctx->username : "salmon";
+    const char *username = ctx->username;
     
     char endpoint[128];
     snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
@@ -1346,7 +1418,7 @@ int shyake_fetch(shyake_ctx *ctx, const char *mail_id, int raw)
 int shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 {
     if (!ctx || !mail_id) return -1;
-    const char *username = ctx->username ? ctx->username : "salmon";
+    const char *username = ctx->username;
 
     char endpoint[128];
     snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
@@ -1459,7 +1531,7 @@ int shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 int shyake_burn(shyake_ctx *ctx, const char *mail_id)
 {
     if (!ctx || !mail_id) return -1;
-    const char *username = ctx->username ? ctx->username : "salmon";
+    const char *username = ctx->username;
 
     char endpoint[128];
     snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
@@ -1516,7 +1588,7 @@ int shyake_burn(shyake_ctx *ctx, const char *mail_id)
 int shyake_block(shyake_ctx *ctx, const char *target, int unblock)
 {
     if (!ctx || !target) return -1;
-    const char *username = ctx->username ? ctx->username : "salmon";
+    const char *username = ctx->username;
     const char *method = unblock ? "DELETE" : "POST";
     const char *endpoint = "/api/block";
 
@@ -1574,4 +1646,352 @@ int shyake_block(shyake_ctx *ctx, const char *target, int unblock)
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return ret;
+}
+
+int shyake_rotate(shyake_ctx *ctx)
+{
+    if (!ctx) return -1;
+    const char *username = ctx->username;
+
+    /* Generate new keys in memory */
+    OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
+    OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
+    if (!kem || !sig) {
+        if (kem) OQS_KEM_free(kem);
+        if (sig) OQS_SIG_free(sig);
+        return -1;
+    }
+
+    uint8_t *new_kpk = malloc(kem->length_public_key);
+    uint8_t *new_ksk = malloc(kem->length_secret_key);
+    uint8_t *new_spk = malloc(sig->length_public_key);
+    uint8_t *new_ssk = malloc(sig->length_secret_key);
+
+    if (OQS_KEM_keypair(kem, new_kpk, new_ksk) != OQS_SUCCESS ||
+        OQS_SIG_keypair(sig, new_spk, new_ssk) != OQS_SUCCESS) {
+        free(new_kpk); free(new_ksk); free(new_spk); free(new_ssk);
+        OQS_KEM_free(kem); OQS_SIG_free(sig);
+        return -1;
+    }
+
+    char *kpk_b64 = base64_encode(new_kpk, kem->length_public_key);
+    char *spk_b64 = base64_encode(new_spk, sig->length_public_key);
+
+    char endpoint[128];
+    snprintf(endpoint, sizeof(endpoint), "/api/rotate");
+    char url[512];
+    snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        free(new_kpk); free(new_ksk); free(new_spk); free(new_ssk);
+        free(kpk_b64); free(spk_b64);
+        OQS_KEM_free(kem); OQS_SIG_free(sig);
+        return -1;
+    }
+
+    /* create_signed_headers uses the OLD private key currently on disk */
+    struct curl_slist *headers = create_signed_headers(
+        ctx, "POST", endpoint, username);
+    if (!headers) {
+        curl_easy_cleanup(curl);
+        free(new_kpk); free(new_ksk); free(new_spk); free(new_ssk);
+        free(kpk_b64); free(spk_b64);
+        OQS_KEM_free(kem); OQS_SIG_free(sig);
+        return -1;
+    }
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    cJSON *body_json = cJSON_CreateObject();
+    cJSON_AddStringToObject(body_json, "new_kem_pubkey", kpk_b64);
+    cJSON_AddStringToObject(body_json, "new_sig_pubkey", spk_b64);
+    char *body_str = cJSON_PrintUnformatted(body_json);
+    cJSON_Delete(body_json);
+
+    struct curl_response resp = { .data = malloc(1), .size = 0 };
+    resp.data[0] = '\0';
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body_str);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+
+    printf("Rotating keys for %s...\n", username);
+    CURLcode res = curl_easy_perform(curl);
+    int ret = 0;
+
+    if (res == CURLE_OK) {
+        long http_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code == 200 || http_code == 201) {
+            printf("Keys successfully rotated on server.\n");
+
+            char path[512];
+            snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+            save_file(path, new_kpk, kem->length_public_key);
+            snprintf(path, sizeof(path), "%s/kem_sk.bin", ctx->config_dir);
+            save_file(path, new_ksk, kem->length_secret_key);
+            snprintf(path, sizeof(path), "%s/sig_pk.bin", ctx->config_dir);
+            save_file(path, new_spk, sig->length_public_key);
+            snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
+            save_file(path, new_ssk, sig->length_secret_key);
+            printf("Local keys updated.\n");
+
+        } else {
+            fprintf(stderr, "Failed (HTTP %ld): %s\n",
+                    http_code, resp.data);
+            ret = -1;
+        }
+    } else {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
+        ret = -1;
+    }
+
+    free(body_str);
+    free(resp.data);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    free(new_kpk); free(new_ksk); free(new_spk); free(new_ssk);
+    free(kpk_b64); free(spk_b64);
+    OQS_KEM_free(kem); OQS_SIG_free(sig);
+
+    return ret;
+}
+
+int shyake_destroy(shyake_ctx *ctx)
+{
+    if (!ctx) return -1;
+    const char *username = ctx->username;
+
+    char endpoint[128];
+    snprintf(endpoint, sizeof(endpoint), "/api/destroy");
+    char url[512];
+    snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
+
+    CURL *curl = curl_easy_init();
+    if (!curl) return -1;
+
+    struct curl_slist *headers = create_signed_headers(
+        ctx, "DELETE", endpoint, username);
+    if (!headers) { curl_easy_cleanup(curl); return -1; }
+
+    struct curl_response resp = { .data = malloc(1), .size = 0 };
+    resp.data[0] = '\0';
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+
+    CURLcode res = curl_easy_perform(curl);
+    int ret = 0;
+
+    if (res == CURLE_OK) {
+        long http_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code == 200) {
+            printf("Account destroyed.\n");
+        } else {
+            fprintf(stderr, "Failed (HTTP %ld): %s\n",
+                    http_code, resp.data);
+            ret = -1;
+        }
+    } else {
+        fprintf(stderr, "Network error: %s\n",
+                curl_easy_strerror(res));
+        ret = -1;
+    }
+
+    free(resp.data);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return ret;
+}
+
+static void update_known_host(const char *config_dir, const char *username,
+                              const char *fp, const char *pk_b64)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s/known_hosts", config_dir);
+    
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s/known_hosts.tmp", config_dir);
+    
+    FILE *f = fopen(path, "r");
+    FILE *ftmp = fopen(tmp_path, "w");
+    if (!ftmp) {
+        if (f) fclose(f);
+        return;
+    }
+
+    if (f) {
+        char line[8192];
+        while (fgets(line, sizeof(line), f)) {
+            char user[256];
+            char fp_scan[256];
+            char pk_scan[8192];
+            if (sscanf(line, "%255s %255s %8191s", user, fp_scan, pk_scan) == 3) {
+                if (strcmp(user, username) != 0) {
+                    fprintf(ftmp, "%s %s %s\n", user, fp_scan, pk_scan);
+                }
+            }
+        }
+        fclose(f);
+    }
+    
+    /* Append the new key */
+    fprintf(ftmp, "%s %s %s\n", username, fp, pk_b64);
+    fclose(ftmp);
+    
+    rename(tmp_path, path);
+}
+
+static void print_fingerprint_hex(const unsigned char *fp) {
+    for (int i = 0; i < 16; i++) {
+        printf("%02X%02X", fp[i*2], fp[i*2+1]);
+        if (i == 7) printf("\n");
+        else if (i == 15) printf("\n");
+        else if (i == 3 || i == 11) printf("  ");
+        else printf(" ");
+    }
+}
+
+static void print_randomart(const unsigned char *fp) {
+    int x = 8, y = 4;
+    int grid[17][9] = {0};
+    
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        unsigned char b = fp[i];
+        for (int j = 0; j < 4; j++) {
+            int dir = (b >> (j * 2)) & 3;
+            int dx = (dir & 1) ? 1 : -1;
+            int dy = (dir & 2) ? 1 : -1;
+            
+            x += dx;
+            y += dy;
+            
+            if (x < 0) x = 0;
+            if (x > 16) x = 16;
+            if (y < 0) y = 0;
+            if (y > 8) y = 8;
+            
+            grid[x][y]++;
+        }
+    }
+    
+    const char *chars = " .o+=*BOX@%&#/^";
+    printf("+-----------------+\n");
+    for (int j = 0; j < 9; j++) {
+        printf("|");
+        for (int i = 0; i < 17; i++) {
+            if (i == 8 && j == 4) {
+                printf("S");
+            } else if (i == x && j == y) {
+                printf("E");
+            } else {
+                int val = grid[i][j];
+                if (val > 14) val = 14;
+                printf("%c", chars[val]);
+            }
+        }
+        printf("|\n");
+    }
+    printf("+-----------------+\n");
+}
+
+int shyake_fingerprint(shyake_ctx *ctx, const char *target_user, int do_update)
+{
+    if (!ctx) return -1;
+    
+    if (!target_user) {
+        /* Self fingerprint */
+        char path[512];
+        snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+        size_t pk_len;
+        uint8_t *pk = load_file(path, &pk_len);
+        if (!pk) {
+            fprintf(stderr, "Failed to load local KEM public key.\n");
+            return -1;
+        }
+        
+        unsigned char fp[SHA256_DIGEST_LENGTH];
+        SHA256(pk, pk_len, fp);
+        free(pk);
+        
+        const char *user = ctx->username ? ctx->username : "(unknown)";
+        printf("Fingerprint for %s (local):\n", user);
+        print_fingerprint_hex(fp);
+        print_randomart(fp);
+        return 0;
+    }
+    
+    /* Remote user fingerprint */
+    printf("Fetching public key for %s...\n", target_user);
+    char *recip_pk_b64 = fetch_recipient_pubkey(ctx, target_user);
+    if (!recip_pk_b64) {
+        fprintf(stderr, "Failed to fetch public key for %s\n", target_user);
+        return -1;
+    }
+    
+    size_t recip_pk_len;
+    uint8_t *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
+    if (!recip_pk) {
+        free(recip_pk_b64);
+        return -1;
+    }
+    
+    unsigned char remote_fp[SHA256_DIGEST_LENGTH];
+    SHA256(recip_pk, recip_pk_len, remote_fp);
+    
+    char fp_hex[SHA256_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(fp_hex + (i * 2), "%02x", remote_fp[i]);
+    }
+    
+    char *local_pk_b64 = get_known_host(ctx->config_dir, target_user);
+    
+    if (local_pk_b64) {
+        size_t local_pk_len;
+        uint8_t *local_pk = base64_decode(local_pk_b64, &local_pk_len);
+        if (local_pk) {
+            unsigned char local_fp[SHA256_DIGEST_LENGTH];
+            SHA256(local_pk, local_pk_len, local_fp);
+            
+            printf("\n[Local known_hosts]\n");
+            print_fingerprint_hex(local_fp);
+            print_randomart(local_fp);
+            
+            printf("\n[Remote server]\n");
+            print_fingerprint_hex(remote_fp);
+            print_randomart(remote_fp);
+            
+            if (memcmp(local_fp, remote_fp, SHA256_DIGEST_LENGTH) == 0) {
+                printf("\nStatus: MATCH\n");
+            } else {
+                printf("\nStatus: MISMATCH (Warning: Key has changed)\n");
+            }
+            free(local_pk);
+        }
+        free(local_pk_b64);
+    } else {
+        printf("\n[Remote server]\n");
+        print_fingerprint_hex(remote_fp);
+        print_randomart(remote_fp);
+        printf("\nStatus: NEW HOST (No local key found)\n");
+    }
+    
+    if (do_update) {
+        update_known_host(ctx->config_dir, target_user, fp_hex, recip_pk_b64);
+        printf("\nSuccessfully updated known_hosts for %s.\n", target_user);
+    }
+    
+    free(recip_pk);
+    free(recip_pk_b64);
+    
+    return 0;
 }

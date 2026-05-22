@@ -152,6 +152,33 @@ app.post('/api/mail', async (c) => {
         return c.json({ error: 'Sender not registered' }, 401);
     }
 
+    const recipientUser = await c.env.DB.prepare(
+        'SELECT kem_pubkey FROM users WHERE username = ?'
+    ).bind(recipient).first();
+
+    if (!recipientUser) {
+        return c.json({ error: 'Recipient not found' }, 404);
+    }
+
+    if (!recipientUser.kem_pubkey) {
+        return c.json({ error: 'USER_DESTROYED' }, 410);
+    }
+
+    // Convert standard base64 to Uint8Array safely
+    const b64Str = (recipientUser.kem_pubkey as string)
+        .replace(/-/g, '+').replace(/_/g, '/');
+    const kemBytes = Uint8Array.from(atob(b64Str), c => c.charCodeAt(0));
+
+    const hashBuffer = await crypto.subtle.digest('SHA-256', kemBytes);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const expectedFp = hashArray.map(
+        b => b.toString(16).padStart(2, '0')
+    ).join('');
+
+    if (recipient_kem_fingerprint !== expectedFp) {
+        return c.json({ error: 'KEY_MISMATCH' }, 409);
+    }
+
     await initWasm(wasmModule);
     try {
         const signedData = {
@@ -462,5 +489,147 @@ async function handleBlock(
 
 app.post('/api/block', (c) => handleBlock(c, false));
 app.delete('/api/block', (c) => handleBlock(c, true));
+
+app.post('/api/rotate', async (c) => {
+    const username = c.req.header('X-Shyake-Username');
+    const timestamp = c.req.header('X-Shyake-Timestamp');
+    const signature = c.req.header('X-Shyake-Signature');
+    const pow = c.req.header('X-Shyake-Pow');
+
+    if (!username || !timestamp || !signature || !pow) {
+        return c.json({ error: 'Missing auth headers' }, 401);
+    }
+
+    const isPowValid = await verifyPoW(pow, 20);
+    if (!isPowValid) {
+        return c.json({ error: 'Invalid Proof of Work' }, 403);
+    }
+
+    const clientTs = parseInt(timestamp, 10);
+    const serverTs = Math.floor(Date.now() / 1000);
+    if (Math.abs(serverTs - clientTs) > 300) {
+        return c.json({ error: 'Timestamp out of window' }, 403);
+    }
+
+    const user = await c.env.DB.prepare(
+        'SELECT sig_pubkey FROM users WHERE username = ?'
+    ).bind(username).first();
+
+    if (!user || !user.sig_pubkey) {
+        return c.json(
+            { error: 'User not found or destroyed' }, 401
+        );
+    }
+
+    await initWasm(wasmModule);
+    try {
+        const message = `POST:/api/rotate:${username}:${timestamp}`;
+        const msgBytes = new TextEncoder().encode(message);
+        const toBase64Url = (b64: string) =>
+            b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        const sigUrl = toBase64Url(signature);
+        const pkUrl = toBase64Url(user.sig_pubkey as string);
+        const isSigValid = verifySignature(pkUrl, msgBytes, sigUrl);
+        if (!isSigValid) {
+            return c.json({ error: 'Invalid signature' }, 401);
+        }
+    } catch (e) {
+        return c.json({ error: 'Signature verification failed' }, 401);
+    }
+
+    let body;
+    try {
+        body = await c.req.json();
+    } catch (e) {
+        return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    const { new_kem_pubkey, new_sig_pubkey } = body;
+    if (!new_kem_pubkey || !new_sig_pubkey) {
+        return c.json({ error: 'Missing new keys' }, 400);
+    }
+
+    try {
+        await c.env.DB.prepare(
+            'UPDATE users SET kem_pubkey = ?, sig_pubkey = ? ' +
+            'WHERE username = ?'
+        ).bind(new_kem_pubkey, new_sig_pubkey, username).run();
+
+        await c.env.DB.prepare(
+            'DELETE FROM mail WHERE sender = ? OR recipient = ?'
+        ).bind(username, username).run();
+
+        return c.json({ message: 'Keys rotated and old mails deleted' }, 200);
+    } catch (e) {
+        return c.json({ error: 'Database error' }, 500);
+    }
+});
+
+app.delete('/api/destroy', async (c) => {
+    const username = c.req.header('X-Shyake-Username');
+    const timestamp = c.req.header('X-Shyake-Timestamp');
+    const signature = c.req.header('X-Shyake-Signature');
+    const pow = c.req.header('X-Shyake-Pow');
+
+    if (!username || !timestamp || !signature || !pow) {
+        return c.json({ error: 'Missing auth headers' }, 401);
+    }
+
+    const isPowValid = await verifyPoW(pow, 20);
+    if (!isPowValid) {
+        return c.json({ error: 'Invalid Proof of Work' }, 403);
+    }
+
+    const clientTs = parseInt(timestamp, 10);
+    const serverTs = Math.floor(Date.now() / 1000);
+    if (Math.abs(serverTs - clientTs) > 300) {
+        return c.json({ error: 'Timestamp out of window' }, 403);
+    }
+
+    const user = await c.env.DB.prepare(
+        'SELECT sig_pubkey FROM users WHERE username = ?'
+    ).bind(username).first();
+
+    if (!user || !user.sig_pubkey) {
+        return c.json(
+            { error: 'User not found or already destroyed' }, 401
+        );
+    }
+
+    await initWasm(wasmModule);
+    try {
+        const message = `DELETE:/api/destroy:${username}:${timestamp}`;
+        const msgBytes = new TextEncoder().encode(message);
+        const toBase64Url = (b64: string) =>
+            b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        const sigUrl = toBase64Url(signature);
+        const pkUrl = toBase64Url(user.sig_pubkey as string);
+        const isSigValid = verifySignature(pkUrl, msgBytes, sigUrl);
+        if (!isSigValid) {
+            return c.json({ error: 'Invalid signature' }, 401);
+        }
+    } catch (e) {
+        return c.json({ error: 'Signature verification failed' }, 401);
+    }
+
+    try {
+        await c.env.DB.prepare(
+            "UPDATE users SET kem_pubkey = '', sig_pubkey = '' " +
+            "WHERE username = ?"
+        ).bind(username).run();
+
+        await c.env.DB.prepare(
+            'DELETE FROM mail WHERE sender = ? OR recipient = ?'
+        ).bind(username, username).run();
+
+        await c.env.DB.prepare(
+            'DELETE FROM blocks WHERE blocker = ? OR blocked = ?'
+        ).bind(username, username).run();
+
+        return c.json({ message: 'Account destroyed' }, 200);
+    } catch (e) {
+        return c.json({ error: 'Database error' }, 500);
+    }
+});
 
 export default app;

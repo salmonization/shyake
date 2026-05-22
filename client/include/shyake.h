@@ -97,6 +97,26 @@ int shyake_burn(shyake_ctx *ctx, const char *mail_id);
  */
 int shyake_block(shyake_ctx *ctx, const char *target, int unblock);
 
+/*
+ * Rotate keypairs and upload to the server.
+ * Returns 0 on success, non-zero on failure.
+ */
+int shyake_rotate(shyake_ctx *ctx);
+
+/*
+ * Destroy the account and all associated mails locally and remotely.
+ * Returns 0 on success, non-zero on failure.
+ */
+int shyake_destroy(shyake_ctx *ctx);
+
+/*
+ * View public key fingerprint of self or a remote user.
+ * target_user: NULL for self, or username for remote user.
+ * do_update: 1 to overwrite known_hosts with the fetched key, 0 to just view.
+ * Returns 0 on success, non-zero on failure.
+ */
+int shyake_fingerprint(shyake_ctx *ctx, const char *target_user, int do_update);
+
 /* Future E2EE and network operations will be added here */
 
 #endif /* SHYAKE_H */
