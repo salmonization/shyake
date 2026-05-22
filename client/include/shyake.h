@@ -9,15 +9,15 @@ typedef struct shyake_ctx shyake_ctx;
 
 /* Configuration options provided by the CLI caller */
 typedef struct {
-	const char *instance_url;
-	const char *config_dir;
-	const char *username;
-	const char *time_format;
-	const char *time_format_recent;
-	const char *check_columns;
-	int plain;
-	int debug;
-	int no_color;
+    const char *instance_url;
+    const char *config_dir;
+    const char *username;
+    const char *time_format;
+    const char *time_format_recent;
+    const char *check_columns;
+    int plain;
+    int debug;
+    int no_color;
 } shyake_config;
 
 /* Initialize and free the context */

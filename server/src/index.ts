@@ -9,14 +9,14 @@ import wasmModule from 'mldsa65-wasm/mldsa65_bg.wasm';
 
 // convert base64 to base64url format
 const toBase64Url = (b64: string): string => {
-	if (!b64) {
-		return '';
-	}
-	return b64
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=/g, '')
-		.replace(/\s+/g, '');
+    if (!b64) {
+        return '';
+    }
+    return b64
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '')
+        .replace(/\s+/g, '');
 };
 
 export interface Env {
@@ -269,22 +269,22 @@ app.get('/api/mail', async (c) => {
         return c.json({ error: 'User not found' }, 401);
     }
 
-	await initWasm(wasmModule);
-	try {
-		const message = `GET:/api/mail?type=${type}:${username}:${timestamp}`;
-		const msgBytes = new TextEncoder().encode(message);
+    await initWasm(wasmModule);
+    try {
+        const message = `GET:/api/mail?type=${type}:${username}:${timestamp}`;
+        const msgBytes = new TextEncoder().encode(message);
 
-		const sigUrl = toBase64Url(signature);
-		const pkUrl = toBase64Url(user.sig_pubkey as string);
+        const sigUrl = toBase64Url(signature);
+        const pkUrl = toBase64Url(user.sig_pubkey as string);
 
-		const isSigValid = verifySignature(pkUrl, msgBytes, sigUrl);
-		if (!isSigValid) {
-			return c.json({ error: 'Invalid signature' }, 401);
-		}
-	} catch (e) {
-		console.error('Signature verification error:', e);
-		return c.json({ error: 'Signature verification failed' }, 401);
-	}
+        const isSigValid = verifySignature(pkUrl, msgBytes, sigUrl);
+        if (!isSigValid) {
+            return c.json({ error: 'Invalid signature' }, 401);
+        }
+    } catch (e) {
+        console.error('Signature verification error:', e);
+        return c.json({ error: 'Signature verification failed' }, 401);
+    }
 
     try {
         const column = type === 'sent' ? 'sender' : 'recipient';
