@@ -105,6 +105,36 @@ try {
     }
 });
 
+
+async function getPubkeyForUser(userString: string, c: any) {
+    const localPart = userString.includes('@')
+        ? userString.split('@')[0]
+        : userString;
+    const domainPart = userString.includes('@')
+        ? userString.split('@')[1]
+        : c.env.INSTANCE_DOMAIN;
+
+    if (domainPart === c.env.INSTANCE_DOMAIN) {
+        return await c.env.DB.prepare(
+            'SELECT kem_pubkey, sig_pubkey FROM users WHERE username = ?'
+        ).bind(localPart).first();
+    } else {
+        if (c.env.FEDERATION_ENABLED !== 'true' &&
+            c.env.FEDERATION_ENABLED !== true) {
+            return null;
+        }
+        try {
+            const resp = await fetch(
+                `https://${domainPart}/api/pubkey/${localPart}`
+            );
+            if (!resp.ok) return null;
+            return await resp.json();
+        } catch (e) {
+            return null;
+        }
+    }
+}
+
 app.post('/api/mail', async (c) => {
     const rawBody = await c.req.text();
     
@@ -144,17 +174,13 @@ app.post('/api/mail', async (c) => {
         return c.json({ error: 'Timestamp out of window' }, 403);
     }
 
-    const senderUser = await c.env.DB.prepare(
-        'SELECT sig_pubkey FROM users WHERE username = ?'
-    ).bind(sender).first();
+    const senderUser = await getPubkeyForUser(sender, c);
     
     if (!senderUser) {
         return c.json({ error: 'Sender not registered' }, 401);
     }
 
-    const recipientUser = await c.env.DB.prepare(
-        'SELECT kem_pubkey FROM users WHERE username = ?'
-    ).bind(recipient).first();
+    const recipientUser = await getPubkeyForUser(recipient, c);
 
     if (!recipientUser) {
         return c.json({ error: 'Recipient not found' }, 404);
@@ -222,6 +248,14 @@ app.post('/api/mail', async (c) => {
         );
     }
 
+    const suffix = `@${c.env.INSTANCE_DOMAIN}`;
+    const dbSender = sender.endsWith(suffix)
+        ? sender.slice(0, -suffix.length)
+        : sender;
+    const dbRecipient = recipient.endsWith(suffix)
+        ? recipient.slice(0, -suffix.length)
+        : recipient;
+
     try {
         await c.env.DB.prepare(
             'INSERT INTO mail (mail_id, sender, recipient, ' +
@@ -229,9 +263,22 @@ app.post('/api/mail', async (c) => {
             'enc_body, size, signature, timestamp) ' +
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).bind(
-            mail_id, sender, recipient, enc_key_sender, enc_key_recipient,
-            enc_subject, enc_body, size, signature, serverTs
+            mail_id, dbSender, dbRecipient, enc_key_sender,
+            enc_key_recipient, enc_subject, enc_body, size, 
+            signature, serverTs
         ).run();
+
+        const recipientDomain = recipient.includes('@')
+            ? recipient.split('@')[1]
+            : c.env.INSTANCE_DOMAIN;
+        if (recipientDomain !== c.env.INSTANCE_DOMAIN) {
+            const forwardReq = fetch(`https://${recipientDomain}/api/mail`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: rawBody
+            }).catch(e => console.error('Failed to forward mail:', e));
+            c.executionCtx.waitUntil(forwardReq);
+        }
 
         return c.json({ message: 'Mail sent', id: mail_id }, 201);
     } catch (e) {
@@ -364,7 +411,40 @@ app.get('/api/mail/:id', async (c) => {
 });
 
 app.get('/api/pubkey/:username', async (c) => {
-    const username = c.req.param('username');
+    let username = c.req.param('username');
+
+    if (username.includes('@')) {
+        const [localUser, domain] = username.split('@');
+        if (domain !== c.env.INSTANCE_DOMAIN) {
+            if (c.env.FEDERATION_ENABLED !== 'true' &&
+            c.env.FEDERATION_ENABLED !== true) {
+                return c.json(
+                    { error: 'Federation disabled' },
+                    403
+                );
+            }
+            try {
+                const resp = await fetch(
+                    `https://${domain}/api/pubkey/${localUser}`
+                );
+                if (!resp.ok) {
+                    return c.json(
+                        { error: 'External user not found' },
+                        resp.status
+                    );
+                }
+                const data = await resp.json();
+                return c.json(data, 200);
+            } catch (e) {
+                return c.json(
+                    { error: 'Failed to connect' },
+                    502
+                );
+            }
+        }
+        username = localUser;
+    }
+
     const user = await c.env.DB.prepare(
         'SELECT kem_pubkey, sig_pubkey FROM users WHERE username = ?'
     )

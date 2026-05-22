@@ -718,8 +718,31 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
     
     /* TODO: implement the sender name logic properly (requires reading 
      * config or local state for the username) */
+    char sender_buf[256];
     const char *sender = ctx->username;
     
+    if (strchr(recipient, '@') != NULL) {
+        const char *domain_start = strstr(ctx->instance_url, "://");
+        if (domain_start) {
+            domain_start += 3;
+        } else {
+            domain_start = ctx->instance_url;
+        }
+        // Extract up to the next slash or end of string
+        char domain[128] = {0};
+        const char *slash = strchr(domain_start, '/');
+        if (slash) {
+            size_t len = slash - domain_start;
+            if (len >= sizeof(domain)) len = sizeof(domain) - 1;
+            strncpy(domain, domain_start, len);
+        } else {
+            strncpy(domain, domain_start, sizeof(domain) - 1);
+        }
+
+        snprintf(sender_buf, sizeof(sender_buf), "%s@%s", ctx->username, domain);
+        sender = sender_buf;
+    }
+
     cJSON *signed_obj = cJSON_CreateObject();
     cJSON_AddStringToObject(signed_obj, "sender", sender);
     cJSON_AddStringToObject(signed_obj, "recipient", recipient);
