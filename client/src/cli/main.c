@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include "shyake.h"
+#include "display.h"
 
 int cmd_init(const char *config_dir);
 
@@ -421,7 +422,7 @@ int main(int argc, char *argv[])
         int is_list = (strcmp(arg, "inbox") == 0 ||
                        strcmp(arg, "sent") == 0);
 
-        shyake_check_opts chk_opts = {0};
+        cli_render_opts ro = {0};
         if (is_list) {
             static struct option check_options[] = {
                 {"count", no_argument, 0, 'C'},
@@ -435,10 +436,10 @@ int main(int argc, char *argv[])
             while ((opt = getopt_long(argc, argv, "", check_options,
                                       &opt_idx)) != -1) {
                 switch (opt) {
-                    case 'C': chk_opts.count_only = 1; break;
-                    case 'J': chk_opts.json_out = 1; break;
-                    case 'S': chk_opts.csv_out = 1; break;
-                    case 'H': chk_opts.no_header = 1; break;
+                    case 'C': ro.count_only = 1; break;
+                    case 'J': ro.json_out = 1; break;
+                    case 'S': ro.csv_out = 1; break;
+                    case 'H': ro.no_header = 1; break;
                     default: break;
                 }
             }
@@ -447,7 +448,6 @@ int main(int argc, char *argv[])
         const char *inst = app_cfg->instance;
         const char *user = app_cfg->username;
 
-        
         if (!inst || !user) {
             fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
@@ -467,12 +467,27 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret;
+        int ret = 0;
+
         if (is_list) {
-            ret = shyake_check(ctx, arg, &chk_opts);
+            ro.no_color = cfg.no_color;
+            ro.plain    = cfg.plain;
+            shyake_mail_list *list = shyake_check(ctx, arg);
+            if (list) {
+                cli_render_mail_list(list, &ro);
+                shyake_free_mail_list(list);
+            } else {
+                ret = -1;
+            }
         } else {
-            /* check <id> directly */
-            ret = shyake_check_one(ctx, arg);
+            /* check <id> metadata view */
+            shyake_mail_detail *d = shyake_check_one(ctx, arg);
+            if (d) {
+                cli_render_mail_header(d, cfg.no_color);
+                shyake_free_mail_detail(d);
+            } else {
+                ret = -1;
+            }
         }
 
         shyake_free_ctx(ctx);
@@ -534,7 +549,14 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_fetch(ctx, mail_id, raw);
+        int ret = 0;
+        shyake_mail_detail *d = shyake_fetch(ctx, mail_id);
+        if (d) {
+            cli_render_mail_detail(d, raw, cfg.no_color, cfg.plain);
+            shyake_free_mail_detail(d);
+        } else {
+            ret = -1;
+        }
 
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
@@ -671,7 +693,27 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_fingerprint(ctx, target_user, do_update);
+        int ret = 0;
+        int is_self = (target_user == NULL);
+
+        if (is_self)
+            printf("Fingerprint for %s (local):\n", user);
+        else
+            printf("Fetching public key for %s...\n", target_user);
+
+        shyake_fp_result *fp = shyake_fingerprint(
+            ctx, target_user, do_update);
+        if (fp) {
+            cli_render_fingerprint(
+                is_self ? user : target_user, fp, is_self);
+            if (!is_self && do_update)
+                printf("\nSuccessfully updated known_hosts for %s.\n",
+                       target_user);
+            shyake_free_fp_result(fp);
+        } else {
+            fprintf(stderr, "Failed to fetch public key.\n");
+            ret = -1;
+        }
 
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
