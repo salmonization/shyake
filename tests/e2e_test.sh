@@ -425,7 +425,85 @@ else
 fi
 
 # ------------------------------------------------------------------ #
-section "15. Anti-replay: stale timestamp rejected"
+section "15. KEY_MISMATCH (409): recipient rotated after key cached"
+# ------------------------------------------------------------------ #
+
+# Setup: two fresh users D and E
+DIR_D="$TMPDIR_ROOT/acct_d"
+DIR_E="$TMPDIR_ROOT/acct_e"
+USER_D="tstd${TS}"
+USER_E="tste${TS}"
+"$SHYAKE" init -c "$DIR_D" > /dev/null 2>&1 || true
+"$SHYAKE" init -c "$DIR_E" > /dev/null 2>&1 || true
+sh_run "$DIR_D" register -u "$USER_D" -i "$INSTANCE" > /dev/null 2>&1 || true
+sh_run "$DIR_E" register -u "$USER_E" -i "$INSTANCE" > /dev/null 2>&1 || true
+
+# D sends to E — E's pubkey fingerprint gets cached in D's known_hosts
+echo "first mail" | sh_run "$DIR_D" send -t "$USER_E" \
+    -s "Cache E key" > /dev/null 2>&1 || true
+
+# E rotates keys — server now has a new pubkey for E
+sh_run "$DIR_E" rotate > /dev/null 2>&1 || true
+
+# D sends to E again — expects failure: local fingerprint mismatch
+set +e
+out_mismatch=$(echo "after rotate" | sh_run "$DIR_D" send -t "$USER_E" \
+    -s "Should fail" 2>&1)
+rc_mismatch=$?
+set -e
+assert_exit "409 path: send exits non-zero after key rotation" 1 "$rc_mismatch"
+assert_contains "409 path: FATAL key-changed message" \
+    "Remote public key of recipient has changed" "$out_mismatch"
+
+# After --update, D can send again
+sh_run "$DIR_D" fingerprint "$USER_E" --update > /dev/null 2>&1 || true
+out_ok=$(echo "after update" | sh_run "$DIR_D" send -t "$USER_E" \
+    -s "After trust update" 2>&1)
+assert_exit "409 path: send succeeds after fingerprint --update" 0 "$?"
+
+# ------------------------------------------------------------------ #
+section "16. USER_DESTROYED (410): send to destroyed account"
+# ------------------------------------------------------------------ #
+
+# Setup: two fresh users F and G
+DIR_F="$TMPDIR_ROOT/acct_f"
+DIR_G="$TMPDIR_ROOT/acct_g"
+USER_F="tstf${TS}"
+USER_G="tstg${TS}"
+"$SHYAKE" init -c "$DIR_F" > /dev/null 2>&1 || true
+"$SHYAKE" init -c "$DIR_G" > /dev/null 2>&1 || true
+sh_run "$DIR_F" register -u "$USER_F" -i "$INSTANCE" > /dev/null 2>&1 || true
+sh_run "$DIR_G" register -u "$USER_G" -i "$INSTANCE" > /dev/null 2>&1 || true
+
+# G sends to F — F's pubkey cached in G's known_hosts
+echo "initial mail" | sh_run "$DIR_G" send -t "$USER_F" \
+    -s "Cache F key" > /dev/null 2>&1 || true
+
+# F destroys account — server clears F's pubkeys
+echo "$USER_F" | sh_run "$DIR_F" destroy > /dev/null 2>&1 || true
+
+# G tries to send to F — expects failure (destroyed user)
+set +e
+out_destroyed=$(echo "to destroyed" | sh_run "$DIR_G" send -t "$USER_F" \
+    -s "Should fail" 2>&1)
+rc_destroyed=$?
+set -e
+assert_exit "410 path: send exits non-zero to destroyed user" 1 "$rc_destroyed"
+assert_not_contains "410 path: mail not sent" "sent" "$out_destroyed"
+# Accept server-side 410 or client-side empty-key mismatch detection
+if echo "$out_destroyed" | grep -qF "no longer exists"; then
+    echo -e "  ${GREEN}PASS${NC}  410 path: server FATAL message present"
+    PASS=$((PASS + 1))
+elif echo "$out_destroyed" | grep -qF "changed"; then
+    echo -e "  ${GREEN}PASS${NC}  410 path: client detected cleared key as mismatch"
+    PASS=$((PASS + 1))
+else
+    echo -e "  ${RED}FAIL${NC}  410 path: unexpected error output: $out_destroyed"
+    FAIL=$((FAIL + 1))
+fi
+
+# ------------------------------------------------------------------ #
+section "17. Anti-replay: stale timestamp rejected"
 # ------------------------------------------------------------------ #
 
 STALE_TS=$(date -v-10M +%s 2>/dev/null || date --date="10 minutes ago" +%s)

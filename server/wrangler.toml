@@ -19,4 +19,5 @@ migrations_dir = "migrations"
 [[rules]]
 type = "CompiledWasm"
 globs = ["**/*.wasm"]
+fallthrough = true
 fallbacks = []

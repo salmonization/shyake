@@ -68,7 +68,7 @@ if (Math.abs(serverTs - clientTs) > 300) {
 }
 
 // Initialize the WASM module for Cloudflare Workers
-await initWasm(wasmModule);
+await initWasm({ module_or_path: wasmModule });
 
 // 4. Verify Signature
 try {
@@ -209,7 +209,7 @@ app.post('/api/mail', async (c) => {
         return c.json({ error: 'KEY_MISMATCH' }, 409);
     }
 
-    await initWasm(wasmModule);
+    await initWasm({ module_or_path: wasmModule });
     try {
         const signedData = {
             sender, recipient, recipient_kem_fingerprint,
@@ -323,7 +323,7 @@ app.get('/api/mail', async (c) => {
         return c.json({ error: 'User not found' }, 401);
     }
 
-    await initWasm(wasmModule);
+    await initWasm({ module_or_path: wasmModule });
     try {
         const message =
             `GET:/api/mail?type=${type}:${username}:${timestamp}`;
@@ -385,7 +385,7 @@ app.get('/api/mail/:id', async (c) => {
         return c.json({ error: 'User not found' }, 401);
     }
 
-    await initWasm(wasmModule);
+    await initWasm({ module_or_path: wasmModule });
     try {
         const message = `GET:/api/mail/${id}:${username}:${timestamp}`;
         const msgBytes = new TextEncoder().encode(message);
@@ -490,7 +490,7 @@ app.delete('/api/mail/:id', async (c) => {
     ).bind(username).first();
     if (!user) return c.json({ error: 'User not found' }, 401);
 
-    await initWasm(wasmModule);
+    await initWasm({ module_or_path: wasmModule });
     try {
         const message =
             `DELETE:/api/mail/${id}:${username}:${timestamp}`;
@@ -541,7 +541,7 @@ async function handleBlock(
     ).bind(username).first();
     if (!user) return c.json({ error: 'User not found' }, 401);
 
-    await initWasm(wasmModule);
+    await initWasm({ module_or_path: wasmModule });
     const method = unblock ? 'DELETE' : 'POST';
     try {
         const message =
@@ -609,7 +609,7 @@ app.post('/api/rotate', async (c) => {
         );
     }
 
-    await initWasm(wasmModule);
+    await initWasm({ module_or_path: wasmModule });
     try {
         const message = `POST:/api/rotate:${username}:${timestamp}`;
         const msgBytes = new TextEncoder().encode(message);
@@ -687,7 +687,7 @@ app.delete('/api/destroy', async (c) => {
         );
     }
 
-    await initWasm(wasmModule);
+    await initWasm({ module_or_path: wasmModule });
     try {
         const message = `DELETE:/api/destroy:${username}:${timestamp}`;
         const msgBytes = new TextEncoder().encode(message);
