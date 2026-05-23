@@ -139,7 +139,9 @@ read_config(const char *config_dir)
 
 
 static int
-update_config_user_and_instance(const char *config_dir, const char *username, const char *instance)
+update_config_user_and_instance(const char *config_dir,
+                                const char *username,
+                                const char *instance)
 {
     // update INSTANCE key in config file in-place
     char path[512];
@@ -172,7 +174,9 @@ update_config_user_and_instance(const char *config_dir, const char *username, co
         if (strcmp(key, "INSTANCE") == 0) {
             free(lines[i]);
             char new_line[1024];
-            snprintf(new_line, sizeof(new_line), "INSTANCE=%s\nUSERNAME=%s\n", instance, username);
+            snprintf(new_line, sizeof(new_line),
+                     "INSTANCE=%s\nUSERNAME=%s\n",
+                     instance, username);
             lines[i] = strdup(new_line);
             has_instance = 1;
         } else if (strcmp(key, "USERNAME") == 0) {
@@ -385,7 +389,8 @@ int main(int argc, char *argv[])
 
         
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr, 
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -449,7 +454,8 @@ int main(int argc, char *argv[])
         const char *user = app_cfg->username;
 
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr,
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -531,7 +537,8 @@ int main(int argc, char *argv[])
 
         
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr,
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -577,7 +584,8 @@ int main(int argc, char *argv[])
 
         
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr,
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -612,7 +620,8 @@ int main(int argc, char *argv[])
 
         
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr,
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -639,7 +648,8 @@ int main(int argc, char *argv[])
 
         
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr,
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -678,7 +688,8 @@ int main(int argc, char *argv[])
 
         
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr,
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -749,7 +760,8 @@ int main(int argc, char *argv[])
 
         
         if (!inst || !user) {
-            fprintf(stderr, "Missing INSTANCE or USERNAME in config file.\n");
+            fprintf(stderr,
+                    "Missing INSTANCE or USERNAME in config file.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;

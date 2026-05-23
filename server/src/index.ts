@@ -37,8 +37,12 @@ app.post('/api/register', async (c) => {
     }
 
     const body = await c.req.json();
-    const { username, kem_pubkey, sig_pubkey, timestamp, signature, pow } =
-        body;
+    const { username,
+            kem_pubkey,
+            sig_pubkey,
+            timestamp,
+            signature,
+            pow } = body;
 
     if (!username || !kem_pubkey || !sig_pubkey || !timestamp ||
         !signature || !pow) {
@@ -272,11 +276,14 @@ app.post('/api/mail', async (c) => {
             ? recipient.split('@')[1]
             : c.env.INSTANCE_DOMAIN;
         if (recipientDomain !== c.env.INSTANCE_DOMAIN) {
-            const forwardReq = fetch(`https://${recipientDomain}/api/mail`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: rawBody
-            }).catch(e => console.error('Failed to forward mail:', e));
+            const forwardReq = fetch(
+                `https://${recipientDomain}/api/mail`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: rawBody
+                }
+            ).catch(e => console.error('Failed to forward mail:', e));
             c.executionCtx.waitUntil(forwardReq);
         }
 
@@ -318,7 +325,8 @@ app.get('/api/mail', async (c) => {
 
     await initWasm(wasmModule);
     try {
-        const message = `GET:/api/mail?type=${type}:${username}:${timestamp}`;
+        const message =
+            `GET:/api/mail?type=${type}:${username}:${timestamp}`;
         const msgBytes = new TextEncoder().encode(message);
 
         const sigUrl = toBase64Url(signature);
@@ -639,7 +647,10 @@ app.post('/api/rotate', async (c) => {
             'DELETE FROM mail WHERE sender = ? OR recipient = ?'
         ).bind(username, username).run();
 
-        return c.json({ message: 'Keys rotated and old mails deleted' }, 200);
+        return c.json(
+            { message: 'Keys rotated and old mails deleted' },
+            200
+        );
     } catch (e) {
         return c.json({ error: 'Database error' }, 500);
     }
