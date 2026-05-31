@@ -241,6 +241,11 @@ int main(int argc, char *argv[])
 
     const char *cmd = argv[1];
 
+    if (strcmp(cmd, "version") == 0) {
+        printf("shyake v0.1.0-rc.1\n");
+        return EXIT_SUCCESS;
+    }
+
     if (strcmp(cmd, "init") == 0) {
         int ret = cmd_init(global_config_dir);
         return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

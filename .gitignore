@@ -3,6 +3,7 @@
 
 client/obj/
 client/bin/
+client/lib/
 
 node_modules/
 dist/
