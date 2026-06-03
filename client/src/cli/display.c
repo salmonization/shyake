@@ -10,7 +10,7 @@
 #include "display.h"
 
 /* ------------------------------------------------------------------ */
-/* Pager                                                                */
+/* Pager                                                              */
 /* ------------------------------------------------------------------ */
 
 static int pager_pid    = -1;
@@ -61,7 +61,7 @@ cli_wait_pager(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Terminal width                                                        */
+/* Terminal width                                                     */
 /* ------------------------------------------------------------------ */
 
 int
@@ -75,7 +75,7 @@ cli_get_terminal_width(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Word wrap                                                            */
+/* Word wrap                                                          */
 /* ------------------------------------------------------------------ */
 
 void
@@ -110,7 +110,7 @@ cli_print_word_wrap(const char *text, int indent, int width)
 }
 
 /* ------------------------------------------------------------------ */
-/* Fingerprint display                                                  */
+/* Fingerprint display                                                */
 /* ------------------------------------------------------------------ */
 
 void
@@ -197,7 +197,7 @@ cli_render_fingerprint(const char *label, const shyake_fp_result *r,
 }
 
 /* ------------------------------------------------------------------ */
-/* Mail list rendering                                                  */
+/* Mail list rendering                                                */
 /* ------------------------------------------------------------------ */
 
 void
@@ -247,7 +247,7 @@ cli_render_mail_list(const shyake_mail_list *list,
     if (opts->csv_out) {
         if (!opts->no_header)
             printf("Mail ID,%s,Subject,Size,Date\n",
-                   is_sent ? "Recipient" : "Sender");
+                   is_sent ? "To" : "From");
         for (int i = 0; i < count; i++) {
             shyake_mail_entry *e = &list->entries[i];
             char escaped[2048] = {0};
@@ -268,7 +268,7 @@ cli_render_mail_list(const shyake_mail_list *list,
         cli_setup_pager(opts->plain);
 
     int w_id  = 7;
-    int w_snd = is_sent ? 9 : 6;
+    int w_snd = is_sent ? 2 : 4;
     int w_sub = 7;
     int w_sz  = 4;
     int w_dt  = 4;
@@ -302,7 +302,7 @@ cli_render_mail_list(const shyake_mail_list *list,
     const char *c_mg   = opts->no_color ? "" : "\033[35m";
     const char *c_rs   = opts->no_color ? "" : "\033[0m";
 
-    const char *col2_hdr = is_sent ? "Recipient" : "Sender";
+    const char *col2_hdr = is_sent ? "To" : "From";
 
     if (!opts->no_header) {
         if (opts->no_color) {
@@ -364,7 +364,7 @@ cli_render_mail_list(const shyake_mail_list *list,
 }
 
 /* ------------------------------------------------------------------ */
-/* Mail detail (fetch --raw or normal)                                  */
+/* Mail detail (fetch --raw or normal)                                */
 /* ------------------------------------------------------------------ */
 
 void
@@ -401,7 +401,7 @@ cli_render_mail_detail(const shyake_mail_detail *d,
 }
 
 /* ------------------------------------------------------------------ */
-/* Mail header view (check <id>)                                        */
+/* Mail header view (check <id>)                                      */
 /* ------------------------------------------------------------------ */
 
 void
