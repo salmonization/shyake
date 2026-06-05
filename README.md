@@ -48,11 +48,11 @@ shyake version
 # initialize local config and generate key pairs
 shyake init
 
-# register on an instance
-shyake register -u <username> -i https://shyake.eee.coffee
+# register on an instance, -u for username
+shyake register -u salmon -i https://shyake.eee.coffee
 ```
 
-Config is stored at `~/.config/shyake/`.
+Configuration is stored at `~/.config/shyake/`.
 
 You can create multiple profiles by specify a directory when init:
 
@@ -60,8 +60,8 @@ You can create multiple profiles by specify a directory when init:
 shyake init -c path/to/your/dir
 ```
 
-And in that case you need always add `-c` option when you
-want to use this profile.
+And in that case you need always add `-c` option when you want to use
+this profile.
 
 **Check command**:
 
@@ -75,52 +75,67 @@ shyake check fQBjZnvJ56
 **Send command**:
 
 ```sh
-shyake -s "subject" -t recipient < body.txt
-# first line of the input file will be the subject if -s is missing
-shyake -t <recipient> < content.txt
-# if you want to use heredoc
-# (please be careful of your shell history)
-shyake -s "subject" -t recipient <<EOF
+shyake -s "This is the subject" -t flat_white < body.txt
+```
+
+First line of the input file will be the subject if `-s` is missing.
+
+```sh
+shyake -t flat_white < content.txt
+```
+
+You can also use heredoc, but please be careful of your shell history.
+
+```sh
+shyake -s "This is the subject" -t flat_white <<EOF
 ```
 
 **Fetch command**:
 
+This will fetch a piece of mail and decrypt it.
+
 ```sh
-# fetch a piece of mail and decrypt it
 shyake fetch fQBjZnvJ56
 ```
 
 **Fingerprint command**:
 
+To display your own fingerprint:
+
 ```sh
-# display your own fingerprint
 shyake fingerprint
-# check fingerprint of your communicators
-shyake fingerprint
+```
+
+To check fingerprints of your communicators:
+
+```sh
+shyake fingerprint flat_white
 ```
 
 **Burn command**:
 
+This will delete a piece of mail.
+
 ```sh
-# this will delete a piece of mail
 shyake burn fQBjZnvJ56
 ```
 
 **Rotate command**:
 
+This will rotate your key pairs and clear all MESSAGES sent to or from you.
+
 ```sh
-# rotate your key pairs and
-# your mail will be cleared at this point
 shyake rotate
 ```
 
 **Destroy command**:
 
+This will delete your local configuration and key pairs, and will also
+destruct your account on the instance. All MESSAGES sent to or from you
+will be cleared. Your username will be permanently locked and cannot be
+registered again on this instance.
+
 ```sh
-# this will delete your local config and key pairs 
-# and destruct your account on the instance.
-# all messages sent to or from you will be cleared.
-# your username will be locked forever
 shyake destroy
 ```
 
