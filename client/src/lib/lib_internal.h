@@ -12,9 +12,6 @@ struct shyake_ctx {
     char *instance_url;
     char *config_dir;
     char *username;
-    char *time_format;
-    char *time_format_recent;
-    char *check_columns;
     int plain;
     int debug;
     int no_color;

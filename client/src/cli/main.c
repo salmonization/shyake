@@ -46,6 +46,7 @@ typedef struct {
     char *time_format_recent;
     char *check_columns;
     int no_color;
+    int tz_hours;   /* UTC offset in hours, or TZ_AUTO */
 } app_config;
 
 static char*
@@ -85,6 +86,7 @@ read_config(const char *config_dir)
     app_config *cfg = calloc(1, sizeof(app_config));
     if (!cfg)
         return NULL;
+    cfg->tz_hours = TZ_AUTO; /* default: system localtime */
 
     char path[512];
     snprintf(path, sizeof(path), "%s/config", config_dir);
@@ -130,6 +132,12 @@ read_config(const char *config_dir)
             cfg->check_columns = strdup(val);
         } else if (strcmp(key, "NO_COLOR") == 0) {
             cfg->no_color = atoi(val);
+        } else if (strcmp(key, "TIME_ZONE") == 0) {
+            /* auto = system localtime; integer = UTC offset hours */
+            if (strcmp(val, "auto") == 0 || val[0] == '\0')
+                cfg->tz_hours = TZ_AUTO;
+            else
+                cfg->tz_hours = atoi(val);
         }
     }
     fclose(f);
@@ -469,9 +477,6 @@ int main(int argc, char *argv[])
             .config_dir = config_dir,
             .instance_url = inst,
             .username = user,
-            .time_format = app_cfg->time_format,
-            .time_format_recent = app_cfg->time_format_recent,
-            .check_columns = app_cfg->check_columns,
             .plain = global_plain,
             .debug = global_debug,
             .no_color = global_no_color || app_cfg->no_color
@@ -481,8 +486,11 @@ int main(int argc, char *argv[])
         int ret = 0;
 
         if (is_list) {
-            ro.no_color = cfg.no_color;
-            ro.plain    = cfg.plain;
+            ro.no_color        = cfg.no_color;
+            ro.plain           = cfg.plain;
+            ro.tz_hours        = app_cfg->tz_hours;
+            ro.time_fmt        = app_cfg->time_format;
+            ro.time_fmt_recent = app_cfg->time_format_recent;
             shyake_mail_list *list = shyake_check(ctx, arg);
             if (list) {
                 cli_render_mail_list(list, &ro);
@@ -494,7 +502,10 @@ int main(int argc, char *argv[])
             /* check <id> metadata view */
             shyake_mail_detail *d = shyake_check_one(ctx, arg);
             if (d) {
-                cli_render_mail_header(d, cfg.no_color);
+                cli_render_mail_header(d, cfg.no_color,
+                                       app_cfg->tz_hours,
+                                       app_cfg->time_format,
+                                       app_cfg->time_format_recent);
                 shyake_free_mail_detail(d);
             } else {
                 ret = -1;
@@ -540,7 +551,6 @@ int main(int argc, char *argv[])
         const char *inst = app_cfg->instance;
         const char *user = app_cfg->username;
 
-        
         if (!inst || !user) {
             fprintf(stderr,
                     "Missing INSTANCE or USERNAME in config file.\n");
@@ -552,9 +562,6 @@ int main(int argc, char *argv[])
             .config_dir = config_dir,
             .instance_url = inst,
             .username = user,
-            .time_format = app_cfg->time_format,
-            .time_format_recent = app_cfg->time_format_recent,
-            .check_columns = app_cfg->check_columns,
             .plain = global_plain,
             .debug = global_debug,
             .no_color = global_no_color || app_cfg->no_color
@@ -564,7 +571,10 @@ int main(int argc, char *argv[])
         int ret = 0;
         shyake_mail_detail *d = shyake_fetch(ctx, mail_id);
         if (d) {
-            cli_render_mail_detail(d, raw, cfg.no_color, cfg.plain);
+            cli_render_mail_detail(d, raw, cfg.no_color, cfg.plain,
+                                   app_cfg->tz_hours,
+                                   app_cfg->time_format,
+                                   app_cfg->time_format_recent);
             shyake_free_mail_detail(d);
         } else {
             ret = -1;

@@ -12,9 +12,6 @@ typedef struct {
     const char *instance_url;
     const char *config_dir;
     const char *username;
-    const char *time_format;
-    const char *time_format_recent;
-    const char *check_columns;
     int plain;
     int debug;
     int no_color;
@@ -45,12 +42,11 @@ int shyake_send(shyake_ctx *ctx, const char *recipient,
 
 typedef struct {
     char *mail_id;
-    char *party;    /* inbox: sender; sent: recipient */
-    char *subject;  /* decrypted, NULL if failed */
-    char *size_str;
-    char *date;
-    int is_large;
-    int is_sent;    /* 1 if from sent box */
+    char *party;       /* inbox: sender; sent: recipient (raw string) */
+    char *subject;     /* decrypted, NULL if failed */
+    int size;          /* plaintext byte count */
+    int64_t timestamp; /* UNIX timestamp seconds */
+    int is_sent;       /* 1 if from sent box */
 } shyake_mail_entry;
 
 typedef struct {
@@ -74,10 +70,10 @@ typedef struct {
     char *mail_id;
     char *sender;
     char *recipient;
-    char *subject;  /* decrypted, NULL if failed */
-    char *body;     /* decrypted, NULL if failed */
-    char *date;
-    int size;
+    char *subject;     /* decrypted, NULL if failed */
+    char *body;        /* decrypted, NULL if failed */
+    int64_t timestamp; /* UNIX timestamp seconds */
+    int size;          /* plaintext byte count */
 } shyake_mail_detail;
 
 void shyake_free_mail_detail(shyake_mail_detail *d);

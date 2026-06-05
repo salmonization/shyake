@@ -117,12 +117,6 @@ shyake_init_ctx(const shyake_config *config)
         ctx->instance_url = strdup(config->instance_url);
     if (config->username)
         ctx->username = strdup(config->username);
-    if (config->time_format)
-        ctx->time_format = strdup(config->time_format);
-    if (config->time_format_recent)
-        ctx->time_format_recent = strdup(config->time_format_recent);
-    if (config->check_columns)
-        ctx->check_columns = strdup(config->check_columns);
 
     ctx->plain    = config->plain;
     ctx->debug    = config->debug;
@@ -140,9 +134,6 @@ shyake_free_ctx(shyake_ctx *ctx)
     free(ctx->config_dir);
     free(ctx->instance_url);
     free(ctx->username);
-    free(ctx->time_format);
-    free(ctx->time_format_recent);
-    free(ctx->check_columns);
     free(ctx);
     curl_global_cleanup();
 }

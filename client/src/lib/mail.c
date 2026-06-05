@@ -8,42 +8,6 @@
 #include "vendor/cJSON/cJSON.h"
 #include "lib_internal.h"
 
-/* format helpers (private to this file) */
-
-static char*
-fmt_sender_local(const char *party)
-{
-    // strip domain suffix, keep trailing @
-    char *dup = strdup(party);
-    char *at = strchr(dup, '@');
-    if (at)
-        at[1] = '\0';
-    return dup;
-}
-
-static void
-fmt_size(char *buf, size_t buf_len, int size)
-{
-    if (size >= 1024)
-        snprintf(buf, buf_len, "%dK", size / 1024);
-    else
-        snprintf(buf, buf_len, "%d", size);
-}
-
-static char*
-fmt_date(int ts, const char *fmt, const char *fmt_recent)
-{
-    time_t t = ts;
-    struct tm *tmi = localtime(&t);
-    char *buf = malloc(64);
-    time_t now = time(NULL);
-    const char *f = fmt ? fmt : "%Y-%m-%d %H:%M";
-    if (fmt_recent && (now - t < 180 * 24 * 3600))
-        f = fmt_recent;
-    strftime(buf, 64, f, tmi);
-    return buf;
-}
-
 /* ------------------------------------------------------------------ */
 
 void
@@ -54,8 +18,6 @@ shyake_free_mail_list(shyake_mail_list *list)
         free(list->entries[i].mail_id);
         free(list->entries[i].party);
         free(list->entries[i].subject);
-        free(list->entries[i].size_str);
-        free(list->entries[i].date);
     }
     free(list->entries);
     free(list);
@@ -70,7 +32,6 @@ shyake_free_mail_detail(shyake_mail_detail *d)
     free(d->recipient);
     free(d->subject);
     free(d->body);
-    free(d->date);
     free(d);
 }
 
@@ -373,19 +334,14 @@ shyake_check(shyake_ctx *ctx, const char *type)
                             }
                         }
 
-                        char sz_buf[16];
-                        fmt_size(sz_buf, sizeof(sz_buf), sz);
-
                         shyake_mail_entry *e = &result->entries[i];
-                        e->mail_id  = strdup(id);
-                        e->party    = fmt_sender_local(party);
-                        e->subject  = sub ? sub
+                        e->mail_id   = strdup(id);
+                        e->party     = strdup(party);
+                        e->subject   = sub ? sub
                                          : strdup("(decryption failed)");
-                        e->size_str = strdup(sz_buf);
-                        e->date     = fmt_date(ts, ctx->time_format,
-                                               ctx->time_format_recent);
-                        e->is_large = (sz >= 1024);
-                        e->is_sent  = is_sent;
+                        e->size      = sz;
+                        e->timestamp = (int64_t)ts;
+                        e->is_sent   = is_sent;
                     }
                     free(ksk);
                 }
@@ -482,7 +438,7 @@ shyake_fetch(shyake_ctx *ctx, const char *mail_id)
                 result->recipient = strdup(rec);
                 result->subject   = sub;
                 result->body      = bdy;
-                result->date      = fmt_date(ts, NULL, NULL);
+                result->timestamp = (int64_t)ts;
                 result->size      = 0;
 
                 cJSON_Delete(json);
@@ -576,7 +532,7 @@ shyake_check_one(shyake_ctx *ctx, const char *mail_id)
                 result->recipient = strdup(rec);
                 result->subject   = sub;
                 result->body      = NULL;
-                result->date      = fmt_date(ts, NULL, NULL);
+                result->timestamp = (int64_t)ts;
                 result->size      = sz;
 
                 cJSON_Delete(json);

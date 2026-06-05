@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -110,6 +111,70 @@ cli_print_word_wrap(const char *text, int indent, int width)
 }
 
 /* ------------------------------------------------------------------ */
+/* Timestamp formatting with timezone support                         */
+/* ------------------------------------------------------------------ */
+
+void
+cli_format_timestamp(int64_t ts, int tz_hours,
+                     const char *fmt, const char *fmt_recent,
+                     char *buf, int buf_len)
+{
+    // convert UNIX ts to broken-down time with optional tz offset
+    const char *f = fmt ? fmt : "%Y-%m-%d %H:%M";
+    time_t t = (time_t)ts;
+
+    struct tm tmbuf;
+    struct tm *tmi;
+
+    if (tz_hours == TZ_AUTO) {
+        tmi = localtime_r(&t, &tmbuf);
+    } else {
+        /* apply manual UTC offset */
+        time_t shifted = t + (time_t)tz_hours * 3600;
+        tmi = gmtime_r(&shifted, &tmbuf);
+    }
+
+    if (!tmi) {
+        snprintf(buf, buf_len, "?");
+        return;
+    }
+
+    if (fmt_recent) {
+        time_t now = time(NULL);
+        if (now - t < 180 * 24 * 3600)
+            f = fmt_recent;
+    }
+
+    strftime(buf, buf_len, f, tmi);
+}
+
+/* ------------------------------------------------------------------ */
+/* Party / size display helpers                                        */
+/* ------------------------------------------------------------------ */
+
+void
+cli_format_party(const char *party, char *buf, int buf_len)
+{
+    // for remote parties keep username@ only
+    const char *at = strchr(party, '@');
+    if (at) {
+        int name_len = (int)(at - party);
+        snprintf(buf, buf_len, "%.*s@", name_len, party);
+    } else {
+        snprintf(buf, buf_len, "%s", party);
+    }
+}
+
+void
+cli_format_size(int size, char *buf, int buf_len)
+{
+    if (size >= 1024)
+        snprintf(buf, buf_len, "%dK", size / 1024);
+    else
+        snprintf(buf, buf_len, "%d", size);
+}
+
+/* ------------------------------------------------------------------ */
 /* Fingerprint display                                                */
 /* ------------------------------------------------------------------ */
 
@@ -168,8 +233,8 @@ void
 cli_render_fingerprint(const char *label, const shyake_fp_result *r,
                        int is_self)
 {
+    (void)label;
     if (is_self) {
-        printf("Fingerprint for %s (local):\n", label);
         cli_print_fingerprint_hex(r->remote_fp);
         cli_print_randomart(r->remote_fp);
         return;
@@ -222,6 +287,33 @@ cli_render_mail_list(const shyake_mail_list *list,
 
     int is_sent = list->count > 0 && list->entries[0].is_sent;
 
+    /* Pre-format all entries into display strings */
+    char **d_party   = calloc(count, sizeof(char *));
+    char **d_subject = calloc(count, sizeof(char *));
+    char **d_size    = calloc(count, sizeof(char *));
+    char **d_date    = calloc(count, sizeof(char *));
+
+    for (int i = 0; i < count; i++) {
+        shyake_mail_entry *e = &list->entries[i];
+
+        char pbuf[256];
+        cli_format_party(e->party, pbuf, sizeof(pbuf));
+        d_party[i] = strdup(pbuf);
+
+        d_subject[i] = e->subject ? strdup(e->subject)
+                                  : strdup("(decryption failed)");
+
+        char sbuf[16];
+        cli_format_size(e->size, sbuf, sizeof(sbuf));
+        d_size[i] = strdup(sbuf);
+
+        char dbuf[64];
+        cli_format_timestamp(e->timestamp, opts->tz_hours,
+                             opts->time_fmt, opts->time_fmt_recent,
+                             dbuf, sizeof(dbuf));
+        d_date[i] = strdup(dbuf);
+    }
+
     /* JSON output */
     if (opts->json_out) {
         cJSON *arr = cJSON_CreateArray();
@@ -229,18 +321,18 @@ cli_render_mail_list(const shyake_mail_list *list,
             shyake_mail_entry *e = &list->entries[i];
             cJSON *obj = cJSON_CreateObject();
             cJSON_AddStringToObject(obj, "mail_id", e->mail_id);
-            cJSON_AddStringToObject(obj, is_sent ? "recipient" : "sender",
-                                    e->party);
-            cJSON_AddStringToObject(obj, "subject", e->subject);
-            cJSON_AddStringToObject(obj, "size", e->size_str);
-            cJSON_AddStringToObject(obj, "date", e->date);
+            cJSON_AddStringToObject(obj,
+                is_sent ? "recipient" : "sender", d_party[i]);
+            cJSON_AddStringToObject(obj, "subject", d_subject[i]);
+            cJSON_AddStringToObject(obj, "size", d_size[i]);
+            cJSON_AddStringToObject(obj, "date", d_date[i]);
             cJSON_AddItemToArray(arr, obj);
         }
         char *out = cJSON_Print(arr);
         printf("%s\n", out);
         free(out);
         cJSON_Delete(arr);
-        return;
+        goto cleanup;
     }
 
     /* CSV output */
@@ -252,20 +344,19 @@ cli_render_mail_list(const shyake_mail_list *list,
             shyake_mail_entry *e = &list->entries[i];
             char escaped[2048] = {0};
             int p = 0;
-            for (int j = 0; e->subject[j] && p < 2040; j++) {
-                if (e->subject[j] == '"') escaped[p++] = '"';
-                escaped[p++] = e->subject[j];
+            for (int j = 0; d_subject[i][j] && p < 2040; j++) {
+                if (d_subject[i][j] == '"') escaped[p++] = '"';
+                escaped[p++] = d_subject[i][j];
             }
             printf("%s,%s,\"%s\",%s,%s\n",
-                   e->mail_id, e->party, escaped,
-                   e->size_str, e->date);
+                   e->mail_id, d_party[i], escaped,
+                   d_size[i], d_date[i]);
         }
-        return;
+        goto cleanup;
     }
 
     /* Table output */
-    if (!opts->json_out && !opts->csv_out)
-        cli_setup_pager(opts->plain);
+    cli_setup_pager(opts->plain);
 
     int w_id  = 7;
     int w_snd = is_sent ? 2 : 4;
@@ -277,13 +368,13 @@ cli_render_mail_list(const shyake_mail_list *list,
         int l;
         l = (int)strlen(list->entries[i].mail_id);
         if (l > w_id)  w_id  = l;
-        l = (int)strlen(list->entries[i].party);
+        l = (int)strlen(d_party[i]);
         if (l > w_snd) w_snd = l;
-        l = (int)strlen(list->entries[i].subject);
+        l = (int)strlen(d_subject[i]);
         if (l > w_sub) w_sub = l;
-        l = (int)strlen(list->entries[i].size_str);
+        l = (int)strlen(d_size[i]);
         if (l > w_sz)  w_sz  = l;
-        l = (int)strlen(list->entries[i].date);
+        l = (int)strlen(d_date[i]);
         if (l > w_dt)  w_dt  = l;
     }
 
@@ -331,36 +422,49 @@ cli_render_mail_list(const shyake_mail_list *list,
         shyake_mail_entry *e = &list->entries[i];
 
         char sub_trunc[512];
-        int slen = (int)strlen(e->subject);
+        int slen = (int)strlen(d_subject[i]);
         if (slen > w_sub && w_sub >= 3)
             snprintf(sub_trunc, sizeof(sub_trunc),
-                     "%.*s...", w_sub - 3, e->subject);
+                     "%.*s...", w_sub - 3, d_subject[i]);
         else
-            snprintf(sub_trunc, sizeof(sub_trunc), "%s", e->subject);
+            snprintf(sub_trunc, sizeof(sub_trunc), "%s", d_subject[i]);
 
-        const char *c_sz = e->is_large
+        int is_large = (e->size >= 1024);
+        const char *c_sz = is_large
             ? (opts->no_color ? "" : "\033[1;35m") : c_mg;
 
         printf("%s%-*s%s ", c_rs, w_id, e->mail_id, c_rs);
 
-        int len_snd = (int)strlen(e->party);
-        if (len_snd > 0 && e->party[len_snd - 1] == '@') {
-            printf("%s%.*s", c_cy, len_snd - 1, e->party);
+        int len_snd = (int)strlen(d_party[i]);
+        if (len_snd > 0 && d_party[i][len_snd - 1] == '@') {
+            printf("%s%.*s", c_cy, len_snd - 1, d_party[i]);
             printf("%s@", c_w);
         } else {
-            printf("%s%s", c_cy, e->party);
+            printf("%s%s", c_cy, d_party[i]);
         }
         printf("%s%-*s ", c_rs, w_snd - len_snd, "");
 
         printf("%s%-*s%s ", c_w, w_sub, sub_trunc, c_rs);
-        printf("%s%-*s%s ", c_sz, w_sz, e->size_str, c_rs);
-        printf("%s%s%s\n", c_w, e->date, c_rs);
+        printf("%s%-*s%s ", c_sz, w_sz, d_size[i], c_rs);
+        printf("%s%s%s\n", c_w, d_date[i], c_rs);
     }
 
     if (!opts->no_header)
         printf("\nTotal: %d item%s\n", count, count == 1 ? "" : "s");
 
     cli_wait_pager();
+
+cleanup:
+    for (int i = 0; i < count; i++) {
+        free(d_party[i]);
+        free(d_subject[i]);
+        free(d_size[i]);
+        free(d_date[i]);
+    }
+    free(d_party);
+    free(d_subject);
+    free(d_size);
+    free(d_date);
 }
 
 /* ------------------------------------------------------------------ */
@@ -369,7 +473,10 @@ cli_render_mail_list(const shyake_mail_list *list,
 
 void
 cli_render_mail_detail(const shyake_mail_detail *d,
-                       int raw, int no_color, int plain)
+                       int raw, int no_color, int plain,
+                       int tz_hours,
+                       const char *time_fmt,
+                       const char *time_fmt_recent)
 {
     if (!d) return;
 
@@ -383,11 +490,16 @@ cli_render_mail_detail(const shyake_mail_detail *d,
     const char *c_val = no_color ? "" : "\033[0m";
     int tw = cli_get_terminal_width();
 
+    char date_buf[64];
+    cli_format_timestamp(d->timestamp, tz_hours,
+                         time_fmt, time_fmt_recent,
+                         date_buf, sizeof(date_buf));
+
     const char *sub_text = d->subject ? d->subject : "(decryption failed)";
 
     printf("%sFROM:%s  %s\n", c_lbl, c_val, d->sender);
     printf("%sTO:%s    %s\n", c_lbl, c_val, d->recipient);
-    printf("%sDATE:%s  %s\n", c_lbl, c_val, d->date);
+    printf("%sDATE:%s  %s\n", c_lbl, c_val, date_buf);
     printf("%sSUBJ:%s  ", c_lbl, c_val);
     cli_print_word_wrap(sub_text, 7, tw);
     printf("\n");
@@ -405,13 +517,21 @@ cli_render_mail_detail(const shyake_mail_detail *d,
 /* ------------------------------------------------------------------ */
 
 void
-cli_render_mail_header(const shyake_mail_detail *d, int no_color)
+cli_render_mail_header(const shyake_mail_detail *d,
+                       int no_color, int tz_hours,
+                       const char *time_fmt,
+                       const char *time_fmt_recent)
 {
     if (!d) return;
 
     const char *c_lbl = no_color ? "" : "\033[1;36m";
     const char *c_rs  = no_color ? "" : "\033[0m";
     int tw = cli_get_terminal_width();
+
+    char date_buf[64];
+    cli_format_timestamp(d->timestamp, tz_hours,
+                         time_fmt, time_fmt_recent,
+                         date_buf, sizeof(date_buf));
 
     const char *sub_text = d->subject
         ? d->subject : "(decryption failed)";
@@ -421,5 +541,5 @@ cli_render_mail_header(const shyake_mail_detail *d, int no_color)
     printf("%sSUBJ:%s ", c_lbl, c_rs);
     cli_print_word_wrap(sub_text, 6, tw);
     printf("%sSIZE:%s %d\n", c_lbl, c_rs, d->size);
-    printf("%sDATE:%s %s\n", c_lbl, c_rs, d->date);
+    printf("%sDATE:%s %s\n", c_lbl, c_rs, date_buf);
 }
