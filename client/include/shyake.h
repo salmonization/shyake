@@ -21,6 +21,23 @@ typedef struct {
 shyake_ctx* shyake_init_ctx(const shyake_config *config);
 void shyake_free_ctx(shyake_ctx *ctx);
 
+/*
+ * Semantic error codes returned by lib functions.
+ * SHYAKE_OK = 0 so existing `ret == 0` checks still work.
+ */
+typedef enum {
+    SHYAKE_OK              =  0,
+    SHYAKE_ERR             = -1, /* generic / internal */
+    SHYAKE_ERR_NETWORK     = -2, /* libcurl transport failure */
+    SHYAKE_ERR_HTTP        = -3, /* unexpected HTTP status */
+    SHYAKE_ERR_KEY_MISMATCH= -4, /* HTTP 409: recipient's key rotated */
+    SHYAKE_ERR_GONE        = -5, /* HTTP 410: recipient destroyed */
+    SHYAKE_ERR_NOT_FOUND   = -6, /* HTTP 404 */
+    SHYAKE_ERR_FORBIDDEN   = -7, /* HTTP 403 */
+    SHYAKE_ERR_CRYPTO      = -8, /* crypto operation failed */
+    SHYAKE_ERR_NO_INSTANCE = -9, /* instance URL not configured */
+} shyake_err;
+
 /* Generate local ML-KEM and ML-DSA keypairs */
 int shyake_generate_keys(shyake_ctx *ctx);
 
@@ -28,15 +45,17 @@ int shyake_generate_keys(shyake_ctx *ctx);
 char* shyake_mint_pow(const char *resource, int bits);
 
 /* Registration */
-int shyake_register(shyake_ctx *ctx, const char *username);
+shyake_err shyake_register(shyake_ctx *ctx, const char *username);
 
 /*
  * Send a message.
- * Returns 0 on success, non-zero on failure.
+ * Returns SHYAKE_OK on success.
+ * Returns SHYAKE_ERR_KEY_MISMATCH if recipient's key changed.
+ * Returns SHYAKE_ERR_GONE if recipient no longer exists.
  */
-int shyake_send(shyake_ctx *ctx, const char *recipient,
-                const char *subject, const uint8_t *body,
-                size_t body_len);
+shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
+                       const char *subject, const uint8_t *body,
+                       size_t body_len);
 
 /* --- Mail list --- */
 
@@ -94,19 +113,19 @@ shyake_mail_detail* shyake_check_one(shyake_ctx *ctx, const char *mail_id);
  * Delete a mail by ID.
  * Returns 0 on success, non-zero on failure.
  */
-int shyake_burn(shyake_ctx *ctx, const char *mail_id);
+shyake_err shyake_burn(shyake_ctx *ctx, const char *mail_id);
 
 /*
  * Block or unblock a target.
  * unblock=0 to block, unblock=1 to unblock.
  */
-int shyake_block(shyake_ctx *ctx, const char *target, int unblock);
+shyake_err shyake_block(shyake_ctx *ctx, const char *target, int unblock);
 
 /* Rotate keypairs and upload to server */
-int shyake_rotate(shyake_ctx *ctx);
+shyake_err shyake_rotate(shyake_ctx *ctx);
 
 /* Destroy account and all associated data */
-int shyake_destroy(shyake_ctx *ctx);
+shyake_err shyake_destroy(shyake_ctx *ctx);
 
 /* --- Fingerprint --- */
 

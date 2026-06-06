@@ -40,6 +40,14 @@ void cli_render_fingerprint(const char *label,
                             const shyake_fp_result *r,
                             int is_self);
 
+/* Column bitmask for CHECK_COLUMNS */
+#define COL_ID      (1 << 0)
+#define COL_PARTY   (1 << 1)  /* sender (inbox) or recipient (sent) */
+#define COL_SUBJECT (1 << 2)
+#define COL_SIZE    (1 << 3)
+#define COL_DATE    (1 << 4)
+#define COL_ALL     (COL_ID | COL_PARTY | COL_SUBJECT | COL_SIZE | COL_DATE)
+
 /* Mail list rendering */
 typedef struct {
     int json_out;
@@ -49,6 +57,11 @@ typedef struct {
     int no_color;
     int plain;
     int term_width;
+    /* column order: col_order[0..col_count-1] are COL_* values
+     * in the order they should appear. col_count=0 means show all
+     * in default order. */
+    int col_order[5];
+    int col_count;
     /* timezone */
     int tz_hours;           /* offset hours, or TZ_AUTO */
     const char *time_fmt;

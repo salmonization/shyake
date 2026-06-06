@@ -37,26 +37,23 @@ shyake_free_mail_detail(shyake_mail_detail *d)
 
 /* ------------------------------------------------------------------ */
 
-int
+shyake_err
 shyake_send(shyake_ctx *ctx, const char *recipient,
             const char *subject, const uint8_t *body,
             size_t body_len)
 {
-    if (!ctx || !recipient || !body) return -1;
+    if (!ctx || !recipient || !body) return SHYAKE_ERR;
 
     /* Fetch recipient public key */
-    printf("Sending mail to %s...\n", recipient);
     char *recip_pk_b64 = fetch_recipient_pubkey(ctx, recipient);
-    if (!recip_pk_b64) {
-        fprintf(stderr, "Failed to fetch recipient public key.\n");
-        return -1;
-    }
+    if (!recip_pk_b64)
+        return SHYAKE_ERR_NETWORK;
 
     size_t recip_pk_len;
     uint8_t *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
     if (!recip_pk) {
         free(recip_pk_b64);
-        return -1;
+        return SHYAKE_ERR_CRYPTO;
     }
 
     /* Compute recipient fingerprint */
@@ -77,12 +74,8 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
             SHA256(known_pk, known_pk_len, known_fp);
             free(known_pk);
             if (memcmp(known_fp, fp_raw, SHA256_DIGEST_LENGTH) != 0) {
-                fprintf(stderr,
-                    "\nFATAL: Remote public key of recipient has changed!\n"
-                    "RUN 'shyake fingerprint <username>' to "
-                    "inspect and update trust.\n");
                 free(recip_pk_b64); free(recip_pk);
-                return -1;
+                return SHYAKE_ERR_KEY_MISMATCH;
             }
         }
     } else {
@@ -100,7 +93,7 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
     if (!my_kpk || !my_ssk) {
         free(recip_pk_b64); free(recip_pk);
         free(my_kpk); free(my_ssk);
-        return -1;
+        return SHYAKE_ERR_CRYPTO;
     }
 
     /* Generate symmetric key */
@@ -112,9 +105,8 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
         fclose(urandom);
     }
     if (read_bytes != 32) {
-        fprintf(stderr, "Failed to generate symmetric key.\n");
         free(recip_pk_b64); free(recip_pk); free(my_kpk); free(my_ssk);
-        return -1;
+        return SHYAKE_ERR_CRYPTO;
     }
 
     char *enc_subject = encrypt_to_b64(
@@ -127,11 +119,10 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
         my_kpk, my_kpk_len, sym_key);
 
     if (!enc_key_recipient || !enc_key_sender) {
-        fprintf(stderr, "Failed to encapsulate symmetric key.\n");
         free(recip_pk_b64); free(recip_pk); free(my_kpk); free(my_ssk);
         free(enc_subject); free(enc_body);
         free(enc_key_recipient); free(enc_key_sender);
-        return -1;
+        return SHYAKE_ERR_CRYPTO;
     }
 
     /* Resolve sender string */
@@ -186,7 +177,7 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
     cJSON_AddStringToObject(root, "pow", pow);
     char *payload = cJSON_PrintUnformatted(root);
 
-    int ret = 0;
+    shyake_err ret = SHYAKE_OK;
     CURL *curl = curl_easy_init();
     if (curl) {
         char url[512];
@@ -207,27 +198,18 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
 
         CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
-            fprintf(stderr, "Network error: %s\n",
-                    curl_easy_strerror(res));
-            ret = -1;
+            ret = SHYAKE_ERR_NETWORK;
         } else {
             long http_code = 0;
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
             if (http_code == 200 || http_code == 201) {
-                printf("Your mail was sent.\n");
+                ret = SHYAKE_OK;
             } else if (http_code == 409) {
-                fprintf(stderr,
-                    "\nFATAL: Remote public key of recipient has changed!\n"
-                    "RUN 'shyake fingerprint <username>' to "
-                    "inspect and update trust.\n");
-                ret = -1;
+                ret = SHYAKE_ERR_KEY_MISMATCH;
             } else if (http_code == 410) {
-                fprintf(stderr, "\nFATAL: Recipient no longer exists.\n");
-                ret = -1;
+                ret = SHYAKE_ERR_GONE;
             } else {
-                fprintf(stderr, "Send failed (HTTP %ld): %s\n",
-                        http_code, resp.data);
-                ret = -1;
+                ret = SHYAKE_ERR_HTTP;
             }
         }
 
@@ -235,8 +217,7 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
     } else {
-        fprintf(stderr, "Error: curl init failed.\n");
-        ret = -1;
+        ret = SHYAKE_ERR;
     }
 
     free(recip_pk_b64); free(recip_pk); free(my_kpk); free(my_ssk);
@@ -556,10 +537,10 @@ shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 
 /* ------------------------------------------------------------------ */
 
-int
+shyake_err
 shyake_burn(shyake_ctx *ctx, const char *mail_id)
 {
-    if (!ctx || !mail_id) return -1;
+    if (!ctx || !mail_id) return SHYAKE_ERR;
     const char *username = ctx->username;
 
     char endpoint[128];
@@ -568,11 +549,11 @@ shyake_burn(shyake_ctx *ctx, const char *mail_id)
     snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
 
     CURL *curl = curl_easy_init();
-    if (!curl) return -1;
+    if (!curl) return SHYAKE_ERR;
 
     struct curl_slist *headers = create_signed_headers(
         ctx, "DELETE", endpoint, username);
-    if (!headers) { curl_easy_cleanup(curl); return -1; }
+    if (!headers) { curl_easy_cleanup(curl); return SHYAKE_ERR; }
 
     struct curl_response resp = { .data = malloc(1), .size = 0 };
     resp.data[0] = '\0';
@@ -584,28 +565,22 @@ shyake_burn(shyake_ctx *ctx, const char *mail_id)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
 
     CURLcode res = curl_easy_perform(curl);
-    int ret = 0;
+    shyake_err ret = SHYAKE_OK;
 
     if (res == CURLE_OK) {
         long http_code;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code == 200) {
-            printf("Mail burned.\n");
+            ret = SHYAKE_OK;
         } else if (http_code == 404) {
-            fprintf(stderr, "Mail not found.\n");
-            ret = -1;
+            ret = SHYAKE_ERR_NOT_FOUND;
         } else if (http_code == 403) {
-            fprintf(stderr, "Permission denied.\n");
-            ret = -1;
+            ret = SHYAKE_ERR_FORBIDDEN;
         } else {
-            fprintf(stderr, "Failed (HTTP %ld): %s\n",
-                    http_code, resp.data);
-            ret = -1;
+            ret = SHYAKE_ERR_HTTP;
         }
     } else {
-        fprintf(stderr, "Network error: %s\n",
-                curl_easy_strerror(res));
-        ret = -1;
+        ret = SHYAKE_ERR_NETWORK;
     }
 
     free(resp.data);

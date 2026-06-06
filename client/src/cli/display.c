@@ -358,6 +358,19 @@ cli_render_mail_list(const shyake_mail_list *list,
     /* Table output */
     cli_setup_pager(opts->plain);
 
+    /* build active column list; default to all if col_count == 0 */
+    static const int def_order[] = {
+        COL_ID, COL_PARTY, COL_SUBJECT, COL_SIZE, COL_DATE
+    };
+    const int *order = (opts->col_count > 0)
+        ? opts->col_order : def_order;
+    int ncols = (opts->col_count > 0) ? opts->col_count : 5;
+
+    /* build active-column bitmask for fast membership test */
+    unsigned int active = 0;
+    for (int c = 0; c < ncols; c++) active |= (unsigned)order[c];
+
+    /* column widths */
     int w_id  = 7;
     int w_snd = is_sent ? 2 : 4;
     int w_sub = 7;
@@ -366,22 +379,37 @@ cli_render_mail_list(const shyake_mail_list *list,
 
     for (int i = 0; i < count; i++) {
         int l;
-        l = (int)strlen(list->entries[i].mail_id);
-        if (l > w_id)  w_id  = l;
-        l = (int)strlen(d_party[i]);
-        if (l > w_snd) w_snd = l;
-        l = (int)strlen(d_subject[i]);
-        if (l > w_sub) w_sub = l;
-        l = (int)strlen(d_size[i]);
-        if (l > w_sz)  w_sz  = l;
-        l = (int)strlen(d_date[i]);
-        if (l > w_dt)  w_dt  = l;
+        if (active & COL_ID) {
+            l = (int)strlen(list->entries[i].mail_id);
+            if (l > w_id)  w_id  = l;
+        }
+        if (active & COL_PARTY) {
+            l = (int)strlen(d_party[i]);
+            if (l > w_snd) w_snd = l;
+        }
+        if (active & COL_SUBJECT) {
+            l = (int)strlen(d_subject[i]);
+            if (l > w_sub) w_sub = l;
+        }
+        if (active & COL_SIZE) {
+            l = (int)strlen(d_size[i]);
+            if (l > w_sz)  w_sz  = l;
+        }
+        if (active & COL_DATE) {
+            l = (int)strlen(d_date[i]);
+            if (l > w_dt)  w_dt  = l;
+        }
     }
 
-    if (!opts->plain) {
+    if (!opts->plain && (active & COL_SUBJECT)) {
         int tw = opts->term_width > 0
             ? opts->term_width : cli_get_terminal_width();
-        int max_sub = tw - w_id - w_snd - w_sz - w_dt - 4;
+        int used = 0;
+        if (active & COL_ID)    used += w_id  + 1;
+        if (active & COL_PARTY) used += w_snd + 1;
+        if (active & COL_SIZE)  used += w_sz  + 1;
+        if (active & COL_DATE)  used += w_dt;
+        int max_sub = tw - used - 1;
         if (max_sub < 15) max_sub = 15;
         if (w_sub > max_sub) w_sub = max_sub;
     }
@@ -395,58 +423,111 @@ cli_render_mail_list(const shyake_mail_list *list,
 
     const char *col2_hdr = is_sent ? "To" : "From";
 
+    /* header row: iterate col_order */
     if (!opts->no_header) {
-        if (opts->no_color) {
-            printf("%-*s %-*s %-*s %-*s %s\n",
-                   w_id,  "Mail ID",
-                   w_snd, col2_hdr,
-                   w_sub, "Subject",
-                   w_sz,  "Size",
-                          "Date");
-        } else {
-            printf("%s", c_rs);
-            printf("%s%sMail ID%s%-*s ",
-                   c_w, ul_on, ul_off, w_id - 7, "");
-            printf("%s%s%s%s%-*s ",
-                   c_w, ul_on, col2_hdr, ul_off,
-                   w_snd - (int)strlen(col2_hdr), "");
-            printf("%s%sSubject%s%-*s ",
-                   c_w, ul_on, ul_off, w_sub - 7, "");
-            printf("%s%sSize%s%-*s ",
-                   c_w, ul_on, ul_off, w_sz - 4, "");
-            printf("%s%sDate%s\n", c_w, ul_on, ul_off);
+        if (!opts->no_color) printf("%s", c_rs);
+        for (int c = 0; c < ncols; c++) {
+            int is_last = (c == ncols - 1);
+            switch (order[c]) {
+            case COL_ID:
+                if (opts->no_color)
+                    printf("%-*s%s", w_id, "Mail ID",
+                           is_last ? "" : " ");
+                else
+                    printf("%s%sMail ID%s%-*s%s",
+                           c_w, ul_on, ul_off, w_id - 7, "",
+                           is_last ? "" : " ");
+                break;
+            case COL_PARTY:
+                if (opts->no_color)
+                    printf("%-*s%s", w_snd, col2_hdr,
+                           is_last ? "" : " ");
+                else
+                    printf("%s%s%s%s%-*s%s",
+                           c_w, ul_on, col2_hdr, ul_off,
+                           w_snd - (int)strlen(col2_hdr), "",
+                           is_last ? "" : " ");
+                break;
+            case COL_SUBJECT:
+                if (opts->no_color)
+                    printf("%-*s%s", w_sub, "Subject",
+                           is_last ? "" : " ");
+                else
+                    printf("%s%sSubject%s%-*s%s",
+                           c_w, ul_on, ul_off, w_sub - 7, "",
+                           is_last ? "" : " ");
+                break;
+            case COL_SIZE:
+                if (opts->no_color)
+                    printf("%-*s%s", w_sz, "Size",
+                           is_last ? "" : " ");
+                else
+                    printf("%s%sSize%s%-*s%s",
+                           c_w, ul_on, ul_off, w_sz - 4, "",
+                           is_last ? "" : " ");
+                break;
+            case COL_DATE:
+                if (opts->no_color)
+                    printf("Date");
+                else
+                    printf("%s%sDate%s", c_w, ul_on, ul_off);
+                break;
+            default: break;
+            }
         }
+        printf("\n");
     }
 
+    /* data rows: iterate col_order */
     for (int i = 0; i < count; i++) {
         shyake_mail_entry *e = &list->entries[i];
-
-        char sub_trunc[512];
-        int slen = (int)strlen(d_subject[i]);
-        if (slen > w_sub && w_sub >= 3)
-            snprintf(sub_trunc, sizeof(sub_trunc),
-                     "%.*s...", w_sub - 3, d_subject[i]);
-        else
-            snprintf(sub_trunc, sizeof(sub_trunc), "%s", d_subject[i]);
-
         int is_large = (e->size >= 1024);
         const char *c_sz = is_large
             ? (opts->no_color ? "" : "\033[1;35m") : c_mg;
 
-        printf("%s%-*s%s ", c_rs, w_id, e->mail_id, c_rs);
-
-        int len_snd = (int)strlen(d_party[i]);
-        if (len_snd > 0 && d_party[i][len_snd - 1] == '@') {
-            printf("%s%.*s", c_cy, len_snd - 1, d_party[i]);
-            printf("%s@", c_w);
-        } else {
-            printf("%s%s", c_cy, d_party[i]);
+        for (int c = 0; c < ncols; c++) {
+            int is_last = (c == ncols - 1);
+            switch (order[c]) {
+            case COL_ID:
+                printf("%s%-*s%s%s", c_rs, w_id, e->mail_id, c_rs,
+                       is_last ? "" : " ");
+                break;
+            case COL_PARTY: {
+                int len_snd = (int)strlen(d_party[i]);
+                if (len_snd > 0 && d_party[i][len_snd - 1] == '@') {
+                    printf("%s%.*s%s@",
+                           c_cy, len_snd - 1, d_party[i], c_w);
+                } else {
+                    printf("%s%s", c_cy, d_party[i]);
+                }
+                printf("%s%-*s%s", c_rs, w_snd - len_snd, "",
+                       is_last ? "" : " ");
+                break;
+            }
+            case COL_SUBJECT: {
+                char sub_trunc[512];
+                int slen = (int)strlen(d_subject[i]);
+                if (slen > w_sub && w_sub >= 3)
+                    snprintf(sub_trunc, sizeof(sub_trunc),
+                             "%.*s...", w_sub - 3, d_subject[i]);
+                else
+                    snprintf(sub_trunc, sizeof(sub_trunc),
+                             "%s", d_subject[i]);
+                printf("%s%-*s%s%s", c_w, w_sub, sub_trunc, c_rs,
+                       is_last ? "" : " ");
+                break;
+            }
+            case COL_SIZE:
+                printf("%s%-*s%s%s", c_sz, w_sz, d_size[i], c_rs,
+                       is_last ? "" : " ");
+                break;
+            case COL_DATE:
+                printf("%s%s%s", c_w, d_date[i], c_rs);
+                break;
+            default: break;
+            }
         }
-        printf("%s%-*s ", c_rs, w_snd - len_snd, "");
-
-        printf("%s%-*s%s ", c_w, w_sub, sub_trunc, c_rs);
-        printf("%s%-*s%s ", c_sz, w_sz, d_size[i], c_rs);
-        printf("%s%s%s\n", c_w, d_date[i], c_rs);
+        printf("\n");
     }
 
     if (!opts->no_header)

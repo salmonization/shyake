@@ -6,10 +6,10 @@
 #include "vendor/cJSON/cJSON.h"
 #include "lib_internal.h"
 
-int
+shyake_err
 shyake_block(shyake_ctx *ctx, const char *target, int unblock)
 {
-    if (!ctx || !target) return -1;
+    if (!ctx || !target) return SHYAKE_ERR;
     const char *username = ctx->username;
     const char *method = unblock ? "DELETE" : "POST";
     const char *endpoint = "/api/block";
@@ -18,11 +18,11 @@ shyake_block(shyake_ctx *ctx, const char *target, int unblock)
     snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
 
     CURL *curl = curl_easy_init();
-    if (!curl) return -1;
+    if (!curl) return SHYAKE_ERR;
 
     struct curl_slist *headers = create_signed_headers(
         ctx, method, endpoint, username);
-    if (!headers) { curl_easy_cleanup(curl); return -1; }
+    if (!headers) { curl_easy_cleanup(curl); return SHYAKE_ERR; }
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
     cJSON *body_json = cJSON_CreateObject();
@@ -41,25 +41,18 @@ shyake_block(shyake_ctx *ctx, const char *target, int unblock)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
 
     CURLcode res = curl_easy_perform(curl);
-    int ret = 0;
+    shyake_err ret = SHYAKE_OK;
 
     if (res == CURLE_OK) {
         long http_code;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code == 200 || http_code == 201) {
-            if (unblock)
-                printf("%s unblocked.\n", target);
-            else
-                printf("%s blocked.\n", target);
+            ret = SHYAKE_OK;
         } else {
-            fprintf(stderr, "Failed (HTTP %ld): %s\n",
-                    http_code, resp.data);
-            ret = -1;
+            ret = SHYAKE_ERR_HTTP;
         }
     } else {
-        fprintf(stderr, "Network error: %s\n",
-                curl_easy_strerror(res));
-        ret = -1;
+        ret = SHYAKE_ERR_NETWORK;
     }
 
     free(body_str);
@@ -69,10 +62,10 @@ shyake_block(shyake_ctx *ctx, const char *target, int unblock)
     return ret;
 }
 
-int
+shyake_err
 shyake_rotate(shyake_ctx *ctx)
 {
-    if (!ctx) return -1;
+    if (!ctx) return SHYAKE_ERR;
     const char *username = ctx->username;
 
     OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
@@ -80,7 +73,7 @@ shyake_rotate(shyake_ctx *ctx)
     if (!kem || !sig) {
         if (kem) OQS_KEM_free(kem);
         if (sig) OQS_SIG_free(sig);
-        return -1;
+        return SHYAKE_ERR_CRYPTO;
     }
 
     uint8_t *new_kpk = malloc(kem->length_public_key);
@@ -92,7 +85,7 @@ shyake_rotate(shyake_ctx *ctx)
         OQS_SIG_keypair(sig, new_spk, new_ssk) != OQS_SUCCESS) {
         free(new_kpk); free(new_ksk); free(new_spk); free(new_ssk);
         OQS_KEM_free(kem); OQS_SIG_free(sig);
-        return -1;
+        return SHYAKE_ERR_CRYPTO;
     }
 
     char *kpk_b64 = base64_encode(new_kpk, kem->length_public_key);
@@ -108,7 +101,7 @@ shyake_rotate(shyake_ctx *ctx)
         free(new_kpk); free(new_ksk); free(new_spk); free(new_ssk);
         free(kpk_b64); free(spk_b64);
         OQS_KEM_free(kem); OQS_SIG_free(sig);
-        return -1;
+        return SHYAKE_ERR;
     }
 
     /* create_signed_headers uses the OLD private key currently on disk */
@@ -119,7 +112,7 @@ shyake_rotate(shyake_ctx *ctx)
         free(new_kpk); free(new_ksk); free(new_spk); free(new_ssk);
         free(kpk_b64); free(spk_b64);
         OQS_KEM_free(kem); OQS_SIG_free(sig);
-        return -1;
+        return SHYAKE_ERR;
     }
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
@@ -139,15 +132,14 @@ shyake_rotate(shyake_ctx *ctx)
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
 
-    printf("Rotating keys for %s...\n", username);
     CURLcode res = curl_easy_perform(curl);
-    int ret = 0;
+    shyake_err ret = SHYAKE_OK;
 
     if (res == CURLE_OK) {
         long http_code;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code == 200 || http_code == 201) {
-            printf("Keys successfully rotated on server.\n");
+            /* save new keys locally only after server confirmed */
             char path[512];
             snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
             save_file(path, new_kpk, kem->length_public_key);
@@ -157,16 +149,11 @@ shyake_rotate(shyake_ctx *ctx)
             save_file(path, new_spk, sig->length_public_key);
             snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
             save_file(path, new_ssk, sig->length_secret_key);
-            printf("Local keys updated.\n");
         } else {
-            fprintf(stderr, "Failed (HTTP %ld): %s\n",
-                    http_code, resp.data);
-            ret = -1;
+            ret = SHYAKE_ERR_HTTP;
         }
     } else {
-        fprintf(stderr, "Network error: %s\n",
-                curl_easy_strerror(res));
-        ret = -1;
+        ret = SHYAKE_ERR_NETWORK;
     }
 
     free(body_str);
@@ -180,10 +167,10 @@ shyake_rotate(shyake_ctx *ctx)
     return ret;
 }
 
-int
+shyake_err
 shyake_destroy(shyake_ctx *ctx)
 {
-    if (!ctx) return -1;
+    if (!ctx) return SHYAKE_ERR;
     const char *username = ctx->username;
 
     char endpoint[128];
@@ -192,11 +179,11 @@ shyake_destroy(shyake_ctx *ctx)
     snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
 
     CURL *curl = curl_easy_init();
-    if (!curl) return -1;
+    if (!curl) return SHYAKE_ERR;
 
     struct curl_slist *headers = create_signed_headers(
         ctx, "DELETE", endpoint, username);
-    if (!headers) { curl_easy_cleanup(curl); return -1; }
+    if (!headers) { curl_easy_cleanup(curl); return SHYAKE_ERR; }
 
     struct curl_response resp = { .data = malloc(1), .size = 0 };
     resp.data[0] = '\0';
@@ -208,22 +195,18 @@ shyake_destroy(shyake_ctx *ctx)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
 
     CURLcode res = curl_easy_perform(curl);
-    int ret = 0;
+    shyake_err ret = SHYAKE_OK;
 
     if (res == CURLE_OK) {
         long http_code;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code == 200) {
-            printf("Account destroyed.\n");
+            ret = SHYAKE_OK;
         } else {
-            fprintf(stderr, "Failed (HTTP %ld): %s\n",
-                    http_code, resp.data);
-            ret = -1;
+            ret = SHYAKE_ERR_HTTP;
         }
     } else {
-        fprintf(stderr, "Network error: %s\n",
-                curl_easy_strerror(res));
-        ret = -1;
+        ret = SHYAKE_ERR_NETWORK;
     }
 
     free(resp.data);

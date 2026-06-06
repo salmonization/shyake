@@ -66,6 +66,51 @@ trim_whitespace(char *str)
 }
 
 static void
+parse_check_columns(const char *spec, int *col_order, int *col_count)
+{
+    /* fill col_order[] with COL_* values in config-specified order */
+    static const int default_order[] = {
+        COL_ID, COL_PARTY, COL_SUBJECT, COL_SIZE, COL_DATE
+    };
+    if (!spec || spec[0] == '\0') {
+        for (int i = 0; i < 5; i++) col_order[i] = default_order[i];
+        *col_count = 5;
+        return;
+    }
+
+    *col_count = 0;
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%s", spec);
+    char *tok = strtok(buf, ",");
+    while (tok && *col_count < 5) {
+        while (*tok == ' ') tok++;
+        int col = 0;
+        if (strcmp(tok, "id") == 0)
+            col = COL_ID;
+        else if (strcmp(tok, "sender")    == 0 ||
+                 strcmp(tok, "from")      == 0 ||
+                 strcmp(tok, "to")        == 0 ||
+                 strcmp(tok, "recipient") == 0)
+            col = COL_PARTY;
+        else if (strcmp(tok, "subject") == 0)
+            col = COL_SUBJECT;
+        else if (strcmp(tok, "size") == 0)
+            col = COL_SIZE;
+        else if (strcmp(tok, "date") == 0)
+            col = COL_DATE;
+
+        if (col) col_order[(*col_count)++] = col;
+        tok = strtok(NULL, ",");
+    }
+
+    /* fallback to default if nothing parsed */
+    if (*col_count == 0) {
+        for (int i = 0; i < 5; i++) col_order[i] = default_order[i];
+        *col_count = 5;
+    }
+}
+
+static void
 free_app_config(app_config *config)
 {
     // free configuration fields
@@ -326,16 +371,25 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_register(ctx, username);
-        if (ret == 0) {
-            
+        fprintf(stderr, "Registering as %s at %s... ", username, inst);
+        fflush(stderr);
+        shyake_err ret = shyake_register(ctx, username);
+        if (ret == SHYAKE_OK) {
+            fprintf(stderr, "done.\n");
+            printf("Successfully registered.\n");
             update_config_user_and_instance(config_dir, username, inst);
+        } else if (ret == SHYAKE_ERR_NETWORK) {
+            fprintf(stderr, "\nError: Network failure during registration.\n");
+        } else if (ret == SHYAKE_ERR_NO_INSTANCE) {
+            fprintf(stderr, "\nError: Instance URL not configured.\n");
+        } else {
+            fprintf(stderr, "\nError: Registration failed (server rejected).\n");
         }
 
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
         free(config_dir);
-        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (strcmp(cmd, "send") == 0) {
@@ -418,13 +472,33 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_send(ctx, recipient, subject, body, body_len);
+        fprintf(stderr, "Sending mail to %s... ", recipient);
+        fflush(stderr);
+        shyake_err ret = shyake_send(ctx, recipient, subject, body,
+                                    body_len);
+        if (ret == SHYAKE_OK) {
+            fprintf(stderr, "done.\n");
+            printf("Your mail was sent.\n");
+        } else if (ret == SHYAKE_ERR_KEY_MISMATCH) {
+            fprintf(stderr, "\n\nFATAL: Remote public key of recipient "
+                    "has changed!\n"
+                    "RUN 'shyake fingerprint <username>' to "
+                    "inspect and update trust.\n");
+        } else if (ret == SHYAKE_ERR_GONE) {
+            fprintf(stderr, "\n\nFATAL: Recipient no longer exists.\n");
+        } else if (ret == SHYAKE_ERR_NETWORK) {
+            fprintf(stderr, "\nError: Network failure.\n");
+        } else if (ret == SHYAKE_ERR_CRYPTO) {
+            fprintf(stderr, "\nError: Cryptographic operation failed.\n");
+        } else {
+            fprintf(stderr, "\nError: Send failed.\n");
+        }
 
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
         free(config_dir);
         free(body);
-        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (strcmp(cmd, "check") == 0) {
@@ -491,6 +565,8 @@ int main(int argc, char *argv[])
             ro.tz_hours        = app_cfg->tz_hours;
             ro.time_fmt        = app_cfg->time_format;
             ro.time_fmt_recent = app_cfg->time_format_recent;
+            parse_check_columns(app_cfg->check_columns,
+                                ro.col_order, &ro.col_count);
             shyake_mail_list *list = shyake_check(ctx, arg);
             if (list) {
                 cli_render_mail_list(list, &ro);
@@ -614,11 +690,21 @@ int main(int argc, char *argv[])
             .no_color = global_no_color || app_cfg->no_color
         };
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_burn(ctx, mail_id);
+        shyake_err ret = shyake_burn(ctx, mail_id);
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
         free(config_dir);
-        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        if (ret == SHYAKE_OK)
+            printf("Mail burned.\n");
+        else if (ret == SHYAKE_ERR_NOT_FOUND)
+            fprintf(stderr, "Error: Mail not found.\n");
+        else if (ret == SHYAKE_ERR_FORBIDDEN)
+            fprintf(stderr, "Error: Permission denied.\n");
+        else if (ret == SHYAKE_ERR_NETWORK)
+            fprintf(stderr, "Error: Network failure.\n");
+        else
+            fprintf(stderr, "Error: Burn failed.\n");
+        return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (strcmp(cmd, "block") == 0 || strcmp(cmd, "unblock") == 0) {
@@ -650,11 +736,18 @@ int main(int argc, char *argv[])
             .no_color = global_no_color || app_cfg->no_color
         };
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_block(ctx, target, is_unblock);
+        shyake_err ret = shyake_block(ctx, target, is_unblock);
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
         free(config_dir);
-        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        if (ret == SHYAKE_OK)
+            printf("%s %s.\n", target,
+                   is_unblock ? "unblocked" : "blocked");
+        else if (ret == SHYAKE_ERR_NETWORK)
+            fprintf(stderr, "Error: Network failure.\n");
+        else
+            fprintf(stderr, "Error: Operation failed.\n");
+        return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (strcmp(cmd, "rotate") == 0) {
@@ -679,12 +772,23 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_rotate(ctx);
-
+        fprintf(stderr, "Rotating keys for %s... ", user);
+        fflush(stderr);
+        shyake_err ret = shyake_rotate(ctx);
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
         free(config_dir);
-        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        if (ret == SHYAKE_OK) {
+            fprintf(stderr, "done.\n");
+            printf("Keys successfully rotated.\n");
+        } else if (ret == SHYAKE_ERR_NETWORK) {
+            fprintf(stderr, "\nError: Network failure.\n");
+        } else if (ret == SHYAKE_ERR_CRYPTO) {
+            fprintf(stderr, "\nError: Key generation failed.\n");
+        } else {
+            fprintf(stderr, "\nError: Rotation failed.\n");
+        }
+        return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     if (strcmp(cmd, "fingerprint") == 0) {
@@ -724,17 +828,20 @@ int main(int argc, char *argv[])
 
         if (is_self)
             printf("Fingerprint for %s (local):\n", user);
-        else
+        else if (!do_update)
             printf("Fetching public key for %s...\n", target_user);
 
         shyake_fp_result *fp = shyake_fingerprint(
             ctx, target_user, do_update);
         if (fp) {
-            cli_render_fingerprint(
-                is_self ? user : target_user, fp, is_self);
-            if (!is_self && do_update)
-                printf("\nSuccessfully updated known_hosts for %s.\n",
+            if (!is_self && do_update) {
+                /* --update: only confirm, no art */
+                printf("Successfully updated known_hosts for %s.\n",
                        target_user);
+            } else {
+                cli_render_fingerprint(
+                    is_self ? user : target_user, fp, is_self);
+            }
             shyake_free_fp_result(fp);
         } else {
             fprintf(stderr, "Failed to fetch public key.\n");
@@ -791,20 +898,25 @@ int main(int argc, char *argv[])
         };
 
         shyake_ctx *ctx = shyake_init_ctx(&cfg);
-        int ret = shyake_destroy(ctx);
+        shyake_err ret = shyake_destroy(ctx);
 
         shyake_free_ctx(ctx);
         free_app_config(app_cfg);
 
-        if (ret == 0) {
+        if (ret == SHYAKE_OK) {
             char cmd_buf[512];
             snprintf(cmd_buf, sizeof(cmd_buf), "rm -rf %s/*", config_dir);
             system(cmd_buf);
-            printf("Local configuration and keys securely deleted.\n");
+            printf("Account destroyed. "
+                   "Local configuration and keys deleted.\n");
+        } else if (ret == SHYAKE_ERR_NETWORK) {
+            fprintf(stderr, "Error: Network failure.\n");
+        } else {
+            fprintf(stderr, "Error: Destroy failed.\n");
         }
 
         free(config_dir);
-        return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     fprintf(stderr, "Unknown command: %s\n", cmd);

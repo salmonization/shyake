@@ -235,10 +235,10 @@ shyake_mint_pow(const char *resource, int bits)
 /* Registration                                                       */
 /* ------------------------------------------------------------------ */
 
-int
+shyake_err
 shyake_register(shyake_ctx *ctx, const char *username)
 {
-    if (!ctx || !username) return -1;
+    if (!ctx || !username) return SHYAKE_ERR;
 
     size_t kpk_len, spk_len, ssk_len;
     char path[512];
@@ -252,7 +252,7 @@ shyake_register(shyake_ctx *ctx, const char *username)
 
     if (!kpk || !spk || !ssk) {
         free(kpk); free(spk); free(ssk);
-        return -1;
+        return SHYAKE_ERR_CRYPTO;
     }
 
     char *kpk_b64 = base64_encode(kpk, kpk_len);
@@ -283,7 +283,7 @@ shyake_register(shyake_ctx *ctx, const char *username)
     cJSON_AddStringToObject(root, "pow", pow);
     char *payload = cJSON_PrintUnformatted(root);
 
-    int ret = 0;
+    shyake_err ret = SHYAKE_OK;
     if (ctx->instance_url) {
         CURL *curl = curl_easy_init();
         if (curl) {
@@ -304,24 +304,17 @@ shyake_register(shyake_ctx *ctx, const char *username)
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
 
-            printf("Registering as %s at %s...\n", username,
-                   ctx->instance_url);
             CURLcode res = curl_easy_perform(curl);
             if (res != CURLE_OK) {
-                fprintf(stderr, "Network error: %s\n",
-                        curl_easy_strerror(res));
-                ret = -1;
+                ret = SHYAKE_ERR_NETWORK;
             } else {
                 long http_code = 0;
                 curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,
                                   &http_code);
                 if (http_code == 200 || http_code == 201) {
-                    printf("Successfully registered.\n");
+                    ret = SHYAKE_OK;
                 } else {
-                    fprintf(stderr,
-                            "Registration failed (HTTP %ld): %s\n",
-                            http_code, resp.data);
-                    ret = -1;
+                    ret = SHYAKE_ERR_HTTP;
                 }
             }
 
@@ -330,8 +323,7 @@ shyake_register(shyake_ctx *ctx, const char *username)
             curl_easy_cleanup(curl);
         }
     } else {
-        fprintf(stderr, "Error: Instance URL not provided.\n");
-        ret = -1;
+        ret = SHYAKE_ERR_NO_INSTANCE;
     }
 
     free(json_raw); free(payload); free(signature);
