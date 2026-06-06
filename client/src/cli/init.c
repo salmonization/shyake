@@ -20,7 +20,7 @@ static const char *default_config =
     "# POSIX format\n"
     "# TIME_FORMAT=\"%b %d  %Y\"\n"
     "# TIME_FORMAT_RECENT=\"%b %d %H:%M\"\n\n"
-    "# Time zone: auto = system local time (default)\n"
+    "# Time zone (default: auto)\n"
     "# Integer offset in hours: 0=UTC, 8=UTC+8, -6=UTC-6\n"
     "TIME_ZONE=auto\n\n"
     "# Display columns for `check` command\n"

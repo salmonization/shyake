@@ -14,14 +14,7 @@ int cli_get_terminal_width(void);
 /* Text formatting */
 void cli_print_word_wrap(const char *text, int indent, int width);
 
-/*
- * Format a UNIX timestamp to a string.
- * tz_hours: offset in whole hours (e.g. 8 = UTC+8, -6 = UTC-6).
- *           INT_MIN means "auto" (use system localtime).
- * fmt / fmt_recent: strftime patterns.
- *   fmt_recent is used when the mail is < 180 days old; may be NULL.
- * buf / buf_len: output buffer.
- */
+/* Format a UNIX timestamp to a string */
 #define TZ_AUTO (0x7FFFFFFF)
 void cli_format_timestamp(int64_t ts, int tz_hours,
                           const char *fmt, const char *fmt_recent,
@@ -57,13 +50,11 @@ typedef struct {
     int no_color;
     int plain;
     int term_width;
-    /* column order: col_order[0..col_count-1] are COL_* values
-     * in the order they should appear. col_count=0 means show all
-     * in default order. */
+    /* column order: col_order[0..col_count-1] are COL_* values */
     int col_order[5];
     int col_count;
     /* timezone */
-    int tz_hours;           /* offset hours, or TZ_AUTO */
+    int tz_hours; /* offset hours, or TZ_AUTO */
     const char *time_fmt;
     const char *time_fmt_recent;
 } cli_render_opts;

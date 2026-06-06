@@ -252,7 +252,11 @@ cli_render_fingerprint(const char *label, const shyake_fp_result *r,
         if (r->match)
             printf("\nStatus: MATCH\n");
         else
-            printf("\nStatus: MISMATCH (Warning: Key has changed)\n");
+            printf("\nStatus: MISMATCH (Warning: Key has changed)\n\n"
+                   "Please verify the new fingerprint in a secondary, "
+                   "trusted out-of-band channel\n"
+                   "before running the update command "
+                   "('shyake fingerprint <username> --update').\n");
     } else {
         printf("\n[Remote server]\n");
         cli_print_fingerprint_hex(r->remote_fp);
@@ -301,7 +305,7 @@ cli_render_mail_list(const shyake_mail_list *list,
         d_party[i] = strdup(pbuf);
 
         d_subject[i] = e->subject ? strdup(e->subject)
-                                  : strdup("(decryption failed)");
+                                  : strdup("<decryption failed>");
 
         char sbuf[16];
         cli_format_size(e->size, sbuf, sizeof(sbuf));
@@ -576,7 +580,7 @@ cli_render_mail_detail(const shyake_mail_detail *d,
                          time_fmt, time_fmt_recent,
                          date_buf, sizeof(date_buf));
 
-    const char *sub_text = d->subject ? d->subject : "(decryption failed)";
+    const char *sub_text = d->subject ? d->subject : "<decryption failed>";
 
     printf("%sFROM:%s  %s\n", c_lbl, c_val, d->sender);
     printf("%sTO:%s    %s\n", c_lbl, c_val, d->recipient);
@@ -588,7 +592,7 @@ cli_render_mail_detail(const shyake_mail_detail *d,
     if (d->body)
         printf("%s\n", d->body);
     else
-        printf("(body decryption failed)\n");
+        printf("<body decryption failed>\n");
 
     cli_wait_pager();
 }

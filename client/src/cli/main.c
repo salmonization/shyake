@@ -46,7 +46,7 @@ typedef struct {
     char *time_format_recent;
     char *check_columns;
     int no_color;
-    int tz_hours;   /* UTC offset in hours, or TZ_AUTO */
+    int tz_hours;
 } app_config;
 
 static char*
@@ -68,7 +68,6 @@ trim_whitespace(char *str)
 static void
 parse_check_columns(const char *spec, int *col_order, int *col_count)
 {
-    /* fill col_order[] with COL_* values in config-specified order */
     static const int default_order[] = {
         COL_ID, COL_PARTY, COL_SUBJECT, COL_SIZE, COL_DATE
     };
@@ -103,7 +102,6 @@ parse_check_columns(const char *spec, int *col_order, int *col_count)
         tok = strtok(NULL, ",");
     }
 
-    /* fallback to default if nothing parsed */
     if (*col_count == 0) {
         for (int i = 0; i < 5; i++) col_order[i] = default_order[i];
         *col_count = 5;
@@ -131,7 +129,7 @@ read_config(const char *config_dir)
     app_config *cfg = calloc(1, sizeof(app_config));
     if (!cfg)
         return NULL;
-    cfg->tz_hours = TZ_AUTO; /* default: system localtime */
+    cfg->tz_hours = TZ_AUTO; // default: system localtime
 
     char path[512];
     snprintf(path, sizeof(path), "%s/config", config_dir);
@@ -178,7 +176,8 @@ read_config(const char *config_dir)
         } else if (strcmp(key, "NO_COLOR") == 0) {
             cfg->no_color = atoi(val);
         } else if (strcmp(key, "TIME_ZONE") == 0) {
-            /* auto = system localtime; integer = UTC offset hours */
+            // auto    = system localtime
+            // integer = UTC offset hours
             if (strcmp(val, "auto") == 0 || val[0] == '\0')
                 cfg->tz_hours = TZ_AUTO;
             else
@@ -379,11 +378,13 @@ int main(int argc, char *argv[])
             printf("Successfully registered.\n");
             update_config_user_and_instance(config_dir, username, inst);
         } else if (ret == SHYAKE_ERR_NETWORK) {
-            fprintf(stderr, "\nError: Network failure during registration.\n");
+            fprintf(stderr, "\nError: Network failure during "
+                    "registration.\n");
         } else if (ret == SHYAKE_ERR_NO_INSTANCE) {
             fprintf(stderr, "\nError: Instance URL not configured.\n");
         } else {
-            fprintf(stderr, "\nError: Registration failed (server rejected).\n");
+            fprintf(stderr, "\nError: Registration failed "
+                    "(server rejected).\n");
         }
 
         shyake_free_ctx(ctx);
@@ -445,7 +446,7 @@ int main(int argc, char *argv[])
             fclose(in_file);
 
         if (!body) {
-            fprintf(stderr, "Failed to read message body.\n");
+            fprintf(stderr, "Failed to read body.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -618,7 +619,7 @@ int main(int argc, char *argv[])
         }
 
         if (!mail_id) {
-            fprintf(stderr, "Error: mail_id is required for fetch.\n");
+            fprintf(stderr, "Error: Mail ID is required for fetch.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -858,11 +859,13 @@ int main(int argc, char *argv[])
         const char *inst = app_cfg->instance;
         const char *user = app_cfg->username;
 
-        printf("WARNING: This will permanently delete your KEYS and ALL "
-               "MESSAGES sent to or\n");
-        printf("from you. And your username will be locked forever and "
-               "cannot be registered\n");
-        printf("again. Type your username to confirm: ");
+        printf("WARNING: This will delete your local configurations "
+               "and key pairs, also\n");
+        printf("destruct your account on the instance. All mail to and"
+               " from you will be\n");
+        printf("cleared. Your username will be permanently locked and"
+               " unregisterable on\n");
+        printf("this instance. Type your username to confirm: ");
         fflush(stdout);
 
         char buf[256];
