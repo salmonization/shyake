@@ -332,7 +332,7 @@ cli_render_mail_list(const shyake_mail_list *list,
             cJSON_AddStringToObject(obj, "date", d_date[i]);
             cJSON_AddItemToArray(arr, obj);
         }
-        char *out = cJSON_Print(arr);
+        char *out = cJSON_PrintUnformatted(arr);
         printf("%s\n", out);
         free(out);
         cJSON_Delete(arr);
