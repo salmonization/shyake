@@ -264,6 +264,7 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--plain") == 0) {
             global_plain = 1;
+            global_no_color = 1;
             for (int j = i; j < argc - 1; j++) argv[j] = argv[j + 1];
             argc--; i--;
         } else if (strcmp(argv[i], "--debug") == 0) {
