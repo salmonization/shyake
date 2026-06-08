@@ -112,6 +112,15 @@ To check fingerprints of your communicators:
 shyake fingerprint flat_white
 ```
 
+You can update the fingerprints of your communicators if they have rotated
+their key pairs. **Warning: Before running the update command, always verify
+the new fingerprint through a secondary, trusted out-of-band channel (e.g.,
+in person or via a different platform) to prevent identity impersonation.**
+
+```sh
+shyake fingerprint flat_white --update
+```
+
 **Burn command**:
 
 This will delete a piece of mail.
@@ -122,7 +131,7 @@ shyake burn fQBjZnvJ56
 
 **Rotate command**:
 
-This will rotate your key pairs and clear all MESSAGES sent to or from you.
+This will rotate your key pairs and clear all mail to and from you.
 
 ```sh
 shyake rotate
@@ -130,14 +139,35 @@ shyake rotate
 
 **Destroy command**:
 
-This will delete your local configuration and key pairs, and will also
-destruct your account on the instance. All MESSAGES sent to or from you
-will be cleared. Your username will be permanently locked and cannot be
-registered again on this instance.
+This will delete your local configuration and key pairs, also destruct
+your account on the instance. All mail to and from you will be cleared.
+Your username will be permanently locked and cannot be registered again
+on this instance.
 
 ```sh
 shyake destroy
 ```
+
+### Advanced Usage
+
+You can use `--no-color` to turn off the colored output.
+
+```sh
+shyake check inbox --no-color
+shyake check fQBjZnvJ56 --no-color
+shyake fetch fQBjZnvJ56 --no-color
+```
+
+Or edit the configuration will be the same:
+
+```sh
+# Disable colors (1 = disable)
+NO_COLOR=1
+```
+
+You can use `--csv` and `--json` to format output for machine parsing.
+
+If you want to disable the pager, color, and truncation, use `--plain`.
 
 ### License
 
