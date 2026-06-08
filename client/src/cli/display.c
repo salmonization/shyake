@@ -472,9 +472,12 @@ cli_render_mail_list(const shyake_mail_list *list,
                 break;
             case COL_DATE:
                 if (opts->no_color)
-                    printf("Date");
+                    printf("%-*s%s", w_dt, "Date",
+                           is_last ? "" : " ");
                 else
-                    printf("%s%sDate%s", c_w, ul_on, ul_off);
+                    printf("%s%sDate%s%-*s%s",
+                           c_w, ul_on, ul_off, w_dt - 4, "",
+                           is_last ? "" : " ");
                 break;
             default: break;
             }
@@ -526,7 +529,8 @@ cli_render_mail_list(const shyake_mail_list *list,
                        is_last ? "" : " ");
                 break;
             case COL_DATE:
-                printf("%s%s%s", c_w, d_date[i], c_rs);
+                printf("%s%-*s%s%s", c_w, w_dt, d_date[i], c_rs,
+                       is_last ? "" : " ");
                 break;
             default: break;
             }
