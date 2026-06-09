@@ -84,6 +84,8 @@ First line of the input file will be the subject if `-s` is missing.
 shyake -t flat_white < content.txt
 ```
 
+Please note that the subject must not exceed 128 bytes in length.
+
 You can also use heredoc, but please be careful of your shell history.
 
 ```sh

@@ -4,7 +4,11 @@ CC ?= gcc
 OS   := $(shell uname -s)
 ARCH := $(shell uname -m)
 
-# resolve prefix for headers / libraries
+# detect Termux
+TERMUX_PREFIX := /data/data/com.termux/files/usr
+IS_TERMUX     := $(shell test -d $(TERMUX_PREFIX) && echo 1 || echo 0)
+
+# resolve prefix for headers or libraries
 ifeq ($(OS), Darwin)
     ifeq ($(ARCH), arm64)
         BREW_PREFIX := /opt/homebrew
@@ -16,11 +20,21 @@ ifeq ($(OS), Darwin)
     SYS_LIB  := $(BREW_PREFIX)/lib \
                 $(BREW_PREFIX)/opt/openssl@3/lib
     SHARED_EXT := dylib
+    # explicit .a path forces static linkage on Darwin
+    LIBOQS_LINK := $(BREW_PREFIX)/lib/liboqs.a
 else ifeq ($(OS), Linux)
-    SYS_INC  := /usr/include \
-                /usr/local/include
-    SYS_LIB  := /usr/lib \
-                /usr/local/lib
+    ifeq ($(IS_TERMUX), 1)
+        # Termux
+        SYS_INC  := $(TERMUX_PREFIX)/include
+        SYS_LIB  := $(TERMUX_PREFIX)/lib
+        LIBOQS_LINK := $(TERMUX_PREFIX)/lib/liboqs.a
+    else
+        SYS_INC  := /usr/include \
+                    /usr/local/include
+        SYS_LIB  := /usr/lib \
+                    /usr/local/lib
+        LIBOQS_LINK := -Wl,-Bstatic -loqs -Wl,-Bdynamic
+    endif
     SHARED_EXT := so
 else
     $(error Unsupported OS: $(OS))
@@ -32,8 +46,9 @@ CFLAGS = -Wall -Wextra -std=c11 -pedantic \
          -Isrc/lib/vendor/cJSON \
          $(addprefix -I, $(SYS_INC))
 
+# liboqs always static
 LDFLAGS = $(addprefix -L, $(SYS_LIB)) \
-          -loqs -lcurl -lcrypto -lm
+          $(LIBOQS_LINK) -lcurl -lcrypto -lm
 
 LIB_DIR     = src/lib
 CLI_DIR     = src/cli

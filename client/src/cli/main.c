@@ -295,7 +295,7 @@ int main(int argc, char *argv[])
     const char *cmd = argv[1];
 
     if (strcmp(cmd, "version") == 0) {
-        printf("shyake v0.1.0-rc.1\n");
+        printf("shyake v0.1.0-rc.2\n");
         return EXIT_SUCCESS;
     }
 
