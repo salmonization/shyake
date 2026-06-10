@@ -64,7 +64,9 @@ To build `liboqs` with only the algorithms required by Shyake (ML-KEM-768
 and ML-DSA-65), run:
 
 ```sh
-git clone git@github.com:open-quantum-safe/liboqs.git
+git clone --depth 1 \
+          --single-branch -b main \
+          https://github.com/open-quantum-safe/liboqs.git
 cd liboqs
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release \
