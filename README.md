@@ -180,15 +180,32 @@ shyake check fQBjZnvJ56 --no-color
 shyake fetch fQBjZnvJ56 --no-color
 ```
 
-Or edit the configuration will be the same:
-
-```sh
-# Disable colors (1 = disable)
-NO_COLOR=1
-```
-
 If you want to disable the pager, color, and truncation for `check` and
 `fetch` command, use `--plain`.
+
+You can edit the configuration file (located at `~/.config/shyake/config` or
+the directories of your other profiles) to optimize your setup. For instance,
+by changing the column layout for `check` command.
+
+```sh
+# Date & Time format (strftime format)
+# RECENT: less than 180 days old.
+# ISO 8601 format
+TIME_FORMAT="%Y-%m-%d %H:%M"
+# POSIX format
+# TIME_FORMAT="%b %d  %Y"
+# TIME_FORMAT_RECENT="%b %d %H:%M"
+
+# Time zone (default: auto)
+# Integer offset in hours: 0=UTC, 8=UTC+8, -6=UTC-6
+TIME_ZONE=auto
+
+# Display columns for `check` command
+CHECK_COLUMNS=id,sender,subject,size,date
+
+# Disable colors (1 = disable)
+# NO_COLOR=0
+```
 
 ### License
 
