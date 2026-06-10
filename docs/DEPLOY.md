@@ -5,7 +5,7 @@ However, you can also self-host it on your own hardware.
 
 There are 2 ways to deploy the server:
 
-* Using Cloudflare (RECOMMEND)
+* Using Cloudflare
 * Self-hosting
 
 **Federation**
@@ -90,15 +90,16 @@ will error on every API call.
 Choose one of the following:
 
 **Option A — Dashboard**: Go to
-`Compute (Workers) → Workers & Pages → Create → Connect to Git`
-in the Cloudflare Dashboard, select your fork, and set:
+`Compute → Workers & Pages → Create application → Continue with GitHub`
+in the Cloudflare Dashboard (you may need to `Add GitHub account` at the first
+time), select your fork, and set:
 
 | Field | Value |
 |-------|-------|
 | Framework preset | None |
-| Build command | `cd server && npm install` |
-| Deploy command | `cd server && npx wrangler deploy` |
-| Root directory | `/` |
+| Build command | `` |
+| Deploy command | `npx wrangler deploy` |
+| Root directory | `/server` |
 
 Future pushes to your fork will redeploy automatically.
 
@@ -112,7 +113,8 @@ npx wrangler deploy
 
 7. **Verify**
 
-Open `https://<worker>.workers.dev/health` (or your custom domain).
+Wait for deployment to complete and then open
+`https://<worker>.workers.dev/health` (or your custom domain).
 A `200 OK` confirms the Worker and database are working correctly.
 
 ### Self-hosting
