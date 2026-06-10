@@ -294,8 +294,81 @@ int main(int argc, char *argv[])
 
     const char *cmd = argv[1];
 
+    // handle help commands
+    if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
+        strcmp(cmd, "-h") == 0) {
+        printf("Use 'shyake man' instead.\n");
+        return EXIT_SUCCESS;
+    }
+
+    // handle man command
+    if (strcmp(cmd, "man") == 0) {
+        if (argc < 3) {
+            printf("shyake - PQC E2EE mailer\n\n");
+            printf("Commands:\n");
+            printf("  init         Initialize\n");
+            printf("  register     Register on an instance\n");
+            printf("  send         Send a piece of mail\n");
+            printf("  check        Check inbox or sent\n");
+            printf("  fetch        Fetch a piece of mail\n");
+            printf("  burn         Burn a piece of mail\n");
+            printf("  block        Block a user or instance\n");
+            printf("  unblock      Unblock a user or instance\n");
+            printf("  rotate       Rotate key pairs\n");
+            printf("  fingerprint  Show or update fingerprint\n");
+            printf("  whoami       Show current identity\n");
+            printf("  destroy      Destroy identity\n\n");
+            printf("For detailed usage, run: shyake man <command>\n");
+        } else {
+            const char *subcmd = argv[2];
+            if (strcmp(subcmd, "init") == 0) {
+                printf("shyake man init - Initialize\n\n");
+                printf("TODO: Add detailed help for init\n");
+            } else if (strcmp(subcmd, "register") == 0) {
+                printf("shyake man register - Register on an instance\n\n");
+                printf("TODO: Add detailed help for register\n");
+            } else if (strcmp(subcmd, "send") == 0) {
+                printf("shyake man send - Send a piece of mail\n\n");
+                printf("TODO: Add detailed help for send\n");
+            } else if (strcmp(subcmd, "check") == 0) {
+                printf("shyake man check - Check inbox or sent\n\n");
+                printf("TODO: Add detailed help for check\n");
+            } else if (strcmp(subcmd, "fetch") == 0) {
+                printf("shyake man fetch - Fetch a piece of mail\n\n");
+                printf("TODO: Add detailed help for fetch\n");
+            } else if (strcmp(subcmd, "burn") == 0) {
+                printf("shyake man burn - Burn a piece of mail\n\n");
+                printf("TODO: Add detailed help for burn\n");
+            } else if (strcmp(subcmd, "block") == 0) {
+                printf("shyake man block - Block a user or instance\n\n");
+                printf("TODO: Add detailed help for block\n");
+            } else if (strcmp(subcmd, "unblock") == 0) {
+                printf("shyake man unblock - Unblock a user or instance\n\n");
+                printf("TODO: Add detailed help for unblock\n");
+            } else if (strcmp(subcmd, "rotate") == 0) {
+                printf("shyake man rotate - Rotate key pairs\n\n");
+                printf("TODO: Add detailed help for rotate\n");
+            } else if (strcmp(subcmd, "fingerprint") == 0) {
+                printf("shyake man fingerprint - Show or update "
+                       "fingerprint\n\n");
+                printf("TODO: Add detailed help for fingerprint\n");
+            } else if (strcmp(subcmd, "whoami") == 0) {
+                printf("shyake man whoami - Show current identity\n\n");
+                printf("TODO: Add detailed help for whoami\n");
+            } else if (strcmp(subcmd, "destroy") == 0) {
+                printf("shyake man destroy - Destroy identity\n\n");
+                printf("TODO: Add detailed help for destroy\n");
+            } else {
+                printf("Unknown command: %s\n", subcmd);
+                printf("Run 'shyake man' for a list of available "
+                       "commands.\n");
+            }
+        }
+        return EXIT_SUCCESS;
+    }
+
     if (strcmp(cmd, "version") == 0) {
-        printf("shyake v0.1.0-rc.2\n");
+        printf("shyake v0.1.0-rc.3\n");
         return EXIT_SUCCESS;
     }
 
