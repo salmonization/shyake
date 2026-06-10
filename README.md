@@ -2,7 +2,7 @@
 
 ### Overview
 
-Shyake is an **end-to-end encrypted mailing system** powered by
+Shyake is an **end-to-end encrypted mail system** powered by
 **post-quantum cryptography**, designed as a decentralized
 communication method to resist censorship and surveillance.
 
@@ -62,6 +62,12 @@ shyake init -c path/to/your/dir
 
 And in that case you need always add `-c` option when you want to use
 this profile.
+
+Use `whoami` command to check your profile.
+
+```sh
+shyake whoami
+```
 
 **Check command**:
 
@@ -180,8 +186,8 @@ shyake check fQBjZnvJ56 --no-color
 shyake fetch fQBjZnvJ56 --no-color
 ```
 
-If you want to disable the pager, color, and truncation for `check` and
-`fetch` command, use `--plain`.
+Use `--plain` to disable the pager, color, and truncation for `check` and
+`fetch` command.
 
 You can edit the configuration file (located at `~/.config/shyake/config` or
 the directories of your other profiles) to optimize your setup. For instance,
@@ -205,7 +211,13 @@ CHECK_COLUMNS=id,sender,subject,size,date
 
 # Disable colors (1 = disable)
 # NO_COLOR=0
+
+# Default action when running without arguments
+# 0 = man, 1 = check inbox, 2 = check inbox --count
+DEFAULT_ACTION=0
 ```
+
+Use `block` or `unblock` command to block or unblock a user or instance.
 
 ### License
 
