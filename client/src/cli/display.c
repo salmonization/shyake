@@ -203,8 +203,10 @@ cli_print_randomart(const unsigned char *fp)
             int dx = (dir & 1) ? 1 : -1;
             int dy = (dir & 2) ? 1 : -1;
             x += dx; y += dy;
-            if (x < 0) x = 0; if (x > 16) x = 16;
-            if (y < 0) y = 0; if (y > 8)  y = 8;
+            if (x < 0) x = 0;
+            if (x > 16) x = 16;
+            if (y < 0) y = 0;
+            if (y > 8)  y = 8;
             grid[x][y]++;
         }
     }

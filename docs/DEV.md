@@ -36,22 +36,58 @@ brew install liboqs curl openssl@3
 On Arch Linux:
 
 ```sh
-sudo pacman -S curl openssl
-# build liboqs from source: https://github.com/open-quantum-safe/liboqs
+sudo pacman -S cmake curl openssl
+# build liboqs from source: see instructions below
 ```
 
 On Debian/Ubuntu:
 
 ```sh
-sudo apt install libcurl4-openssl-dev libssl-dev
-# build liboqs from source: https://github.com/open-quantum-safe/liboqs
+sudo apt install cmake libcurl4-openssl-dev libssl-dev
+# build liboqs from source: see instructions below
 ```
 
 On Termux (Android):
 
 ```sh
-pkg install clang make curl-dev openssl-dev
-# build liboqs from source: https://github.com/open-quantum-safe/liboqs
+pkg install clang cmake make curl-dev openssl-dev
+# build liboqs from source: see instructions below
+```
+
+**Building liboqs**
+
+When compiling `liboqs` from source (e.g., on GNU/Linux or Termux), you must
+perform a minimal build. Building `liboqs` with all algorithms enabled will
+drastically bloat the binary size (~20MB).
+
+To build `liboqs` with only the algorithms required by Shyake (ML-KEM-768 
+and ML-DSA-65), run:
+
+```sh
+git clone git@github.com:open-quantum-safe/liboqs.git
+cd liboqs
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DOQS_BUILD_ONLY_LIB=ON \
+      -DOQS_USE_OPENSSL=ON \
+      -DOQS_MINIMAL_BUILD="KEM_ml_kem_768;SIG_ml_dsa_65" \
+      ..
+make -j$(nproc)
+sudo make install
+```
+
+When compiling in **Termux**, you must specify the installation prefix
+(`$PREFIX`) and omit `sudo`:
+
+```sh
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DOQS_BUILD_ONLY_LIB=ON \
+      -DOQS_USE_OPENSSL=ON \
+      -DOQS_MINIMAL_BUILD="KEM_ml_kem_768;SIG_ml_dsa_65" \
+      -DCMAKE_INSTALL_PREFIX=$PREFIX \
+      ..
+make -j4
+make install
 ```
 
 ### Build
