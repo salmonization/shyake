@@ -219,6 +219,9 @@ DEFAULT_ACTION=0
 
 Use `block` or `unblock` command to block or unblock a user or instance.
 
+Use `--debug` to output verbose `curl` logs (handshakes, HTTP headers,
+and internal variables) routed to `stderr` by default.
+
 ### License
 
 BSD 2-Clause License
