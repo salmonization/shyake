@@ -329,67 +329,205 @@ int main(int argc, char *argv[])
         if (argc < 3) {
             printf("shyake - PQC E2EE mailer\n\n");
             printf("Commands:\n");
-            printf("  init         Initialize\n");
-            printf("  register     Register on an instance\n");
-            printf("  send         Send a piece of mail\n");
-            printf("  check        Check inbox or sent\n");
-            printf("  fetch        Fetch a piece of mail\n");
-            printf("  burn         Burn a piece of mail\n");
-            printf("  block        Block a user or instance\n");
-            printf("  unblock      Unblock a user or instance\n");
-            printf("  rotate       Rotate key pairs\n");
-            printf("  fingerprint  Show or update fingerprint\n");
-            printf("  whoami       Show current identity\n");
-            printf("  destroy      Destroy identity\n\n");
-            printf("  man          Show manual pages\n\n");
-            printf("  version      Show client version\n\n");
+            printf("  init          Initialize\n");
+            printf("  register      Register on an instance\n");
+            printf("  send          Send a piece of mail\n");
+            printf("  check         Check inbox or sent\n");
+            printf("  fetch         Fetch a piece of mail\n");
+            printf("  burn          Burn a piece of mail\n");
+            printf("  block         Block a user or instance\n");
+            printf("  unblock       Unblock a user or instance\n");
+            printf("  rotate        Rotate key pairs\n");
+            printf("  fingerprint   Show or update fingerprint\n");
+            printf("  whoami        Show current identity\n");
+            printf("  destroy       Destroy identity\n");
+            printf("  man           Show manual pages\n");
+            printf("  version       Show client version\n\n");
+            printf("Global Options:\n");
+            printf("  -c, --config  Use an alternative config directory\n");
+            printf("  --plain       Disable pager, color, and truncation\n");
+            printf("  --no-color    Disable colored output\n");
+            printf("  --debug       Output verbose curl logs to stderr\n\n");
             printf("For detailed usage, run: shyake man <command>\n");
         } else {
             const char *subcmd = argv[2];
             if (strcmp(subcmd, "init") == 0) {
                 printf("shyake init - Initialize\n\n");
-                printf("TODO: Add detailed help for init\n");
+                printf("Usage:\n");
+                printf("    shyake init\n\n");
+                printf("    Generate config file and key pairs\n");
+                printf("    Default directory: ~/.config/shyake/\n\n");
+                printf("Options:\n");
+                printf("    -c <path>       "
+                       "Create multiple profiles at alternative "
+                       "directories\n");
             } else if (strcmp(subcmd, "register") == 0) {
                 printf("shyake register - Register on an instance\n\n");
-                printf("TODO: Add detailed help for register\n");
+                printf("Notes: Run this after 'shyake init'\n\n");
+                printf("Usage:\n");
+                printf("    shyake register -u <username> "
+                       "-i <url>\n\n");
+                printf("Options:\n");
+                printf("    -u <username>   Your username\n");
+                printf("    -i <url>        Instance URL\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "send") == 0) {
                 printf("shyake send - Send a piece of mail\n\n");
-                printf("TODO: Add detailed help for send\n");
+                printf("Usage:\n");
+                printf("    shyake send -t <username> "
+                       "[-s <subject>] [<file>]\n\n");
+                printf("    Read body from <file> or stdin.\n");
+                printf("    First line is used as subject if -s is "
+                       "omitted\n");
+                printf("    (subject must not exceed 128 bytes).\n\n");
+                printf("Options:\n");
+                printf("    -t <username>   To (required)\n");
+                printf("                    Use 'username@instance' for "
+                       "an external recipient\n");
+                printf("    -s <subject>    Subject line\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n\n");
+                printf("Tips:\n");
+                printf("    Send a single file:\n");
+                printf("        shyake send -t salmon -s \"image.png\" "
+                       "image.png\n");
+                printf("    Send a directory as a tar archive:\n");
+                printf("        tar czf - ./source | "
+                       "shyake send -t salmon -s \"source.tar.gz\"\n");
             } else if (strcmp(subcmd, "check") == 0) {
-                printf("shyake man check - Check inbox or sent\n\n");
-                printf("TODO: Add detailed help for check\n");
+                printf("shyake check - Check inbox or sent\n\n");
+                printf("Usage:\n");
+                printf("    shyake check inbox|sent\n");
+                printf("    shyake check <id>\n\n");
+                printf("    'check inbox' and 'check sent' list mail.\n");
+                printf("    'check <id>' shows header of a piece of "
+                       "mail.\n\n");
+                printf("Options:\n");
+                printf("    --count         "
+                       "Print count only\n");
+                printf("    --json          "
+                       "Output as JSON\n");
+                printf("    --csv           "
+                       "Output as CSV\n");
+                printf("    --no-header     "
+                       "Disable the column header\n");
+                printf("    --plain         "
+                       "Disable pager, color, and truncation\n");
+                printf("    --no-color      "
+                       "Disable colored output\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "fetch") == 0) {
-                printf("shyake fetch - Fetch a piece of mail\n\n");
-                printf("TODO: Add detailed help for fetch\n");
+                printf("shyake fetch - Fetch and decrypt a piece of "
+                       "mail\n\n");
+                printf("Usage:\n");
+                printf("    shyake fetch <id>\n\n");
+                printf("Options:\n");
+                printf("    -r, --raw       "
+                       "Output body only (no header)\n");
+                printf("    --plain         "
+                       "Disable pager, color, and truncation\n");
+                printf("    --no-color      "
+                       "Disable colored output\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n\n");
+                printf("Tips:\n");
+                printf("    Save a piece of mail with header:\n");
+                printf("        shyake fetch <id> --no-color "
+                       "> output.txt\n");
+                printf("    Save a piece of mail (body only):\n");
+                printf("        shyake fetch <id> -r > output.txt\n");
+                printf("    Extract a tar archive received:\n");
+                printf("        shyake fetch <id> -r | tar xzf -\n");
+                printf("    Extract into a specific directory:\n");
+                printf("        shyake fetch <id> -r | "
+                       "tar xzf - -C ./output\n");
             } else if (strcmp(subcmd, "burn") == 0) {
-                printf("shyake burn - Burn a piece of mail\n\n");
-                printf("TODO: Add detailed help for burn\n");
+                printf("shyake burn - Delete a piece of mail\n\n");
+                printf("Usage:\n");
+                printf("    shyake burn <id>\n\n");
+                printf("Options:\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "block") == 0) {
                 printf("shyake block - Block a user or instance\n\n");
-                printf("TODO: Add detailed help for block\n");
+                printf("Usage:\n");
+                printf("    shyake block <target>\n\n");
+                printf("    <target> can be a username or an instance "
+                       "URL.\n\n");
+                printf("Options:\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "unblock") == 0) {
                 printf("shyake unblock - Unblock a user or instance\n\n");
-                printf("TODO: Add detailed help for unblock\n");
+                printf("Usage:\n");
+                printf("    shyake unblock <target>\n\n");
+                printf("    <target> can be a username or an instance "
+                       "URL.\n\n");
+                printf("Options:\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "rotate") == 0) {
                 printf("shyake rotate - Rotate key pairs\n\n");
-                printf("TODO: Add detailed help for rotate\n");
+                printf("Usage:\n");
+                printf("    shyake rotate\n\n");
+                printf("    Regenerates your key pairs and clears all "
+                       "mail to and from you.\n\n");
+                printf("Options:\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "fingerprint") == 0) {
                 printf("shyake fingerprint - Show or update "
                        "fingerprint\n\n");
-                printf("TODO: Add detailed help for fingerprint\n");
+                printf("Usage:\n");
+                printf("    shyake fingerprint\n");
+                printf("    shyake fingerprint <username>\n");
+                printf("    shyake fingerprint <username> "
+                       "--update\n\n");
+                printf("    Without argument: show your own "
+                       "fingerprint.\n");
+                printf("    With <username>: fetch and display their "
+                       "public key.\n");
+                printf("    --update: refresh the stored key for "
+                       "<username>.\n");
+                printf("    Verify the new fingerprint out-of-band "
+                       "before running\n");
+                printf("    --update to prevent identity "
+                       "impersonation.\n\n");
+                printf("Options:\n");
+                printf("    --update        "
+                       "Update stored key for <username>\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "whoami") == 0) {
                 printf("shyake whoami - Show current identity\n\n");
-                printf("TODO: Add detailed help for whoami\n");
+                printf("Usage:\n");
+                printf("    shyake whoami\n\n");
+                printf("    Displays USERNAME, INSTANCE, and CONFIG "
+                       "directory.\n");
             } else if (strcmp(subcmd, "destroy") == 0) {
                 printf("shyake destroy - Destroy identity\n\n");
-                printf("TODO: Add detailed help for destroy\n");
+                printf("Usage:\n");
+                printf("    shyake destroy\n\n");
+                printf("    Deletes local config and key pairs, "
+                       "destructs the account\n");
+                printf("    on the instance. All mail is cleared. "
+                       "The username is\n");
+                printf("    permanently locked on this "
+                       "instance.\n\n");
+                printf("Options:\n");
+                printf("    --debug         "
+                       "Output verbose curl logs to stderr\n");
             } else if (strcmp(subcmd, "version") == 0) {
                 printf("shyake version - Show client version\n\n");
-                printf("Usage: shyake version\n");
-            } else if (strcmp(subcmd, "version") == 0) {
-                printf("shyake version - Show manual pages\n\n");
-                printf("Usage: shyake man\n");
-                printf("       shyake man <command>\n");
+                printf("Usage:\n");
+                printf("    shyake version\n");
+            } else if (strcmp(subcmd, "man") == 0) {
+                printf("shyake man - Show manual pages\n\n");
+                printf("Usage:\n");
+                printf("    shyake man\n");
+                printf("    shyake man <command>\n");
             } else {
                 printf("Unknown command: %s\n", subcmd);
                 printf("Run 'shyake man' for a list of available "

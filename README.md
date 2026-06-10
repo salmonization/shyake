@@ -77,9 +77,9 @@ shyake check sent
 ```
 
 You can use `--csv` and `--json` to format output for machine parsing. You
-can also use `--no-header` to disable the header if you want.
+can also use `--no-header` to disable the column header if you want.
 
-To check metadata of a piece of mail:
+To check header of a piece of mail:
 
 ```sh
 shyake check fQBjZnvJ56
