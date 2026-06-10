@@ -68,7 +68,14 @@ this profile.
 ```sh
 shyake check inbox
 shyake check sent
-# check metadata of a piece of mail
+```
+
+You can use `--csv` and `--json` to format output for machine parsing. You
+can also use `--no-header` to disable the header if you want.
+
+To check metadata of a piece of mail:
+
+```sh
 shyake check fQBjZnvJ56
 ```
 
@@ -98,6 +105,19 @@ This will fetch a piece of mail and decrypt it.
 
 ```sh
 shyake fetch fQBjZnvJ56
+```
+
+If you want to save a piece of mail with the metadata:
+
+```sh
+shyake fetch fQBjZnvJ56 --no-color > saved-mail.txt
+```
+
+To output the body only, use `-r` or `--raw`.
+
+```sh
+shyake fetch fQBjZnvJ56 --raw
+shyake fetch fQBjZnvJ56 -r > saved-mail.txt
 ```
 
 **Fingerprint command**:
@@ -167,9 +187,8 @@ Or edit the configuration will be the same:
 NO_COLOR=1
 ```
 
-You can use `--csv` and `--json` to format output for machine parsing.
-
-If you want to disable the pager, color, and truncation, use `--plain`.
+If you want to disable the pager, color, and truncation for `check` and
+`fetch` command, use `--plain`.
 
 ### License
 
