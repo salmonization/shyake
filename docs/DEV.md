@@ -16,7 +16,9 @@ This document helps you develop for Shyake.
 
 ### Dependencies
 
-The client is a statically linked C binary with no runtime dependencies.
+`liboqs` is statically linked on all platforms so the binary carries
+no runtime dependency on it. `libcurl` and `libcrypto` remain
+dynamically linked on all platforms.
 
 Dependencies (build-time only):
 
@@ -45,6 +47,13 @@ sudo apt install libcurl4-openssl-dev libssl-dev
 # build liboqs from source: https://github.com/open-quantum-safe/liboqs
 ```
 
+On Termux (Android):
+
+```sh
+pkg install clang make curl-dev openssl-dev
+# build liboqs from source: https://github.com/open-quantum-safe/liboqs
+```
+
 ### Build
 
 ```sh
@@ -56,9 +65,9 @@ Outputs:
 
 | File | Description |
 |------|-------------|
-| `bin/shyake` | Statically linked CLI binary |
+| `bin/shyake` | CLI binary (`liboqs` statically linked on all platforms) |
 | `lib/libshyake.a` | Static library for FFI |
-| `lib/libshyake.so` | Shared library for FFI |
+| `lib/libshyake.so` or `lib/libshyake.dylib` | Shared library for FFI |
 
 ### Install
 
@@ -89,4 +98,4 @@ bash tests/e2e_test.sh
 npx wrangler dev --local
 ```
 
-The worker listens on `http://localhost:8787` by default
+The worker listens on `http://localhost:8787` by default.

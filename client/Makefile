@@ -33,7 +33,8 @@ else ifeq ($(OS), Linux)
                     /usr/local/include
         SYS_LIB  := /usr/lib \
                     /usr/local/lib
-        LIBOQS_LINK := -Wl,-Bstatic -loqs -Wl,-Bdynamic
+        # explicit .a path forces static linkage on Linux
+        LIBOQS_LINK := /usr/local/lib/liboqs.a
     endif
     SHARED_EXT := so
 else
@@ -46,7 +47,7 @@ CFLAGS = -Wall -Wextra -std=c11 -pedantic \
          -Isrc/lib/vendor/cJSON \
          $(addprefix -I, $(SYS_INC))
 
-# liboqs always static
+# liboqs always static; curl/crypto dynamic on all platforms
 LDFLAGS = $(addprefix -L, $(SYS_LIB)) \
           $(LIBOQS_LINK) -lcurl -lcrypto -lm
 
