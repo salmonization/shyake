@@ -287,6 +287,9 @@ shyake_register(shyake_ctx *ctx, const char *username)
     if (ctx->instance_url) {
         CURL *curl = curl_easy_init();
         if (curl) {
+            if (ctx->debug)
+                curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
             char url[512];
             snprintf(url, sizeof(url), "%s/api/register",
                      ctx->instance_url);

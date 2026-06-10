@@ -20,6 +20,9 @@ shyake_block(shyake_ctx *ctx, const char *target, int unblock)
     CURL *curl = curl_easy_init();
     if (!curl) return SHYAKE_ERR;
 
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
     struct curl_slist *headers = create_signed_headers(
         ctx, method, endpoint, username);
     if (!headers) { curl_easy_cleanup(curl); return SHYAKE_ERR; }
@@ -104,6 +107,9 @@ shyake_rotate(shyake_ctx *ctx)
         return SHYAKE_ERR;
     }
 
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
     /* create_signed_headers uses the OLD private key currently on disk */
     struct curl_slist *headers = create_signed_headers(
         ctx, "POST", endpoint, username);
@@ -180,6 +186,9 @@ shyake_destroy(shyake_ctx *ctx)
 
     CURL *curl = curl_easy_init();
     if (!curl) return SHYAKE_ERR;
+
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
     struct curl_slist *headers = create_signed_headers(
         ctx, "DELETE", endpoint, username);

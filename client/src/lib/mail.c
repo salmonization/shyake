@@ -180,6 +180,9 @@ shyake_send(shyake_ctx *ctx, const char *recipient,
     shyake_err ret = SHYAKE_OK;
     CURL *curl = curl_easy_init();
     if (curl) {
+        if (ctx->debug)
+            curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
         char url[512];
         snprintf(url, sizeof(url), "%s/api/mail", ctx->instance_url);
 
@@ -245,6 +248,9 @@ shyake_check(shyake_ctx *ctx, const char *type)
 
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
+
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
     struct curl_slist *headers = create_auth_headers(
         ctx, endpoint, username);
@@ -359,6 +365,9 @@ shyake_fetch(shyake_ctx *ctx, const char *mail_id)
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
 
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
     struct curl_slist *headers = create_auth_headers(
         ctx, endpoint, username);
     if (!headers) { curl_easy_cleanup(curl); return NULL; }
@@ -455,6 +464,9 @@ shyake_check_one(shyake_ctx *ctx, const char *mail_id)
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
 
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
     struct curl_slist *headers = create_auth_headers(
         ctx, endpoint, username);
     if (!headers) { curl_easy_cleanup(curl); return NULL; }
@@ -550,6 +562,9 @@ shyake_burn(shyake_ctx *ctx, const char *mail_id)
 
     CURL *curl = curl_easy_init();
     if (!curl) return SHYAKE_ERR;
+
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
     struct curl_slist *headers = create_signed_headers(
         ctx, "DELETE", endpoint, username);

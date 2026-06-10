@@ -93,6 +93,9 @@ fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient)
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
 
+    if (ctx->debug)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
     struct curl_response resp = { .data = malloc(1), .size = 0 };
     resp.data[0] = '\0';
 
