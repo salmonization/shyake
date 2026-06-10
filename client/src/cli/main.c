@@ -47,6 +47,7 @@ typedef struct {
     char *check_columns;
     int no_color;
     int tz_hours;
+    int default_action;
 } app_config;
 
 static char*
@@ -182,6 +183,8 @@ read_config(const char *config_dir)
                 cfg->tz_hours = TZ_AUTO;
             else
                 cfg->tz_hours = atoi(val);
+        } else if (strcmp(key, "DEFAULT_ACTION") == 0) {
+            cfg->default_action = atoi(val);
         }
     }
     fclose(f);
@@ -287,9 +290,29 @@ int main(int argc, char *argv[])
     if (no_color_env && strlen(no_color_env) > 0)
         global_no_color = 1;
 
+    static char *def_argv_man[]   = { "shyake", "man", NULL };
+    static char *def_argv_check[] = { "shyake", "check", "inbox", NULL };
+    static char *def_argv_count[] = { "shyake", "check", "inbox",
+                                                       "--count", NULL };
+
     if (argc < 2) {
-        fprintf(stderr, "Usage: shyake <command> [args...]\n");
-        return EXIT_FAILURE;
+        char *config_dir = global_config_dir
+            ? strdup(global_config_dir) : get_config_dir();
+        app_config *app_cfg = read_config(config_dir);
+        int def_act = app_cfg->default_action;
+        free_app_config(app_cfg);
+        free(config_dir);
+
+        if (def_act == 1) {
+            argv = def_argv_check;
+            argc = 3;
+        } else if (def_act == 2) {
+            argv = def_argv_count;
+            argc = 4;
+        } else {
+            argv = def_argv_man;
+            argc = 2;
+        }
     }
 
     const char *cmd = argv[1];
@@ -318,46 +341,55 @@ int main(int argc, char *argv[])
             printf("  fingerprint  Show or update fingerprint\n");
             printf("  whoami       Show current identity\n");
             printf("  destroy      Destroy identity\n\n");
+            printf("  man          Show manual pages\n\n");
+            printf("  version      Show client version\n\n");
             printf("For detailed usage, run: shyake man <command>\n");
         } else {
             const char *subcmd = argv[2];
             if (strcmp(subcmd, "init") == 0) {
-                printf("shyake man init - Initialize\n\n");
+                printf("shyake init - Initialize\n\n");
                 printf("TODO: Add detailed help for init\n");
             } else if (strcmp(subcmd, "register") == 0) {
-                printf("shyake man register - Register on an instance\n\n");
+                printf("shyake register - Register on an instance\n\n");
                 printf("TODO: Add detailed help for register\n");
             } else if (strcmp(subcmd, "send") == 0) {
-                printf("shyake man send - Send a piece of mail\n\n");
+                printf("shyake send - Send a piece of mail\n\n");
                 printf("TODO: Add detailed help for send\n");
             } else if (strcmp(subcmd, "check") == 0) {
                 printf("shyake man check - Check inbox or sent\n\n");
                 printf("TODO: Add detailed help for check\n");
             } else if (strcmp(subcmd, "fetch") == 0) {
-                printf("shyake man fetch - Fetch a piece of mail\n\n");
+                printf("shyake fetch - Fetch a piece of mail\n\n");
                 printf("TODO: Add detailed help for fetch\n");
             } else if (strcmp(subcmd, "burn") == 0) {
-                printf("shyake man burn - Burn a piece of mail\n\n");
+                printf("shyake burn - Burn a piece of mail\n\n");
                 printf("TODO: Add detailed help for burn\n");
             } else if (strcmp(subcmd, "block") == 0) {
-                printf("shyake man block - Block a user or instance\n\n");
+                printf("shyake block - Block a user or instance\n\n");
                 printf("TODO: Add detailed help for block\n");
             } else if (strcmp(subcmd, "unblock") == 0) {
-                printf("shyake man unblock - Unblock a user or instance\n\n");
+                printf("shyake unblock - Unblock a user or instance\n\n");
                 printf("TODO: Add detailed help for unblock\n");
             } else if (strcmp(subcmd, "rotate") == 0) {
-                printf("shyake man rotate - Rotate key pairs\n\n");
+                printf("shyake rotate - Rotate key pairs\n\n");
                 printf("TODO: Add detailed help for rotate\n");
             } else if (strcmp(subcmd, "fingerprint") == 0) {
-                printf("shyake man fingerprint - Show or update "
+                printf("shyake fingerprint - Show or update "
                        "fingerprint\n\n");
                 printf("TODO: Add detailed help for fingerprint\n");
             } else if (strcmp(subcmd, "whoami") == 0) {
-                printf("shyake man whoami - Show current identity\n\n");
+                printf("shyake whoami - Show current identity\n\n");
                 printf("TODO: Add detailed help for whoami\n");
             } else if (strcmp(subcmd, "destroy") == 0) {
-                printf("shyake man destroy - Destroy identity\n\n");
+                printf("shyake destroy - Destroy identity\n\n");
                 printf("TODO: Add detailed help for destroy\n");
+            } else if (strcmp(subcmd, "version") == 0) {
+                printf("shyake version - Show client version\n\n");
+                printf("Usage: shyake version\n");
+            } else if (strcmp(subcmd, "version") == 0) {
+                printf("shyake version - Show manual pages\n\n");
+                printf("Usage: shyake man\n");
+                printf("       shyake man <command>\n");
             } else {
                 printf("Unknown command: %s\n", subcmd);
                 printf("Run 'shyake man' for a list of available "
