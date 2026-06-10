@@ -30,6 +30,15 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>();
 
+app.get('/health', async (c) => {
+    try {
+        await c.env.DB.prepare('SELECT 1').first();
+        return c.text('200 OK', 200);
+    } catch (e: any) {
+        return c.text(`500 Internal Server Error: ${e.message}`, 500);
+    }
+});
+
 app.post('/api/register', async (c) => {
     const regEnabled = String(c.env.REGISTRATION_ENABLED) === 'true';
     if (!regEnabled) {
