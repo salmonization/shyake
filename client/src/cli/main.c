@@ -538,7 +538,7 @@ int main(int argc, char *argv[])
     }
 
     if (strcmp(cmd, "version") == 0) {
-        printf("shyake v0.1.0\n");
+        printf("shyake v0.1.1\n");
         return EXIT_SUCCESS;
     }
 

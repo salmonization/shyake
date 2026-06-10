@@ -11,10 +11,9 @@ Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 ### 1. Overview
 
-Shyake is a post-quantum, end-to-end encrypted asynchronous mail
-system with a POSIX-style command-line interface. The design goal is
-censorship resistance and surveillance resistance with minimal
-external dependencies.
+Shyake is a post-quantum, end-to-end encrypted asynchronous mail system
+with a POSIX-style command-line interface client, designed as a
+decentralized communication method to resist censorship and surveillance.
 
 Key properties:
 
@@ -23,10 +22,10 @@ Key properties:
 - **Post-quantum cryptography**: key encapsulation uses ML-KEM-768;
   authentication uses ML-DSA-65 (CRYSTALS-Dilithium), both from
   [liboqs](https://github.com/open-quantum-safe/liboqs).
-- **Decentralized**: any operator can self-host a Worker instance.
-  Instances optionally federate using a server-to-server relay model.
-- **Stateless server**: the Worker stores only ciphertext and public
-  keys. No session state, no passwords.
+- **Decentralized**: any operator can host their own instance with almost
+  zero cost. Instances optionally federate using a server-to-server relay
+  model.
+- **Stateless server**: the server stores only ciphertext and public keys.
 
 ---
 
@@ -52,7 +51,7 @@ shyake/
 #### 2.2 Client
 
 - **Standard**: C11, POSIX.1-2008 (`_POSIX_C_SOURCE=200809L`)
-- **Build system**: GNU Make; cross-platform (macOS, Linux, Termux)
+- **Build system**: GNU Make; cross-platform (macOS, GNU/Linux, Termux)
 - **Artifacts**:
   - `bin/shyake` — CLI binary, statically linked against
     `libshyake.a`
@@ -120,7 +119,7 @@ The signed message is a deterministic string constructed from the
 HTTP method, endpoint, username, and timestamp — e.g.:
 
 ```
-GET:/api/mail?type=inbox:alice:1749513600
+GET:/api/mail?type=inbox:salmon:1749513600
 ```
 
 For `POST /api/mail`, the signed payload is a JSON object containing:
@@ -142,7 +141,7 @@ stored in D1, via the WASM ML-DSA module.
 
 #### 3.4 Anti-Replay
 
-The `timestamp` field is included in every signed payload. The Worker
+The `timestamp` field is included in every signed payload. The server
 rejects requests whose timestamp deviates from server time by more
 than **300 seconds (5 minutes)**.
 
@@ -219,7 +218,7 @@ configured `INSTANCE_DOMAIN`.
 | `GET` | `/api/pubkey/:username` | Return `kem_pubkey` and `sig_pubkey` |
 
 `/api/pubkey/:username` supports the `user@domain` syntax; if the
-domain differs from the local instance, the Worker proxies the
+domain differs from the local instance, the server proxies the
 request to the remote instance (requires federation enabled).
 
 #### 5.2 Authenticated Endpoints
@@ -240,7 +239,7 @@ All require the four headers listed in §3.3.
 
 #### 5.3 Size Limit
 
-The Worker enforces a hard cap on the raw HTTP request body of `POST
+The server enforces a hard cap on the raw HTTP request body of `POST
 /api/mail`. The default is **196608 bytes (192 KiB)**, configurable
 in `wrangler.toml` via `MAX_MAIL_SIZE`. The absolute ceiling is
 786432 bytes (768 KiB), imposed by Cloudflare D1's single-row limit.
@@ -262,12 +261,12 @@ When `recipient` belongs to a remote instance:
 
 1. The client posts the signed, encrypted payload to the **sender's
    own instance** (`POST /api/mail`).
-2. The sender's Worker stores the mail in its local D1 database.
+2. The sender's instance stores the mail in its local D1 database.
 3. In the same request lifecycle (via `executionCtx.waitUntil`), the
-   Worker forwards the original raw payload to
+   server forwards the original raw payload to
    `https://<recipientDomain>/api/mail`.
 
-The recipient's Worker independently verifies the sender's signature
+The recipient's instance independently verifies the sender's signature
 by fetching the sender's public key from the sender's instance
 (`GET /api/pubkey/<sender>`).
 
@@ -295,10 +294,10 @@ Shyake uses **Trust On First Use (TOFU)** for public key management:
 - **Key rotation detected**: if the server returns `KEY_MISMATCH`
   (HTTP 409), the client prints a fatal error and halts:
 
-  ```
-  FATAL: Remote public key of recipient has changed!
-  RUN 'shyake fingerprint <username>' to inspect and update trust.
-  ```
+```
+FATAL: Remote public key of recipient has changed!
+RUN 'shyake fingerprint <username>' to inspect and update trust.
+```
 
 The `fingerprint` command provides **out-of-band (OOB) verification**:
 it fetches the current public key from the server, computes the
@@ -348,7 +347,7 @@ Key `config` fields:
 
 | Key | Default | Description |
 |---|---|---|
-| `INSTANCE` | — | Worker base URL |
+| `INSTANCE` | — | Instance base URL |
 | `TIME_FORMAT` | `%Y-%m-%d %H:%M` | `strftime` format for timestamps |
 | `TIME_ZONE` | `auto` | Integer hour offset or `auto` |
 | `CHECK_COLUMNS` | `id,sender,subject,size,date` | Column layout for `check` |
