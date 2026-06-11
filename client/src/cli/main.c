@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <ctype.h>
 #include "shyake.h"
 #include "display.h"
 
@@ -640,6 +641,7 @@ int main(int argc, char *argv[])
     if (strcmp(cmd, "send") == 0) {
         char *recipient = NULL;
         char *subject = NULL;
+        char *extracted_subject = NULL;
 
         static struct option long_options[] = {
             {"to", required_argument, 0, 't'},
@@ -661,13 +663,6 @@ int main(int argc, char *argv[])
         if (!recipient) {
             fprintf(stderr, "Error: -t <recipient> is required "
                             "for send.\n");
-            free_app_config(app_cfg);
-            free(config_dir);
-            return EXIT_FAILURE;
-        }
-
-        if (subject && strlen(subject) > 128) {
-            fprintf(stderr, "Error: Subject cannot exceed 128 bytes.\n");
             free_app_config(app_cfg);
             free(config_dir);
             return EXIT_FAILURE;
@@ -696,10 +691,63 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
 
+        if (!subject) {
+            uint8_t *newline = memchr(body, '\n', body_len);
+            size_t first_line_len = newline ? (size_t)(newline - body)
+                                            : body_len;
+            size_t actual_len = first_line_len;
+            if (actual_len > 0 && body[actual_len - 1] == '\r') {
+                actual_len--;
+            }
+
+            extracted_subject = malloc(actual_len + 1);
+            memcpy(extracted_subject, body, actual_len);
+            extracted_subject[actual_len] = '\0';
+            subject = extracted_subject;
+
+            size_t advance = newline ? first_line_len + 1 : body_len;
+            body_len -= advance;
+            if (body_len > 0) {
+                memmove(body, body + advance, body_len);
+            }
+        }
+
+        if (!subject || strlen(subject) == 0) {
+            fprintf(stderr, "Error: Subject cannot be empty.\n");
+            if (extracted_subject) free(extracted_subject);
+            free(body);
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+        if (strlen(subject) > 128) {
+            fprintf(stderr, "Error: Subject cannot exceed 128 bytes.\n");
+            if (extracted_subject) free(extracted_subject);
+            free(body);
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+        int is_blank = 1;
+        for (size_t i = 0; subject[i] != '\0'; i++) {
+            if (!isspace((unsigned char)subject[i])) {
+                is_blank = 0;
+                break;
+            }
+        }
+        if (is_blank) {
+            fprintf(stderr,
+                    "Error: Subject cannot be entirely whitespace.\n");
+            if (extracted_subject) free(extracted_subject);
+            free(body);
+            free_app_config(app_cfg);
+            free(config_dir);
+            return EXIT_FAILURE;
+        }
+
         const char *inst = app_cfg->instance;
         const char *user = app_cfg->username;
 
-        
         if (!inst || !user) {
             fprintf(stderr, 
                     "Missing INSTANCE or USERNAME in config file.\n");
@@ -743,6 +791,7 @@ int main(int argc, char *argv[])
         free_app_config(app_cfg);
         free(config_dir);
         free(body);
+        if (extracted_subject) free(extracted_subject);
         return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
