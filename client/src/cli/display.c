@@ -712,10 +712,14 @@ cli_render_mail_detail(const shyake_mail_detail *d,
     cli_print_word_wrap(sub_text, 7, tw);
     printf("\n");
 
-    if (d->body)
-        printf("%s\n", d->body);
-    else
+    if (d->body) {
+        printf("%s", d->body);
+        if (isatty(STDOUT_FILENO) || saved_stdout >= 0) {
+            printf("\n");
+        }
+    } else {
         printf("<body decryption failed>\n");
+    }
 
     cli_wait_pager();
 }

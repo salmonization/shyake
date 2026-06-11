@@ -88,13 +88,13 @@ shyake check fQBjZnvJ56
 **Send command**:
 
 ```sh
-shyake -s "This is the subject" -t flat_white < body.txt
+shyake send -s "This is the subject" -t flat_white < body.txt
 ```
 
 First line of the input file will be the subject if `-s` is missing.
 
 ```sh
-shyake -t flat_white < content.txt
+shyake send -t flat_white < content.txt
 ```
 
 Please note that the subject must not exceed 128 bytes in length.
@@ -102,7 +102,7 @@ Please note that the subject must not exceed 128 bytes in length.
 You can also use heredoc, but please be careful of your shell history.
 
 ```sh
-shyake -s "This is the subject" -t flat_white <<EOF
+shyake send -s "This is the subject" -t flat_white <<EOF
 ```
 
 **Fetch command**:
