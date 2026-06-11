@@ -191,29 +191,43 @@ cli_get_terminal_width(void)
 void
 cli_print_word_wrap(const char *text, int indent, int width)
 {
-    // word-wrap text with aligned continuation indent
+    // word-wrap text with UTF-8 display width awareness
     int avail = width - indent;
     if (avail < 20) avail = 20;
-
-    int len = (int)strlen(text);
-    int pos = 0;
     int first = 1;
-
-    while (pos < len) {
+    const char *p = text;
+    while (*p) {
         if (!first) printf("\n%*s", indent, "");
         first = 0;
-
-        int remain = len - pos;
-        if (remain <= avail) {
-            printf("%.*s", remain, text + pos);
-            pos += remain;
+        const char *line_start = p;
+        const char *last_space = NULL;
+        const char *safe_cut = p;
+        int accum = 0;
+        while (*p) {
+            const char *before = p;
+            int cp = utf8_next(&p);
+            if (cp == ' ') {
+                last_space = before;
+            }
+            int cw = cp > 0 ? cp_width(cp) : 0;
+            if (accum + cw > avail) {
+                p = before; // rewind to just before this codepoint
+                break;
+            }
+            accum += cw;
+            safe_cut = p;
+        }
+        if (*p == '\0') {
+            printf("%.*s", (int)(safe_cut - line_start), line_start);
+            break;
+        }
+        if (last_space != NULL && last_space > line_start) {
+            printf("%.*s", (int)(last_space - line_start), line_start);
+            p = last_space;
+            while (*p == ' ') p++;
         } else {
-            int cut = avail;
-            while (cut > 0 && text[pos + cut] != ' ') cut--;
-            if (cut == 0) cut = avail;
-            printf("%.*s", cut, text + pos);
-            pos += cut;
-            while (pos < len && text[pos] == ' ') pos++;
+            printf("%.*s", (int)(safe_cut - line_start), line_start);
+            p = safe_cut;
         }
     }
     printf("\n");
@@ -231,10 +245,8 @@ cli_format_timestamp(int64_t ts, int tz_hours,
     // convert UNIX ts to broken-down time with optional tz offset
     const char *f = fmt ? fmt : "%Y-%m-%d %H:%M";
     time_t t = (time_t)ts;
-
     struct tm tmbuf;
     struct tm *tmi;
-
     if (tz_hours == TZ_AUTO) {
         tmi = localtime_r(&t, &tmbuf);
     } else {
@@ -242,18 +254,15 @@ cli_format_timestamp(int64_t ts, int tz_hours,
         time_t shifted = t + (time_t)tz_hours * 3600;
         tmi = gmtime_r(&shifted, &tmbuf);
     }
-
     if (!tmi) {
         snprintf(buf, buf_len, "?");
         return;
     }
-
     if (fmt_recent) {
         time_t now = time(NULL);
         if (now - t < 180 * 24 * 3600)
             f = fmt_recent;
     }
-
     strftime(buf, buf_len, f, tmi);
 }
 
