@@ -16,9 +16,8 @@ void cli_print_word_wrap(const char *text, int indent, int width);
 
 /* Format a UNIX timestamp to a string */
 #define TZ_AUTO (0x7FFFFFFF)
-void cli_format_timestamp(int64_t ts, int tz_hours,
-                          const char *fmt, const char *fmt_recent,
-                          char *buf, int buf_len);
+void cli_format_timestamp(int64_t ts, int tz_hours, const char *fmt,
+			  const char *fmt_recent, char *buf, int buf_len);
 
 /* Sender display helper: keep trailing @ for remote parties */
 void cli_format_party(const char *party, char *buf, int buf_len);
@@ -29,53 +28,50 @@ void cli_format_size(int size, char *buf, int buf_len);
 /* Fingerprint display */
 void cli_print_fingerprint_hex(const unsigned char *fp);
 void cli_print_randomart(const unsigned char *fp);
-void cli_render_fingerprint(const char *label,
-                            const shyake_fp_result *r,
-                            int is_self);
+void cli_render_fingerprint(const char *label, const shyake_fp_result *r,
+			    int is_self);
 
 /* Column bitmask for CHECK_COLUMNS */
-#define COL_ID       (1 << 0)
-#define COL_PARTY    (1 << 1)  /* sender (inbox) or recipient (sent) */
-#define COL_SUBJECT  (1 << 2)
-#define COL_SIZE     (1 << 3)
-#define COL_DATE     (1 << 4)
-#define COL_CREATED  (1 << 5)  /* draft creation timestamp */
-#define COL_MODIFIED (1 << 6)  /* draft last-modified timestamp */
-#define COL_ALL      (COL_ID | COL_PARTY | COL_SUBJECT | COL_SIZE | COL_DATE)
+#define COL_ID (1 << 0)
+#define COL_PARTY (1 << 1) /* sender (inbox) or recipient (sent) */
+#define COL_SUBJECT (1 << 2)
+#define COL_SIZE (1 << 3)
+#define COL_DATE (1 << 4)
+#define COL_CREATED (1 << 5) /* draft creation timestamp */
+#define COL_MODIFIED (1 << 6) /* draft last-modified timestamp */
+#define COL_ALL (COL_ID | COL_PARTY | COL_SUBJECT | COL_SIZE | COL_DATE)
 
 /* Mail list rendering */
 typedef struct {
-    int json_out;
-    int csv_out;
-    int count_only;
-    int no_header;
-    int no_color;
-    int plain;
-    int term_width;
-    /* column order: col_order[0..col_count-1] are COL_* values */
-    int col_order[7];
-    int col_count;
-    /* timezone */
-    int tz_hours; /* offset hours, or TZ_AUTO */
-    const char *time_fmt;
-    const char *time_fmt_recent;
-    const char *id_label; /* override "Mail ID" column header (NULL = default) */
+	int json_out;
+	int csv_out;
+	int count_only;
+	int no_header;
+	int no_color;
+	int plain;
+	int term_width;
+	/* column order: col_order[0..col_count-1] are COL_* values */
+	int col_order[7];
+	int col_count;
+	/* timezone */
+	int tz_hours; /* offset hours, or TZ_AUTO */
+	const char *time_fmt;
+	const char *time_fmt_recent;
+	const char *
+		id_label; /* override "Mail ID" column header (NULL = default) */
 } cli_render_opts;
 
 void cli_render_mail_list(const shyake_mail_list *list,
-                          const cli_render_opts *opts);
+			  const cli_render_opts *opts);
 
 /* Mail detail rendering */
-void cli_render_mail_detail(const shyake_mail_detail *d,
-                            int raw, int no_color, int plain,
-                            int tz_hours,
-                            const char *time_fmt,
-                            const char *time_fmt_recent);
+void cli_render_mail_detail(const shyake_mail_detail *d, int raw, int no_color,
+			    int plain, int tz_hours, const char *time_fmt,
+			    const char *time_fmt_recent);
 
 /* Single mail header view (check <id>) */
-void cli_render_mail_header(const shyake_mail_detail *d,
-                            int no_color, int tz_hours,
-                            const char *time_fmt,
-                            const char *time_fmt_recent);
+void cli_render_mail_header(const shyake_mail_detail *d, int no_color,
+			    int tz_hours, const char *time_fmt,
+			    const char *time_fmt_recent);
 
 #endif /* SHYAKE_DISPLAY_H */

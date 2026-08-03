@@ -12,7 +12,7 @@
  * cli_drafts_last_error(). */
 
 /* Detail of the last drafts failure, "" if none */
-const char* cli_drafts_last_error(void);
+const char *cli_drafts_last_error(void);
 
 /*
  * Save an encrypted draft to <config_dir>/drafts/<id>.json.
@@ -28,9 +28,9 @@ const char* cli_drafts_last_error(void);
  * does not exist.
  */
 shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
-                          const char *recipient, const char *subject,
-                          const uint8_t *body, size_t body_len,
-                          const char *draft_id, char **out_id);
+			  const char *recipient, const char *subject,
+			  const uint8_t *body, size_t body_len,
+			  const char *draft_id, char **out_id);
 
 /*
  * List all local drafts sorted by id (decrypts recipient + subject).
@@ -38,25 +38,21 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
  * Entry recipient is "" for diary drafts.
  * Caller must free with shyake_free_saved_list().
  */
-shyake_saved_list* cli_list_drafts(shyake_ctx *ctx,
-                                   const char *config_dir,
-                                   const char *username);
+shyake_saved_list *cli_list_drafts(shyake_ctx *ctx, const char *config_dir,
+				   const char *username);
 
 /*
  * Load and decrypt a draft from disk (body included).
  * Returns allocated shyake_mail_detail* on success, NULL on failure.
  * Caller must free with shyake_free_mail_detail().
  */
-shyake_mail_detail* cli_read_draft(shyake_ctx *ctx,
-                                   const char *config_dir,
-                                   const char *username,
-                                   const char *draft_id);
+shyake_mail_detail *cli_read_draft(shyake_ctx *ctx, const char *config_dir,
+				   const char *username, const char *draft_id);
 
 /*
  * Delete a draft by id.
  * Returns SHYAKE_OK, SHYAKE_ERR_NOT_FOUND, or SHYAKE_ERR.
  */
-shyake_err cli_delete_draft(const char *config_dir,
-                            const char *draft_id);
+shyake_err cli_delete_draft(const char *config_dir, const char *draft_id);
 
 #endif /* SHYAKE_CLI_DRAFTS_H */

@@ -11,6 +11,12 @@ indent_size = 4
 [Makefile]
 indent_style = tab
 
+# Linux kernel style: tabs, 8 columns wide (see .clang-format)
+[client/**.{c,h}]
+indent_style = tab
+indent_size = 8
+tab_width = 8
+
 [*.md]
 # trailing double-space is a markdown line break
 trim_trailing_whitespace = false

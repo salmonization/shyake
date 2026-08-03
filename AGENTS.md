@@ -95,7 +95,7 @@ shyake/
 │   │   │                   #   enc_dec)
 │   │   └── vendor/cJSON/   # vendored JSON parser
 │   ├── src/cli/            # CLI entry, init, display, prompts,
-│   │                       #   drafts, self-update
+│   │                       #   drafts, self-update, man pages
 │   ├── include/shyake.h    # public FFI API (opaque context pointer)
 │   ├── tests/              # unit tests + test account fixtures
 │   └── Makefile
@@ -141,8 +141,14 @@ Architecture notes:
 
 ### C
 
-- 4-space indentation, 80-column limit where sensible, no trailing
-  whitespace.
+Linux kernel coding style
+([docs.kernel.org/process/coding-style.html](https://docs.kernel.org/process/coding-style.html)).
+[.clang-format](.clang-format) is the upstream kernel `.clang-format`
+verbatim (minus its `ForEachMacros` list, not applicable here) - run
+it, don't hand-tune around it; see the file header for provenance.
+
+- Tabs for indentation, 8 columns wide; 80-column limit where
+  sensible; no trailing whitespace.
 - K&R braces: opening brace on the same line for `if`/`for`/`while`/
   `switch`; **function opening braces go on the next line**. Omit
   braces for single-statement bodies.
