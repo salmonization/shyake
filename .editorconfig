@@ -17,6 +17,10 @@ indent_style = tab
 indent_size = 8
 tab_width = 8
 
+# Google TypeScript Style (see .prettierrc)
+[server/**.ts]
+indent_size = 2
+
 [*.md]
 # trailing double-space is a markdown line break
 trim_trailing_whitespace = false
