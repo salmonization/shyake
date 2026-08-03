@@ -6,8 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "node scripts/patch-mldsa65-exports.js",
-    "format": "prettier --write src",
-    "format:check": "prettier --check src"
+    "format": "prettier --write src scripts",
+    "format:check": "prettier --check src scripts"
   },
   "keywords": [],
   "author": "",
