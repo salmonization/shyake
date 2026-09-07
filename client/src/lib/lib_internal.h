@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <curl/curl.h>
 #include "shyake.h"
+#include "internal.h"
 
 /* Internal context definition hidden from the public ABI */
 struct shyake_ctx {
