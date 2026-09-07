@@ -159,6 +159,68 @@ it, don't hand-tune around it; see the file header for provenance.
   `zero_memory()` in `client/src/lib/passphrase.c`), never log secrets
   or plaintext, and keep all private-key operations client-side.
 
+#### Type discipline
+
+The kernel style already implies short fixed-width type names; this
+project spells them the Rust way:
+
+```c
+typedef uint8_t   u8;   typedef int8_t    i8;
+typedef uint16_t  u16;  typedef int16_t   i16;
+typedef uint32_t  u32;  typedef int32_t   i32;
+typedef uint64_t  u64;  typedef int64_t   i64;
+typedef float     f32;  typedef double    f64;
+typedef size_t    usize; typedef ptrdiff_t isize;
+typedef uintptr_t uptr;
+```
+
+- These live in `client/src/lib/internal.h` and are for **internal
+  code only**. `include/shyake.h` is a public FFI header: it keeps the
+  `<stdint.h>` spellings, because `u8`/`usize` in a public header
+  would collide with whatever the consumer already defines.
+- New code uses the aliases; don't reformat untouched files just to
+  convert them.
+
+#### Banned and preferred library calls
+
+- Banned: `strcpy`, `strcat`, `strncpy`, `sprintf`, `strtok`. Their
+  interfaces cannot express a destination bound (or, for `strncpy`,
+  do not NUL-terminate). Use `snprintf` for formatting, `memcpy` with
+  an explicit length for copying, and `strchr`-based scanning instead
+  of `strtok`.
+- `memcpy`/`memmove`/`memset` are fine - length is explicit and the
+  semantics have nothing to do with NUL termination.
+- Pass binary data as `(const u8 *buf, usize len)`, never as a bare
+  `char *` whose length the callee has to discover.
+
+#### Parse, don't validate
+
+- Cross a trust boundary exactly once, at the edge, and let the
+  resulting type carry the proof: `shyake_ctx` is opaque and can only
+  be produced by `shyake_init_ctx()`; new subsystems follow the same
+  shape (opaque struct in the header, constructor that validates).
+- Do not re-check the same input deeper in the call chain - if a
+  function needs a guarantee, take a type that only the parser can
+  hand out.
+
+#### Errors
+
+- Library functions return `shyake_err` (or `NULL`) and record detail
+  via `set_error()`; the caller reads it with `shyake_last_error()`.
+  This is the project's stand-in for `Result<T, E>` - do not invent a
+  second error channel (no `errno` smuggling, no printing from the
+  library).
+
+#### Explicitly not adopted
+
+- **Arena allocators**: secret material must be zeroized at a
+  well-defined point, which a bulk arena free does not give us.
+- **C23 tuple macros / tag compatibility**: the client is `-std=c11
+  -pedantic` and has to build on Termux and older toolchains.
+- **A length-carrying `String` struct**: the public API and the FFI
+  consumers are `char *`-based; converting would break every binding
+  for readability alone.
+
 ### TypeScript
 
 - 4-space indentation, 100-column limit, no trailing whitespace.
