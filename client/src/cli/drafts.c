@@ -35,9 +35,9 @@
 #include "drafts.h"
 
 /* zero a symmetric key after use */
-static void wipe_key(uint8_t key[32])
+static void wipe_key(u8 key[32])
 {
-	volatile uint8_t *p = key;
+	volatile u8 *p = key;
 	for (int i = 0; i < 32; i++)
 		p[i] = 0;
 }
@@ -74,10 +74,10 @@ static int ensure_drafts_dir(const char *config_dir)
 /* check filename is <digits>.json, return id or -1 */
 static long numeric_draft_id(const char *name)
 {
-	size_t nl = strlen(name);
+	usize nl = strlen(name);
 	if (nl <= 5 || strcmp(name + nl - 5, ".json") != 0)
 		return -1;
-	for (size_t i = 0; i < nl - 5; i++) {
+	for (usize i = 0; i < nl - 5; i++) {
 		if (name[i] < '0' || name[i] > '9')
 			return -1;
 	}
@@ -122,14 +122,14 @@ static char *read_text_file(const char *path)
 		fclose(f);
 		return NULL;
 	}
-	size_t rd = fread(raw, 1, (size_t)flen, f);
+	usize rd = fread(raw, 1, (usize)flen, f);
 	raw[rd] = '\0';
 	fclose(f);
 	return raw;
 }
 
 /* decrypt optional field; "" maps to empty string */
-static char *decrypt_field(const uint8_t *sym, const char *enc)
+static char *decrypt_field(const u8 *sym, const char *enc)
 {
 	if (!enc || enc[0] == '\0')
 		return strdup("");
@@ -138,8 +138,8 @@ static char *decrypt_field(const uint8_t *sym, const char *enc)
 
 shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 			  const char *recipient, const char *subject,
-			  const uint8_t *body, size_t body_len,
-			  const char *draft_id, char **out_id)
+			  const u8 *body, usize body_len, const char *draft_id,
+			  char **out_id)
 {
 	drafts_error[0] = '\0';
 	if (!ctx || !config_dir || !body || body_len == 0)
@@ -171,7 +171,7 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 	}
 
 	/* symmetric key encapsulated to own kem_pk */
-	uint8_t sym_key[32];
+	u8 sym_key[32];
 	char *enc_key = shyake_selfenc_begin(ctx, sym_key);
 	if (!enc_key) {
 		drafts_set_error(
@@ -182,10 +182,10 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 	/* encrypt fields; empty ones stored as "" */
 	char *enc_rec = NULL, *enc_sub = NULL, *enc_bdy = NULL;
 	if (recipient && recipient[0])
-		enc_rec = shyake_seal_b64(sym_key, (const uint8_t *)recipient,
+		enc_rec = shyake_seal_b64(sym_key, (const u8 *)recipient,
 					  strlen(recipient));
 	if (subject && subject[0])
-		enc_sub = shyake_seal_b64(sym_key, (const uint8_t *)subject,
+		enc_sub = shyake_seal_b64(sym_key, (const u8 *)subject,
 					  strlen(subject));
 	enc_bdy = shyake_seal_b64(sym_key, body, body_len);
 	wipe_key(sym_key);
@@ -305,7 +305,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 		return NULL;
 	}
 	char *rec = NULL, *sub = NULL, *bdy = NULL;
-	uint8_t sym[32];
+	u8 sym[32];
 	int have_sym = shyake_selfdec_key(sd, jkey->valuestring, sym) ==
 		       SHYAKE_OK;
 	if (have_sym) {
@@ -331,8 +331,8 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 	result->recipient = rec;
 	result->subject = sub;
 	result->body = bdy;
-	result->timestamp = jupd ? (int64_t)jupd->valuedouble : 0;
-	result->created = jcrt ? (int64_t)jcrt->valuedouble : 0;
+	result->timestamp = jupd ? (i64)jupd->valuedouble : 0;
+	result->created = jcrt ? (i64)jcrt->valuedouble : 0;
 	result->size = jsz ? jsz->valueint : 0;
 
 	cJSON_Delete(json);
@@ -429,7 +429,7 @@ shyake_saved_list *cli_list_drafts(shyake_ctx *ctx, const char *config_dir,
 		}
 
 		char *rec = NULL, *sub = NULL;
-		uint8_t sym[32];
+		u8 sym[32];
 		if (shyake_selfdec_key(sd, jkey->valuestring, sym) ==
 		    SHYAKE_OK) {
 			rec = decrypt_field(sym,
@@ -446,8 +446,8 @@ shyake_saved_list *cli_list_drafts(shyake_ctx *ctx, const char *config_dir,
 		e->sender = strdup(self);
 		e->recipient = rec ? rec : strdup("(decryption failed)");
 		e->subject = sub ? sub : strdup("(decryption failed)");
-		e->timestamp = jupd ? (int64_t)jupd->valuedouble : 0;
-		e->created = jcrt ? (int64_t)jcrt->valuedouble : 0;
+		e->timestamp = jupd ? (i64)jupd->valuedouble : 0;
+		e->created = jcrt ? (i64)jcrt->valuedouble : 0;
 		e->size = jsz ? jsz->valueint : 0;
 		idx++;
 

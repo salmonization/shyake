@@ -19,9 +19,9 @@
  *   [16 bytes]   Poly1305 MAC
  */
 
-static void write_u32le(FILE *f, uint32_t v)
+static void write_u32le(FILE *f, u32 v)
 {
-	uint8_t buf[4];
+	u8 buf[4];
 	buf[0] = v & 0xff;
 	buf[1] = (v >> 8) & 0xff;
 	buf[2] = (v >> 16) & 0xff;
@@ -29,13 +29,13 @@ static void write_u32le(FILE *f, uint32_t v)
 	fwrite(buf, 1, 4, f);
 }
 
-static uint32_t read_u32le(FILE *f)
+static u32 read_u32le(FILE *f)
 {
-	uint8_t buf[4];
+	u8 buf[4];
 	if (fread(buf, 1, 4, f) != 4)
 		return 0;
-	return (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
-	       ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+	return (u32)buf[0] | ((u32)buf[1] << 8) | ((u32)buf[2] << 16) |
+	       ((u32)buf[3] << 24);
 }
 
 shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
@@ -58,8 +58,8 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 		fclose(in);
 		return SHYAKE_ERR;
 	}
-	size_t pt_len = (size_t)fsz;
-	uint8_t *pt = malloc(pt_len);
+	usize pt_len = (usize)fsz;
+	u8 *pt = malloc(pt_len);
 	if (!pt || fread(pt, 1, pt_len, in) != pt_len) {
 		free(pt);
 		fclose(in);
@@ -68,8 +68,8 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 	fclose(in);
 
 	/* resolve KEM public key */
-	uint8_t *kem_pk = NULL;
-	size_t kem_pk_len = 0;
+	u8 *kem_pk = NULL;
+	usize kem_pk_len = 0;
 
 	if (recipient) {
 		char *pk_b64 = fetch_recipient_pubkey(ctx, recipient);
@@ -93,7 +93,7 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 	}
 
 	/* generate random symmetric key */
-	uint8_t sym_key[32];
+	u8 sym_key[32];
 	FILE *ur = fopen("/dev/urandom", "rb");
 	if (!ur || fread(sym_key, 1, 32, ur) != 32) {
 		if (ur)
@@ -114,8 +114,8 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR_CRYPTO;
 	}
 
-	uint8_t *kem_ct = malloc(kem->length_ciphertext);
-	uint8_t *ss = malloc(kem->length_shared_secret);
+	u8 *kem_ct = malloc(kem->length_ciphertext);
+	u8 *ss = malloc(kem->length_shared_secret);
 	if (OQS_KEM_encaps(kem, kem_ct, ss, kem_pk) != OQS_SUCCESS) {
 		free(kem_ct);
 		free(ss);
@@ -125,12 +125,12 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR_CRYPTO;
 	}
 
-	uint8_t ek[32];
+	u8 ek[32];
 	for (int i = 0; i < 32; i++)
 		ek[i] = sym_key[i] ^ ss[i];
 
 	/* generate nonce */
-	uint8_t nonce[12];
+	u8 nonce[12];
 	ur = fopen("/dev/urandom", "rb");
 	if (!ur || fread(nonce, 1, 12, ur) != 12) {
 		if (ur)
@@ -145,8 +145,8 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 	fclose(ur);
 
 	/* encrypt */
-	uint8_t *ct = malloc(pt_len);
-	uint8_t mac[16];
+	u8 *ct = malloc(pt_len);
+	u8 mac[16];
 	if (chacha20_poly1305_encrypt(sym_key, nonce, pt, pt_len, NULL, 0, ct,
 				      mac) != 0) {
 		free(ct);
@@ -178,11 +178,11 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR;
 	}
 
-	write_u32le(out, (uint32_t)kem->length_ciphertext);
+	write_u32le(out, (u32)kem->length_ciphertext);
 	fwrite(kem_ct, 1, kem->length_ciphertext, out);
 	write_u32le(out, 32);
 	fwrite(ek, 1, 32, out);
-	write_u32le(out, (uint32_t)pt_len);
+	write_u32le(out, (u32)pt_len);
 	fwrite(nonce, 1, 12, out);
 	fwrite(ct, 1, pt_len, out);
 	fwrite(mac, 1, 16, out);
@@ -212,28 +212,28 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR;
 	}
 
-	uint32_t kem_ct_len = read_u32le(in);
-	uint8_t *kem_ct = malloc(kem_ct_len);
+	u32 kem_ct_len = read_u32le(in);
+	u8 *kem_ct = malloc(kem_ct_len);
 	if (fread(kem_ct, 1, kem_ct_len, in) != kem_ct_len)
 		goto bad_format;
 
-	uint32_t ek_len = read_u32le(in);
+	u32 ek_len = read_u32le(in);
 	if (ek_len != 32)
 		goto bad_format;
-	uint8_t ek[32];
+	u8 ek[32];
 	if (fread(ek, 1, 32, in) != 32)
 		goto bad_format;
 
-	uint32_t pt_len = read_u32le(in);
-	uint8_t nonce[12];
+	u32 pt_len = read_u32le(in);
+	u8 nonce[12];
 	if (fread(nonce, 1, 12, in) != 12)
 		goto bad_format;
-	uint8_t *ct = malloc(pt_len);
+	u8 *ct = malloc(pt_len);
 	if (fread(ct, 1, pt_len, in) != pt_len) {
 		free(ct);
 		goto bad_format;
 	}
-	uint8_t mac[16];
+	u8 mac[16];
 	if (fread(mac, 1, 16, in) != 16) {
 		free(ct);
 		goto bad_format;
@@ -242,9 +242,9 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 
 	/* load own KEM secret key */
 	char ksk_path[512];
-	size_t ksk_len;
+	usize ksk_len;
 	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
-	uint8_t *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
+	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
 	if (!ksk) {
 		free(kem_ct);
 		free(ct);
@@ -259,7 +259,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR_CRYPTO;
 	}
 
-	uint8_t *ss = malloc(kem->length_shared_secret);
+	u8 *ss = malloc(kem->length_shared_secret);
 	if (OQS_KEM_decaps(kem, ss, kem_ct, ksk) != OQS_SUCCESS) {
 		free(ss);
 		free(kem_ct);
@@ -270,7 +270,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR_CRYPTO;
 	}
 
-	uint8_t sym_key[32];
+	u8 sym_key[32];
 	for (int i = 0; i < 32; i++)
 		sym_key[i] = ek[i] ^ ss[i];
 
@@ -279,7 +279,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 	free(ksk);
 	OQS_KEM_free(kem);
 
-	uint8_t *pt = malloc(pt_len);
+	u8 *pt = malloc(pt_len);
 	if (chacha20_poly1305_decrypt(sym_key, nonce, ct, pt_len, NULL, 0, mac,
 				      pt) != 0) {
 		free(pt);

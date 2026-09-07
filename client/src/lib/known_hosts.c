@@ -93,8 +93,8 @@ shyake_fp_result *shyake_fingerprint(shyake_ctx *ctx, const char *target_user,
 		/* Self fingerprint: compute from local kem_pk.bin */
 		char path[512];
 		snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
-		size_t pk_len;
-		uint8_t *pk = load_file(path, &pk_len);
+		usize pk_len;
+		u8 *pk = load_file(path, &pk_len);
 		if (!pk) {
 			free(result);
 			return NULL;
@@ -113,8 +113,8 @@ shyake_fp_result *shyake_fingerprint(shyake_ctx *ctx, const char *target_user,
 		return NULL;
 	}
 
-	size_t recip_pk_len;
-	uint8_t *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
+	usize recip_pk_len;
+	u8 *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
 	if (!recip_pk) {
 		free(recip_pk_b64);
 		free(result);
@@ -126,12 +126,12 @@ shyake_fp_result *shyake_fingerprint(shyake_ctx *ctx, const char *target_user,
 
 	char fp_hex[SHA256_DIGEST_LENGTH * 2 + 1];
 	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		sprintf(fp_hex + (i * 2), "%02x", result->remote_fp[i]);
+		snprintf(fp_hex + (i * 2), 3, "%02x", result->remote_fp[i]);
 
 	char *local_pk_b64 = get_known_host(ctx->config_dir, target_user);
 	if (local_pk_b64) {
-		size_t local_pk_len;
-		uint8_t *local_pk = base64_decode(local_pk_b64, &local_pk_len);
+		usize local_pk_len;
+		u8 *local_pk = base64_decode(local_pk_b64, &local_pk_len);
 		if (local_pk) {
 			SHA256(local_pk, local_pk_len, result->local_fp);
 			free(local_pk);

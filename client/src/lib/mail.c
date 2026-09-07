@@ -40,8 +40,7 @@ void shyake_free_mail_detail(shyake_mail_detail *d)
 /* ------------------------------------------------------------------ */
 
 shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
-		       const char *subject, const uint8_t *body,
-		       size_t body_len)
+		       const char *subject, const u8 *body, usize body_len)
 {
 	if (!ctx || !recipient || !body)
 		return SHYAKE_ERR;
@@ -51,8 +50,8 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	if (!recip_pk_b64)
 		return SHYAKE_ERR_NETWORK;
 
-	size_t recip_pk_len;
-	uint8_t *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
+	usize recip_pk_len;
+	u8 *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
 	if (!recip_pk) {
 		free(recip_pk_b64);
 		return SHYAKE_ERR_CRYPTO;
@@ -63,13 +62,13 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	SHA256(recip_pk, recip_pk_len, fp_raw);
 	char fp_hex[SHA256_DIGEST_LENGTH * 2 + 1];
 	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		sprintf(fp_hex + (i * 2), "%02x", fp_raw[i]);
+		snprintf(fp_hex + (i * 2), 3, "%02x", fp_raw[i]);
 
 	/* Check known_hosts */
 	char *known_pk_b64 = get_known_host(ctx->config_dir, recipient);
 	if (known_pk_b64) {
-		size_t known_pk_len;
-		uint8_t *known_pk = base64_decode(known_pk_b64, &known_pk_len);
+		usize known_pk_len;
+		u8 *known_pk = base64_decode(known_pk_b64, &known_pk_len);
 		free(known_pk_b64);
 		if (known_pk) {
 			unsigned char known_fp[SHA256_DIGEST_LENGTH];
@@ -88,12 +87,12 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	}
 
 	/* Load own keys */
-	size_t my_kpk_len, my_ssk_len;
+	usize my_kpk_len, my_ssk_len;
 	char path[512];
 	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
-	uint8_t *my_kpk = load_file(path, &my_kpk_len);
+	u8 *my_kpk = load_file(path, &my_kpk_len);
 	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
-	uint8_t *my_ssk = load_sk_decrypted(ctx, path, &my_ssk_len);
+	u8 *my_ssk = load_sk_decrypted(ctx, path, &my_ssk_len);
 
 	if (!my_kpk || !my_ssk) {
 		free(recip_pk_b64);
@@ -104,8 +103,8 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	}
 
 	/* Generate symmetric key */
-	uint8_t sym_key[32];
-	size_t read_bytes = 0;
+	u8 sym_key[32];
+	usize read_bytes = 0;
 	FILE *urandom = fopen("/dev/urandom", "rb");
 	if (urandom) {
 		read_bytes = fread(sym_key, 1, 32, urandom);
@@ -119,7 +118,7 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 		return SHYAKE_ERR_CRYPTO;
 	}
 
-	char *enc_subject = encrypt_to_b64(sym_key, (const uint8_t *)subject,
+	char *enc_subject = encrypt_to_b64(sym_key, (const u8 *)subject,
 					   subject ? strlen(subject) : 0);
 	char *enc_body = encrypt_to_b64(sym_key, body, body_len);
 	char *enc_key_recipient =
@@ -144,16 +143,13 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	if (strchr(recipient, '@') != NULL) {
 		const char *d = strstr(ctx->instance_url, "://");
 		d = d ? d + 3 : ctx->instance_url;
-		char domain[128] = { 0 };
+		char domain[128];
 		const char *sl = strchr(d, '/');
-		if (sl) {
-			size_t ln = (size_t)(sl - d);
-			if (ln >= sizeof(domain))
-				ln = sizeof(domain) - 1;
-			strncpy(domain, d, ln);
-		} else {
-			strncpy(domain, d, sizeof(domain) - 1);
-		}
+		usize ln = sl ? (usize)(sl - d) : strlen(d);
+		if (ln >= sizeof(domain))
+			ln = sizeof(domain) - 1;
+		memcpy(domain, d, ln);
+		domain[ln] = '\0';
 		snprintf(sender_buf, sizeof(sender_buf), "%s@%s", ctx->username,
 			 domain);
 		sender = sender_buf;
@@ -177,10 +173,10 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	char *json_raw = cJSON_PrintUnformatted(signed_obj);
 
 	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
-	uint8_t *signature = malloc(sig->length_signature);
-	size_t sig_len;
-	OQS_SIG_sign(sig, signature, &sig_len, (uint8_t *)json_raw,
-		     strlen(json_raw), my_ssk);
+	u8 *signature = malloc(sig->length_signature);
+	usize sig_len;
+	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)json_raw, strlen(json_raw),
+		     my_ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
 
 	char *pow = shyake_mint_pow(sender, 20);
@@ -319,12 +315,12 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 
 					/* load KEM secret key for decryption */
 					char path[512];
-					size_t ksk_len;
+					usize ksk_len;
 					snprintf(path, sizeof(path),
 						 "%s/kem_sk.bin",
 						 ctx->config_dir);
-					uint8_t *ksk = load_sk_decrypted(
-						ctx, path, &ksk_len);
+					u8 *ksk = load_sk_decrypted(ctx, path,
+								    &ksk_len);
 
 					for (int i = 0; i < count; i++) {
 						cJSON *item =
@@ -368,7 +364,7 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 
 						char *sub = NULL;
 						if (ksk) {
-							uint8_t *sym =
+							u8 *sym =
 								kem_decapsulate_key(
 									enc_key,
 									ksk);
@@ -388,7 +384,7 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 							sub ? sub :
 							      strdup("(decryption failed)");
 						e->size = sz;
-						e->timestamp = (int64_t)ts;
+						e->timestamp = (i64)ts;
 						e->is_sent = is_sent;
 					}
 					free(ksk);
@@ -476,17 +472,17 @@ shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 						->valuestring;
 
 				char path[512];
-				size_t ksk_len;
+				usize ksk_len;
 				snprintf(path, sizeof(path), "%s/kem_sk.bin",
 					 ctx->config_dir);
-				uint8_t *ksk =
+				u8 *ksk =
 					load_sk_decrypted(ctx, path, &ksk_len);
 
 				char *sub = NULL;
 				char *bdy = NULL;
 				if (ksk) {
-					uint8_t *sym = kem_decapsulate_key(
-						enc_key, ksk);
+					u8 *sym = kem_decapsulate_key(enc_key,
+								      ksk);
 					if (sym) {
 						sub = decrypt_from_b64(sym,
 								       enc_sub);
@@ -503,7 +499,7 @@ shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 				result->recipient = strdup(rec);
 				result->subject = sub;
 				result->body = bdy;
-				result->timestamp = (int64_t)ts;
+				result->timestamp = (i64)ts;
 				result->size = 0;
 
 				cJSON_Delete(json);
@@ -588,15 +584,15 @@ shyake_mail_detail *shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 						->valuestring;
 
 				char path[512];
-				size_t ksk_len;
+				usize ksk_len;
 				snprintf(path, sizeof(path), "%s/kem_sk.bin",
 					 ctx->config_dir);
-				uint8_t *ksk =
+				u8 *ksk =
 					load_sk_decrypted(ctx, path, &ksk_len);
 				char *sub = NULL;
 				if (ksk) {
-					uint8_t *sym = kem_decapsulate_key(
-						enc_key, ksk);
+					u8 *sym = kem_decapsulate_key(enc_key,
+								      ksk);
 					if (sym) {
 						sub = decrypt_from_b64(sym,
 								       enc_sub);
@@ -611,7 +607,7 @@ shyake_mail_detail *shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 				result->recipient = strdup(rec);
 				result->subject = sub;
 				result->body = NULL;
-				result->timestamp = (int64_t)ts;
+				result->timestamp = (i64)ts;
 				result->size = sz;
 
 				cJSON_Delete(json);
@@ -836,13 +832,13 @@ parse_saved_json(shyake_ctx *ctx, const char *mail_id, int decrypt_body)
 		cJSON_GetObjectItem(json, "enc_body")->valuestring;
 
 	char ksk_path[512];
-	size_t ksk_len;
+	usize ksk_len;
 	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
-	uint8_t *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
+	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
 
 	char *sub = NULL, *bdy = NULL;
 	if (ksk) {
-		uint8_t *sym = kem_decapsulate_key(enc_key, ksk);
+		u8 *sym = kem_decapsulate_key(enc_key, ksk);
 		if (sym) {
 			sub = decrypt_from_b64(sym, enc_sub);
 			if (decrypt_body && enc_bdy)
@@ -858,7 +854,7 @@ parse_saved_json(shyake_ctx *ctx, const char *mail_id, int decrypt_body)
 	result->recipient = strdup(rec);
 	result->subject = sub;
 	result->body = bdy;
-	result->timestamp = (int64_t)ts;
+	result->timestamp = (i64)ts;
 	result->size = sz;
 
 	cJSON_Delete(json);
@@ -895,7 +891,7 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 	int count = 0;
 	struct dirent *ent;
 	while ((ent = readdir(d)) != NULL) {
-		size_t nl = strlen(ent->d_name);
+		usize nl = strlen(ent->d_name);
 		if (nl > 5 && strcmp(ent->d_name + nl - 5, ".json") == 0)
 			count++;
 	}
@@ -911,19 +907,19 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 
 	/* load KEM secret key once */
 	char ksk_path[512];
-	size_t ksk_len;
+	usize ksk_len;
 	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
-	uint8_t *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
+	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
 
 	int idx = 0;
 	while ((ent = readdir(d)) != NULL && idx < count) {
-		size_t nl = strlen(ent->d_name);
+		usize nl = strlen(ent->d_name);
 		if (nl <= 5 || strcmp(ent->d_name + nl - 5, ".json") != 0)
 			continue;
 
 		/* derive mail_id from filename (strip .json) */
 		char mail_id[256];
-		size_t id_len = nl - 5;
+		usize id_len = nl - 5;
 		if (id_len >= sizeof(mail_id))
 			id_len = sizeof(mail_id) - 1;
 		memcpy(mail_id, ent->d_name, id_len);
@@ -963,7 +959,7 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 
 		char *sub = NULL;
 		if (ksk) {
-			uint8_t *sym = kem_decapsulate_key(enc_key, ksk);
+			u8 *sym = kem_decapsulate_key(enc_key, ksk);
 			if (sym) {
 				sub = decrypt_from_b64(sym, enc_sub);
 				free(sym);
@@ -975,7 +971,7 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 		e->sender = strdup(snd);
 		e->recipient = strdup(rec);
 		e->subject = sub ? sub : strdup("(decryption failed)");
-		e->timestamp = (int64_t)ts;
+		e->timestamp = (i64)ts;
 		e->size = sz;
 		idx++;
 

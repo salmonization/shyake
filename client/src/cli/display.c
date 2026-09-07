@@ -266,7 +266,7 @@ void cli_print_word_wrap(const char *text, int indent, int width)
 /* Timestamp formatting with timezone support                         */
 /* ------------------------------------------------------------------ */
 
-void cli_format_timestamp(int64_t ts, int tz_hours, const char *fmt,
+void cli_format_timestamp(i64 ts, int tz_hours, const char *fmt,
 			  const char *fmt_recent, char *buf, int buf_len)
 {
 	// convert UNIX ts to broken-down time with optional tz offset

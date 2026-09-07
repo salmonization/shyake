@@ -37,17 +37,17 @@ const char *shyake_last_error(shyake_ctx *ctx)
 /* File I/O helpers                                                   */
 /* ------------------------------------------------------------------ */
 
-int save_file(const char *path, const uint8_t *data, size_t len)
+int save_file(const char *path, const u8 *data, usize len)
 {
 	FILE *f = fopen(path, "wb");
 	if (!f)
 		return -1;
-	size_t written = fwrite(data, 1, len, f);
+	usize written = fwrite(data, 1, len, f);
 	fclose(f);
 	return written == len ? 0 : -1;
 }
 
-uint8_t *load_file(const char *path, size_t *len)
+u8 *load_file(const char *path, usize *len)
 {
 	FILE *f = fopen(path, "rb");
 	if (!f)
@@ -55,7 +55,7 @@ uint8_t *load_file(const char *path, size_t *len)
 	fseek(f, 0, SEEK_END);
 	*len = ftell(f);
 	fseek(f, 0, SEEK_SET);
-	uint8_t *data = malloc(*len);
+	u8 *data = malloc(*len);
 	if (data) {
 		if (fread(data, 1, *len, f) != *len) {
 			free(data);
@@ -70,7 +70,7 @@ uint8_t *load_file(const char *path, size_t *len)
 /* Base64                                                             */
 /* ------------------------------------------------------------------ */
 
-char *base64_encode(const uint8_t *data, size_t len)
+char *base64_encode(const u8 *data, usize len)
 {
 	int out_len = 4 * ((len + 2) / 3);
 	char *out = malloc(out_len + 1);
@@ -80,19 +80,19 @@ char *base64_encode(const uint8_t *data, size_t len)
 	return out;
 }
 
-uint8_t *base64_decode(const char *b64, size_t *out_len)
+u8 *base64_decode(const char *b64, usize *out_len)
 {
-	size_t len = strlen(b64);
+	usize len = strlen(b64);
 	while (len > 0 && (b64[len - 1] == '\r' || b64[len - 1] == '\n' ||
 			   b64[len - 1] == ' '))
 		len--;
 
-	uint8_t *out = malloc(len);
+	u8 *out = malloc(len);
 	if (!out)
 		return NULL;
 
 	char *std_b64 = strdup(b64);
-	for (size_t i = 0; i < len; i++) {
+	for (usize i = 0; i < len; i++) {
 		if (std_b64[i] == '-')
 			std_b64[i] = '+';
 		if (std_b64[i] == '_')
@@ -160,11 +160,11 @@ void shyake_free_ctx(shyake_ctx *ctx)
 	free(ctx->config_dir);
 	free(ctx->instance_url);
 	free(ctx->username);
-	volatile uint8_t *vp = (volatile uint8_t *)ctx->passphrase;
-	for (size_t i = 0; i < sizeof(ctx->passphrase); i++)
+	volatile u8 *vp = (volatile u8 *)ctx->passphrase;
+	for (usize i = 0; i < sizeof(ctx->passphrase); i++)
 		vp[i] = 0;
-	vp = (volatile uint8_t *)ctx->new_passphrase;
-	for (size_t i = 0; i < sizeof(ctx->new_passphrase); i++)
+	vp = (volatile u8 *)ctx->new_passphrase;
+	for (usize i = 0; i < sizeof(ctx->new_passphrase); i++)
 		vp[i] = 0;
 	free(ctx);
 	curl_global_cleanup();
@@ -174,16 +174,16 @@ void shyake_set_passphrase(shyake_ctx *ctx, const char *passphrase)
 {
 	if (!ctx)
 		return;
-	strncpy(ctx->passphrase, passphrase ? passphrase : "", 511);
-	ctx->passphrase[511] = '\0';
+	snprintf(ctx->passphrase, sizeof(ctx->passphrase), "%s",
+		 passphrase ? passphrase : "");
 }
 
 void shyake_set_new_passphrase(shyake_ctx *ctx, const char *passphrase)
 {
 	if (!ctx)
 		return;
-	strncpy(ctx->new_passphrase, passphrase ? passphrase : "", 511);
-	ctx->new_passphrase[511] = '\0';
+	snprintf(ctx->new_passphrase, sizeof(ctx->new_passphrase), "%s",
+		 passphrase ? passphrase : "");
 }
 
 /* ------------------------------------------------------------------ */
@@ -203,8 +203,8 @@ int shyake_generate_keys(shyake_ctx *ctx)
 	if (stat(path_pk, &st) == -1) {
 		OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
 		if (kem) {
-			uint8_t *pk = malloc(kem->length_public_key);
-			uint8_t *sk = malloc(kem->length_secret_key);
+			u8 *pk = malloc(kem->length_public_key);
+			u8 *sk = malloc(kem->length_secret_key);
 			if (OQS_KEM_keypair(kem, pk, sk) == OQS_SUCCESS) {
 				snprintf(path_sk, sizeof(path_sk),
 					 "%s/kem_sk.bin", ctx->config_dir);
@@ -224,8 +224,8 @@ int shyake_generate_keys(shyake_ctx *ctx)
 	if (stat(path_pk, &st) == -1) {
 		OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
 		if (sig) {
-			uint8_t *pk = malloc(sig->length_public_key);
-			uint8_t *sk = malloc(sig->length_secret_key);
+			u8 *pk = malloc(sig->length_public_key);
+			u8 *sk = malloc(sig->length_secret_key);
 			if (OQS_SIG_keypair(sig, pk, sk) == OQS_SUCCESS) {
 				snprintf(path_sk, sizeof(path_sk),
 					 "%s/sig_sk.bin", ctx->config_dir);
@@ -256,7 +256,7 @@ char *shyake_mint_pow(const char *resource, int bits)
 
 	char rand_str[13];
 	const char charset[] = "abcdefghijklmnopqrstuvwxyz0123456789";
-	uint8_t rnd[12];
+	u8 rnd[12];
 	FILE *ur = fopen("/dev/urandom", "rb");
 	int have_rnd = 0;
 	if (ur) {
@@ -265,23 +265,24 @@ char *shyake_mint_pow(const char *resource, int bits)
 	}
 	if (!have_rnd) {
 		/* fallback: seed once from time and stack address */
-		srand((unsigned)(time(NULL) ^ (uintptr_t)rnd));
+		srand((unsigned)(time(NULL) ^ (uptr)rnd));
 		for (int i = 0; i < 12; i++)
-			rnd[i] = (uint8_t)rand();
+			rnd[i] = (u8)rand();
 	}
 	for (int i = 0; i < 12; i++)
 		rand_str[i] = charset[rnd[i] % 36];
 	rand_str[12] = '\0';
 
-	char *header = malloc(256);
+	usize header_sz = 256;
+	char *header = malloc(header_sz);
 	unsigned long counter = 0;
 	unsigned char hash[SHA_DIGEST_LENGTH];
 	int bytes_to_check = bits / 8;
 	int remaining_bits = bits % 8;
 
 	while (1) {
-		sprintf(header, "1:%d:%s:%s::%s:%lx", bits, date, resource,
-			rand_str, counter);
+		snprintf(header, header_sz, "1:%d:%s:%s::%s:%lx", bits, date,
+			 resource, rand_str, counter);
 		SHA1((unsigned char *)header, strlen(header), hash);
 		int match = 1;
 		for (int i = 0; i < bytes_to_check; i++) {
@@ -313,15 +314,15 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username)
 	if (!ctx || !username)
 		return SHYAKE_ERR;
 
-	size_t kpk_len, spk_len, ssk_len;
+	usize kpk_len, spk_len, ssk_len;
 	char path[512];
 
 	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
-	uint8_t *kpk = load_file(path, &kpk_len);
+	u8 *kpk = load_file(path, &kpk_len);
 	snprintf(path, sizeof(path), "%s/sig_pk.bin", ctx->config_dir);
-	uint8_t *spk = load_file(path, &spk_len);
+	u8 *spk = load_file(path, &spk_len);
 	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
-	uint8_t *ssk = load_sk_decrypted(ctx, path, &ssk_len);
+	u8 *ssk = load_sk_decrypted(ctx, path, &ssk_len);
 
 	if (!kpk || !spk || !ssk) {
 		free(kpk);
@@ -346,10 +347,10 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username)
 	char *json_raw = cJSON_PrintUnformatted(root);
 
 	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
-	uint8_t *signature = malloc(sig->length_signature);
-	size_t sig_len;
-	OQS_SIG_sign(sig, signature, &sig_len, (uint8_t *)json_raw,
-		     strlen(json_raw), ssk);
+	u8 *signature = malloc(sig->length_signature);
+	usize sig_len;
+	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)json_raw, strlen(json_raw),
+		     ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
 
 	char *pow = shyake_mint_pow(username, 20);

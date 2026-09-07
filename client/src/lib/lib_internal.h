@@ -28,11 +28,11 @@ void set_error(shyake_ctx *ctx, const char *fmt, ...)
 /* libcurl response buffer */
 struct curl_response {
 	char *data;
-	size_t size;
+	usize size;
 };
 
 /* network.c */
-size_t curl_write_cb(void *contents, size_t size, size_t nmemb, void *userp);
+usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp);
 struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
 					 const char *endpoint,
 					 const char *username);
@@ -41,22 +41,23 @@ struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
 char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient);
 
 /* libshyake.c (file I/O & base64) */
-int save_file(const char *path, const uint8_t *data, size_t len);
-uint8_t *load_file(const char *path, size_t *len);
+int save_file(const char *path, const u8 *data, usize len);
+u8 *load_file(const char *path, usize *len);
 
 /* passphrase.c */
-int save_sk_encrypted(const char *path, const char *passphrase,
-		      const uint8_t *sk, size_t sk_len);
-uint8_t *load_sk_decrypted(shyake_ctx *ctx, const char *path, size_t *out_len);
-char *base64_encode(const uint8_t *data, size_t len);
-uint8_t *base64_decode(const char *b64, size_t *out_len);
+void zero_memory(void *buf, usize len);
+int save_sk_encrypted(const char *path, const char *passphrase, const u8 *sk,
+		      usize sk_len);
+u8 *load_sk_decrypted(shyake_ctx *ctx, const char *path, usize *out_len);
+char *base64_encode(const u8 *data, usize len);
+u8 *base64_decode(const char *b64, usize *out_len);
 
 /* crypto_ops.c */
-char *encrypt_to_b64(const uint8_t *key, const uint8_t *pt, size_t pt_len);
-char *decrypt_from_b64(const uint8_t *key, const char *b64);
-char *kem_encapsulate_key(const uint8_t *kem_pk, size_t kem_pk_len,
-			  const uint8_t *sym_key);
-uint8_t *kem_decapsulate_key(const char *enc_key_b64, const uint8_t *ksk);
+char *encrypt_to_b64(const u8 *key, const u8 *pt, usize pt_len);
+char *decrypt_from_b64(const u8 *key, const char *b64);
+char *kem_encapsulate_key(const u8 *kem_pk, usize kem_pk_len,
+			  const u8 *sym_key);
+u8 *kem_decapsulate_key(const char *enc_key_b64, const u8 *ksk);
 
 /* known_hosts.c */
 char *get_known_host(const char *config_dir, const char *username);

@@ -8,9 +8,9 @@
 #include "vendor/cJSON/cJSON.h"
 #include "lib_internal.h"
 
-size_t curl_write_cb(void *contents, size_t size, size_t nmemb, void *userp)
+usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp)
 {
-	size_t realsize = size * nmemb;
+	usize realsize = size * nmemb;
 	struct curl_response *mem = (struct curl_response *)userp;
 	char *ptr = realloc(mem->data, mem->size + realsize + 1);
 	if (!ptr)
@@ -32,9 +32,9 @@ struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
 	snprintf(timestamp, sizeof(timestamp), "%ld", now);
 
 	char path[512];
-	size_t ssk_len;
+	usize ssk_len;
 	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
-	uint8_t *ssk = load_sk_decrypted(ctx, path, &ssk_len);
+	u8 *ssk = load_sk_decrypted(ctx, path, &ssk_len);
 	if (!ssk)
 		return NULL;
 
@@ -47,10 +47,10 @@ struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
 		free(ssk);
 		return NULL;
 	}
-	uint8_t *signature = malloc(sig->length_signature);
-	size_t sig_len;
-	OQS_SIG_sign(sig, signature, &sig_len, (uint8_t *)message,
-		     strlen(message), ssk);
+	u8 *signature = malloc(sig->length_signature);
+	usize sig_len;
+	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)message, strlen(message),
+		     ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
 
 	char *pow = shyake_mint_pow(username, 20);

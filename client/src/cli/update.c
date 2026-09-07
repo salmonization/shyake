@@ -10,18 +10,18 @@
 #include "update.h"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include "internal.h"
 #endif
 
 /* growable buffer for curl responses */
 struct mem_buf {
 	char *data;
-	size_t size;
+	usize size;
 };
 
-static size_t mem_write_cb(void *contents, size_t size, size_t nmemb,
-			   void *userp)
+static usize mem_write_cb(void *contents, usize size, usize nmemb, void *userp)
 {
-	size_t total = size * nmemb;
+	usize total = size * nmemb;
 	struct mem_buf *buf = userp;
 	char *p = realloc(buf->data, buf->size + total + 1);
 	if (!p)
@@ -34,7 +34,7 @@ static size_t mem_write_cb(void *contents, size_t size, size_t nmemb,
 }
 
 /* read whole file into malloc'd buffer */
-static uint8_t *read_file(const char *path, size_t *len)
+static u8 *read_file(const char *path, usize *len)
 {
 	FILE *f = fopen(path, "rb");
 	if (!f)
@@ -46,18 +46,18 @@ static uint8_t *read_file(const char *path, size_t *len)
 		fclose(f);
 		return NULL;
 	}
-	uint8_t *data = malloc((size_t)sz);
+	u8 *data = malloc((usize)sz);
 	if (!data) {
 		fclose(f);
 		return NULL;
 	}
-	if (fread(data, 1, (size_t)sz, f) != (size_t)sz) {
+	if (fread(data, 1, (usize)sz, f) != (usize)sz) {
 		free(data);
 		fclose(f);
 		return NULL;
 	}
 	fclose(f);
-	*len = (size_t)sz;
+	*len = (usize)sz;
 	return data;
 }
 
@@ -250,8 +250,8 @@ static int verify_sha256(const char *file_path, const char *expected_hex)
 	if (!expected_hex || strlen(expected_hex) != SHA256_DIGEST_LENGTH * 2)
 		return -1;
 
-	size_t data_len = 0;
-	uint8_t *data = read_file(file_path, &data_len);
+	usize data_len = 0;
+	u8 *data = read_file(file_path, &data_len);
 	if (!data)
 		return -1;
 
@@ -351,7 +351,7 @@ int cli_self_update(const char *version_url, const char *current_version,
 #if defined(__linux__)
 	readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
 #elif defined(__APPLE__)
-	uint32_t sz = sizeof(self_path);
+	u32 sz = sizeof(self_path);
 	_NSGetExecutablePath(self_path, &sz);
 #endif
 
@@ -361,7 +361,7 @@ int cli_self_update(const char *version_url, const char *current_version,
 			fgets(self_path, sizeof(self_path), wp);
 			pclose(wp);
 		}
-		size_t l = strlen(self_path);
+		usize l = strlen(self_path);
 		if (l > 0 && self_path[l - 1] == '\n')
 			self_path[l - 1] = '\0';
 	}
