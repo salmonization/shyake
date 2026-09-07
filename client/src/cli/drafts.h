@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "shyake.h"
+#include "internal.h"
 
 /* Local encrypted drafts of this reference CLI. The on-disk JSON
  * format is client-specific; the crypto uses libshyake's public
@@ -29,8 +30,8 @@ const char *cli_drafts_last_error(void);
  */
 shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 			  const char *recipient, const char *subject,
-			  const uint8_t *body, size_t body_len,
-			  const char *draft_id, char **out_id);
+			  const u8 *body, usize body_len, const char *draft_id,
+			  char **out_id);
 
 /*
  * List all local drafts sorted by id (decrypts recipient + subject).

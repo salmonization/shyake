@@ -11,6 +11,7 @@
 #include "update.h"
 #include "drafts.h"
 #include "man.h"
+#include "internal.h"
 
 #ifndef SHYAKE_VERSION
 #define SHYAKE_VERSION "dev"
@@ -23,7 +24,7 @@ static char *build_version_url(const char *instance)
 {
 	if (!instance || !*instance)
 		return strdup(SHYAKE_FALLBACK_VERSION_URL);
-	size_t len = strlen(instance);
+	usize len = strlen(instance);
 	while (len > 0 && instance[len - 1] == '/')
 		len--;
 	const char *path = "/api/client/version";
@@ -31,7 +32,7 @@ static char *build_version_url(const char *instance)
 	if (!url)
 		return NULL;
 	memcpy(url, instance, len);
-	strcpy(url + len, path);
+	memcpy(url + len, path, strlen(path) + 1);
 	return url;
 }
 
@@ -59,25 +60,25 @@ int cmd_init(const char *config_dir);
 
 char *get_config_dir(void);
 
-static uint8_t *read_all_bytes(FILE *f, size_t *out_len)
+static u8 *read_all_bytes(FILE *f, usize *out_len)
 {
-	size_t capacity = 1024;
-	size_t length = 0;
-	uint8_t *buffer = malloc(capacity);
+	usize capacity = 1024;
+	usize length = 0;
+	u8 *buffer = malloc(capacity);
 	if (!buffer)
 		return NULL;
 
 	while (!feof(f) && !ferror(f)) {
 		if (length == capacity) {
 			capacity *= 2;
-			uint8_t *new_buffer = realloc(buffer, capacity);
+			u8 *new_buffer = realloc(buffer, capacity);
 			if (!new_buffer) {
 				free(buffer);
 				return NULL;
 			}
 			buffer = new_buffer;
 		}
-		size_t read_bytes =
+		usize read_bytes =
 			fread(buffer + length, 1, capacity - length, f);
 		length += read_bytes;
 	}
@@ -132,8 +133,16 @@ static void parse_check_columns(const char *spec, int *col_order,
 	*col_count = 0;
 	char buf[256];
 	snprintf(buf, sizeof(buf), "%s", spec);
-	char *tok = strtok(buf, ",");
-	while (tok && *col_count < 5) {
+	char *rest = buf;
+	while (rest && *col_count < 5) {
+		char *tok = rest;
+		char *comma = strchr(rest, ',');
+		if (comma) {
+			*comma = '\0';
+			rest = comma + 1;
+		} else {
+			rest = NULL;
+		}
 		while (*tok == ' ')
 			tok++;
 		int col = 0;
@@ -152,7 +161,6 @@ static void parse_check_columns(const char *spec, int *col_order,
 
 		if (col)
 			col_order[(*col_count)++] = col;
-		tok = strtok(NULL, ",");
 	}
 
 	if (*col_count == 0) {
@@ -268,7 +276,7 @@ static int update_config_user_and_instance(const char *config_dir,
 	int has_instance = 0;
 	for (int i = 0; i < count; i++) {
 		char line_copy[1024];
-		strcpy(line_copy, lines[i]);
+		snprintf(line_copy, sizeof(line_copy), "%s", lines[i]);
 		char *trimmed = trim_whitespace(line_copy);
 		if (trimmed[0] == '#' || trimmed[0] == '\0')
 			continue;
@@ -674,7 +682,7 @@ int main(int argc, char *argv[])
 					draft_id, recipient);
 				fflush(stderr);
 				ret = shyake_send(ctx, recipient, subject,
-						  (const uint8_t *)d->body,
+						  (const u8 *)d->body,
 						  strlen(d->body));
 				if (ret == SHYAKE_OK) {
 					fprintf(stderr, "done.\n");
@@ -735,8 +743,8 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		size_t body_len;
-		uint8_t *body = read_all_bytes(in_file, &body_len);
+		usize body_len;
+		u8 *body = read_all_bytes(in_file, &body_len);
 		if (in_file != stdin)
 			fclose(in_file);
 
@@ -748,10 +756,10 @@ int main(int argc, char *argv[])
 		}
 
 		if (!subject) {
-			uint8_t *newline = memchr(body, '\n', body_len);
-			size_t first_line_len =
-				newline ? (size_t)(newline - body) : body_len;
-			size_t actual_len = first_line_len;
+			u8 *newline = memchr(body, '\n', body_len);
+			usize first_line_len =
+				newline ? (usize)(newline - body) : body_len;
+			usize actual_len = first_line_len;
 			if (actual_len > 0 && body[actual_len - 1] == '\r') {
 				actual_len--;
 			}
@@ -761,8 +769,7 @@ int main(int argc, char *argv[])
 			extracted_subject[actual_len] = '\0';
 			subject = extracted_subject;
 
-			size_t advance = newline ? first_line_len + 1 :
-						   body_len;
+			usize advance = newline ? first_line_len + 1 : body_len;
 			body_len -= advance;
 			if (body_len > 0) {
 				memmove(body, body + advance, body_len);
@@ -789,7 +796,7 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 		int is_blank = 1;
-		for (size_t i = 0; subject[i] != '\0'; i++) {
+		for (usize i = 0; subject[i] != '\0'; i++) {
 			if (!isspace((unsigned char)subject[i])) {
 				is_blank = 0;
 				break;
@@ -907,10 +914,13 @@ int main(int argc, char *argv[])
 			}
 			const char *to = d->recipient ? d->recipient : "";
 			const char *sub = d->subject ? d->subject : "";
-			initial = malloc(strlen(to) + strlen(sub) +
-					 strlen(d->body) + 32);
-			sprintf(initial, "To: %s\nSubject: %s\n---\n%s", to,
-				sub, d->body);
+			usize sz =
+				strlen(to) + strlen(sub) + strlen(d->body) + 32;
+			initial = malloc(sz);
+			if (initial)
+				snprintf(initial, sz,
+					 "To: %s\nSubject: %s\n---\n%s", to,
+					 sub, d->body);
 			shyake_free_mail_detail(d);
 		} else {
 			initial = strdup("To: \nSubject: \n---\n");
@@ -951,7 +961,7 @@ int main(int argc, char *argv[])
 		/* read edited content back and wipe the plaintext */
 		FILE *rf = fopen(tmp_path, "rb");
 		char *buf = NULL;
-		size_t buf_len = 0;
+		usize buf_len = 0;
 		if (rf) {
 			buf = (char *)read_all_bytes(rf, &buf_len);
 			fclose(rf);
@@ -1014,9 +1024,8 @@ int main(int argc, char *argv[])
 
 		char *new_id = NULL;
 		shyake_err ret = cli_save_draft(ctx, config_dir, to, subject,
-						(const uint8_t *)body,
-						strlen(body), draft_id,
-						&new_id);
+						(const u8 *)body, strlen(body),
+						draft_id, &new_id);
 		if (ret == SHYAKE_OK) {
 			printf("Draft %s saved.\n", new_id ? new_id : draft_id);
 		} else {

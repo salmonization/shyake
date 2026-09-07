@@ -147,8 +147,7 @@ shyake_block_list *shyake_list_blocks(shyake_ctx *ctx)
 								"");
 						e->created =
 							cJSON_IsNumber(ts) ?
-								(int64_t)ts
-									->valuedouble :
+								(i64)ts->valuedouble :
 								0;
 					}
 				}
@@ -184,10 +183,10 @@ shyake_err shyake_rotate(shyake_ctx *ctx)
 		return SHYAKE_ERR_CRYPTO;
 	}
 
-	uint8_t *new_kpk = malloc(kem->length_public_key);
-	uint8_t *new_ksk = malloc(kem->length_secret_key);
-	uint8_t *new_spk = malloc(sig->length_public_key);
-	uint8_t *new_ssk = malloc(sig->length_secret_key);
+	u8 *new_kpk = malloc(kem->length_public_key);
+	u8 *new_ksk = malloc(kem->length_secret_key);
+	u8 *new_spk = malloc(sig->length_public_key);
+	u8 *new_ssk = malloc(sig->length_secret_key);
 
 	if (OQS_KEM_keypair(kem, new_kpk, new_ksk) != OQS_SUCCESS ||
 	    OQS_SIG_keypair(sig, new_spk, new_ssk) != OQS_SUCCESS) {

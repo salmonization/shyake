@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "man.h"
+#include "internal.h"
 
 #ifndef SHYAKE_VERSION
 #define SHYAKE_VERSION "dev"
@@ -280,7 +281,7 @@ static const struct man_entry man_table[] = {
 
 void cli_print_man(const char *subcmd)
 {
-	size_t i;
+	usize i;
 
 	if (!subcmd) {
 		printf("Usage: shyake [option] [command]\n\n"

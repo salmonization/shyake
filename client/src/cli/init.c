@@ -42,10 +42,11 @@ char *get_config_dir(void)
 		homedir = getpwuid(getuid())->pw_dir;
 	}
 
-	char *path = malloc(strlen(homedir) + 32);
+	usize sz = strlen(homedir) + 32;
+	char *path = malloc(sz);
 	if (!path)
 		return NULL;
-	sprintf(path, "%s/.config/shyake", homedir);
+	snprintf(path, sz, "%s/.config/shyake", homedir);
 	return path;
 }
 
@@ -54,7 +55,7 @@ static int mkdir_p(const char *path)
 {
 	char tmp[512];
 	snprintf(tmp, sizeof(tmp), "%s", path);
-	size_t len = strlen(tmp);
+	usize len = strlen(tmp);
 	if (len > 0 && tmp[len - 1] == '/')
 		tmp[len - 1] = '\0';
 

@@ -6,7 +6,7 @@
 #include "prompt.h"
 #include "shyake.h"
 
-int read_passphrase(const char *prompt_str, char *buf, size_t buflen)
+int read_passphrase(const char *prompt_str, char *buf, usize buflen)
 {
 	buf[0] = '\0';
 
@@ -14,8 +14,7 @@ int read_passphrase(const char *prompt_str, char *buf, size_t buflen)
 	 * Avoids both stdin-consumed and no-tty problems in pipelines. */
 	const char *env_pp = getenv("SHYAKE_PASSPHRASE");
 	if (env_pp != NULL) {
-		strncpy(buf, env_pp, buflen - 1);
-		buf[buflen - 1] = '\0';
+		snprintf(buf, buflen, "%s", env_pp);
 		return 0;
 	}
 
@@ -55,7 +54,7 @@ int read_passphrase(const char *prompt_str, char *buf, size_t buflen)
 		return -1;
 	}
 
-	size_t len = strlen(buf);
+	usize len = strlen(buf);
 	if (len > 0 && buf[len - 1] == '\n')
 		buf[len - 1] = '\0';
 	return 0;

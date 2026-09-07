@@ -1,10 +1,10 @@
 #include "shyake_crypto.h"
 #include <openssl/evp.h>
 
-int chacha20_poly1305_encrypt(const uint8_t *key, const uint8_t *nonce,
-			      const uint8_t *plaintext, size_t plaintext_len,
-			      const uint8_t *aad, size_t aad_len,
-			      uint8_t *ciphertext, uint8_t *mac)
+int chacha20_poly1305_encrypt(const u8 *key, const u8 *nonce,
+			      const u8 *plaintext, usize plaintext_len,
+			      const u8 *aad, usize aad_len, u8 *ciphertext,
+			      u8 *mac)
 {
 	EVP_CIPHER_CTX *ctx;
 	int len;
@@ -58,10 +58,10 @@ int chacha20_poly1305_encrypt(const uint8_t *key, const uint8_t *nonce,
 	return 0;
 }
 
-int chacha20_poly1305_decrypt(const uint8_t *key, const uint8_t *nonce,
-			      const uint8_t *ciphertext, size_t ciphertext_len,
-			      const uint8_t *aad, size_t aad_len,
-			      const uint8_t *mac, uint8_t *plaintext)
+int chacha20_poly1305_decrypt(const u8 *key, const u8 *nonce,
+			      const u8 *ciphertext, usize ciphertext_len,
+			      const u8 *aad, usize aad_len, const u8 *mac,
+			      u8 *plaintext)
 {
 	EVP_CIPHER_CTX *ctx;
 	int len;

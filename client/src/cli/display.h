@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "shyake.h"
+#include "internal.h"
 
 /* Pager */
 void cli_setup_pager(int disable_pager);
@@ -16,7 +17,7 @@ void cli_print_word_wrap(const char *text, int indent, int width);
 
 /* Format a UNIX timestamp to a string */
 #define TZ_AUTO (0x7FFFFFFF)
-void cli_format_timestamp(int64_t ts, int tz_hours, const char *fmt,
+void cli_format_timestamp(i64 ts, int tz_hours, const char *fmt,
 			  const char *fmt_recent, char *buf, int buf_len);
 
 /* Sender display helper: keep trailing @ for remote parties */

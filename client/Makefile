@@ -47,6 +47,7 @@ CFLAGS = -Wall -Wextra -std=c11 -pedantic \
          -DSHYAKE_VERSION='"$(VERSION)"' \
          -MMD -MP \
          -Iinclude \
+         -Isrc/lib \
          -Isrc/lib/vendor/cJSON \
          $(addprefix -I, $(SYS_INC))
 
