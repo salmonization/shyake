@@ -56,7 +56,7 @@ static const struct man_entry man_table[] = {
 		  "    must be base64-encoded before sending.\n\n"
 		  "Tips:\n"
 		  "    Send a small image:\n"
-		  "        base64 image.png | shyake send -t salmon -s "
+		  "        base64 -i image.png | shyake send -t salmon -s "
 		  "\"image.png\"\n"
 		  "    Send a small archive:\n"
 		  "        tar czf - ./source | base64 | shyake send -t "
