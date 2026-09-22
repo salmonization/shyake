@@ -147,7 +147,7 @@ sending.
 
 ```sh
 # send a poor image
-base64 image.png | shyake send -t flat_white -s "image.png"
+base64 < image.png | shyake send -t flat_white -s "image.png"
 
 # send a small tape archive
 tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"

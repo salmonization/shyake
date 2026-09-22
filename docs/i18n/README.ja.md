@@ -135,7 +135,7 @@ base64 エンコードする必要があります。
 
 ```sh
 # 貧しい画像を送る
-base64 image.png | shyake send -t flat_white -s "image.png"
+base64 < image.png | shyake send -t flat_white -s "image.png"
 
 # 小さなアーカイブを送る
 tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
