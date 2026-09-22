@@ -147,7 +147,7 @@ app.post('/api/register', async c => {
     return c.json({error: 'Username is reserved'}, 403);
   }
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) {
     return c.json({error: 'Invalid Proof of Work'}, 403);
   }
@@ -285,7 +285,7 @@ app.post('/api/mail', async c => {
     return c.json({error: 'Missing required fields'}, 400);
   }
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, sender);
   if (!isPowValid) {
     return c.json({error: 'Invalid Proof of Work'}, 403);
   }
@@ -430,7 +430,7 @@ app.get('/api/mail', async c => {
     return c.json({error: 'Missing auth headers'}, 401);
   }
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) {
     return c.json({error: 'Invalid Proof of Work'}, 403);
   }
@@ -495,7 +495,7 @@ app.get('/api/mail/:id', async c => {
     return c.json({error: 'Missing auth headers'}, 401);
   }
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) {
     return c.json({error: 'Invalid Proof of Work'}, 403);
   }
@@ -599,7 +599,7 @@ app.delete('/api/mail/:id', async c => {
   if (!username || !timestamp || !signature || !pow)
     return c.json({error: 'Missing auth headers'}, 401);
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) return c.json({error: 'Invalid Proof of Work'}, 403);
 
   const clientTs = parseInt(timestamp, 10);
@@ -648,7 +648,7 @@ async function handleBlock(c: any, unblock: boolean): Promise<Response> {
   if (!username || !timestamp || !signature || !pow)
     return c.json({error: 'Missing auth headers'}, 401);
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) return c.json({error: 'Invalid Proof of Work'}, 403);
 
   const clientTs = parseInt(timestamp, 10);
@@ -719,7 +719,7 @@ app.get('/api/block', async c => {
   if (!username || !timestamp || !signature || !pow)
     return c.json({error: 'Missing auth headers'}, 401);
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) return c.json({error: 'Invalid Proof of Work'}, 403);
 
   const clientTs = parseInt(timestamp, 10);
@@ -769,7 +769,7 @@ app.post('/api/rotate', async c => {
     return c.json({error: 'Missing auth headers'}, 401);
   }
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) {
     return c.json({error: 'Invalid Proof of Work'}, 403);
   }
@@ -845,7 +845,7 @@ app.delete('/api/destroy', async c => {
     return c.json({error: 'Missing auth headers'}, 401);
   }
 
-  const isPowValid = await verifyPoW(pow, 20);
+  const isPowValid = await verifyPoW(pow, username);
   if (!isPowValid) {
     return c.json({error: 'Invalid Proof of Work'}, 403);
   }
