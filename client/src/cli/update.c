@@ -8,9 +8,9 @@
 #include <openssl/sha.h>
 #include "cJSON.h"
 #include "update.h"
+#include "internal.h"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
-#include "internal.h"
 #endif
 
 /* growable buffer for curl responses */
