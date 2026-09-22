@@ -11,9 +11,10 @@ Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 ### 1. Overview
 
-Shyake is a post-quantum, end-to-end encrypted, asynchronous mail
-system with a POSIX-style command-line client. It is a decentralized,
-censorship-resistant, and surveillance-resistant way to communicate.
+Shyake is a post-quantum, end-to-end encrypted asynchronous mail
+system with a POSIX-style command-line interface client, designed as
+a decentralized communication method to resist censorship and
+surveillance.
 
 Key properties:
 

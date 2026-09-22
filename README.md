@@ -4,9 +4,9 @@ English | [简体中文](./docs/i18n/README.zh-CN.md) | [日本語](./docs/i18n/
 
 ### Overview
 
-Shyake is an **end-to-end encrypted mail system**. It uses
-**post-quantum cryptography**. It is a decentralized,
-censorship-resistant, and surveillance-resistant way to communicate.
+Shyake is an **end-to-end encrypted mail system** powered by
+**post-quantum cryptography**, designed as a decentralized
+communication method to resist censorship and surveillance.
 
 The server runs on Cloudflare Workers, so everyone can host an
 instance at no cost. You can also self-host the server on your own
