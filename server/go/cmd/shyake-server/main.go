@@ -28,10 +28,16 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	importD1 := flag.String("import-d1", "", "copy the Worker database in `file` (the D1 "+
+		"SQLite file, or the SQL of wrangler d1 export) into SHYAKE_DATABASE, then exit")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("shyake-server", version)
 		return
+	}
+	run := run
+	if *importD1 != "" {
+		run = func() error { return runImport(*importD1) }
 	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "shyake-server:", err)
@@ -98,6 +104,35 @@ func run() error {
 	defer cancel()
 	if err := srv.Shutdown(shutdown); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	return nil
+}
+
+// runImport moves a Worker instance's data into a new database. The
+// instance domain must be the one the Worker used, since stored
+// addresses are relative to it.
+func runImport(src string) error {
+	cfg, err := config.Load(nil)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	db, err := sqlite.Open(ctx, cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	rep, err := sqlite.ImportD1(ctx, db, src, cfg.InstanceDomain)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("imported %d users, %d mails, %d blocks into %s\n",
+		rep.Users, rep.Mail, rep.Blocks, cfg.Database)
+	if rep.DuplicateMail > 0 {
+		fmt.Printf("dropped %d duplicate mails (same signature stored twice)\n", rep.DuplicateMail)
+	}
+	for _, u := range rep.SkippedUsers {
+		fmt.Printf("skipped user %q: differs from an earlier name only by case\n", u)
 	}
 	return nil
 }
