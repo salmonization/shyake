@@ -16,9 +16,9 @@ This document helps you develop for Shyake.
 
 ### Dependencies
 
-`liboqs` is statically linked on all platforms so the binary carries
-no runtime dependency on it. `libcurl` and `libcrypto` remain
-dynamically linked on all platforms.
+The build links `liboqs` statically on all platforms, so the binary
+carries no runtime dependency on it. It links `libcurl` and
+`libcrypto` dynamically on all platforms.
 
 Dependencies (build-time only):
 
@@ -56,11 +56,11 @@ pkg install clang cmake make curl-dev openssl-dev
 
 **Building liboqs**
 
-When compiling `liboqs` from source (e.g., on GNU/Linux or Termux), you must
-perform a minimal build. Building `liboqs` with all algorithms enabled will
-drastically bloat the binary size (~20MB).
+When you compile `liboqs` from source (for example, on GNU/Linux or
+Termux), you must build a minimal version. A full build, with all
+algorithms enabled, adds about 20MB to the binary.
 
-To build `liboqs` with only the algorithms required by Shyake (ML-KEM-768 
+To build `liboqs` with only the algorithms Shyake needs (ML-KEM-768
 and ML-DSA-65), run:
 
 ```sh
@@ -78,7 +78,7 @@ make -j$(nproc)
 sudo make install
 ```
 
-When compiling in **Termux**, you must specify the installation prefix
+When you compile in **Termux**, you must set the installation prefix
 (`$PREFIX`) and omit `sudo`:
 
 ```sh
@@ -131,10 +131,10 @@ bash tests/e2e_test.sh
 ### Non-interactive passphrase
 
 `SHYAKE_PASSPHRASE` skips the interactive prompt wherever a command
-needs to unlock the secret key (and `init` uses it as the initial
-passphrase). Handy for scripting tests, not meant for end users —
-inline values land in shell history, exported ones are visible to
-child processes.
+needs to unlock the secret key. `init` also uses it as the initial
+passphrase. Use this variable for scripting tests, not for end
+users. Inline values land in shell history. Exported values stay
+visible to child processes.
 
 ```sh
 export SHYAKE_PASSPHRASE=$(openssl rand -base64 12)
@@ -154,6 +154,6 @@ npx wrangler dev --local
 
 The worker listens on `http://localhost:8787` by default.
 
-`wrangler.toml` is generated from `wrangler.template.toml` and is
-git-ignored. Deploying to Cloudflare is the same script without
-`--local`; see [DEPLOY.md](DEPLOY.md).
+`deploy.sh` generates `wrangler.toml` from `wrangler.template.toml`.
+Git does not track `wrangler.toml`. To deploy to Cloudflare, run the
+same script without `--local`. See [DEPLOY.md](DEPLOY.md).
