@@ -92,6 +92,7 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
 如果你的实例是在 `wrangler.toml` 改为生成式之前部署的，
 `./deploy.sh --update` 会先把你的配置另存为 `wrangler.toml.bak`，
 拉取代码后再恢复回来。
+
 ### 自托管
 
 自托管就是在你自己的机器上、通过 Wrangler 自带的本地 `workerd`

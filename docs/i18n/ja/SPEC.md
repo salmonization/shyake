@@ -55,7 +55,7 @@ shyake/
 #### 2.2 クライアント
 
 - **標準**：C11、POSIX.1-2008（`_POSIX_C_SOURCE=200809L`）
-- **ビルドシステム**：GNU Make；クロスプラットフォーム（macOS、GNU/Linux、Termux）
+- **ビルドシステム**：GNU Make、クロスプラットフォーム（macOS、GNU/Linux、Termux）
 - **成果物**：
   - `bin/shyake`: CLI バイナリ、`libshyake.a` を静的リンク
   - `lib/libshyake.a`: 静的ライブラリ
@@ -299,7 +299,7 @@ Cloudflare D1（SQLite）で管理される。マイグレーション：
 
 | メソッド | パス | 説明 |
 |---|---|---|
-| `GET` | `/health` | 死活チェック；D1 に問い合わせ |
+| `GET` | `/health` | 死活チェック、D1 に問い合わせ |
 | `GET` | `/api/pubkey/:username` | `kem_pubkey`、`sig_pubkey` を返す |
 | `GET` | `/api/client/version` | 最新のクライアントリリースタグ |
 
@@ -549,7 +549,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 をプロキシし、各チャネルの最新タグを選択して、結果を KV に
 1 時間キャッシュする。
 
-`shyake update` はこのエンドポイントを**ユーザー自身のインスタンス**（profile 設定の `INSTANCE`）から取得する。したがって各インスタンスが自身の KV キャッシュで GitHub API を中継する。`shyake.eee.coffee` は組み込みのフォールバックにすぎず、インスタンスが未設定の場合にのみ使用される。タグは semver 順序（`vX.Y.Z`；同じベースバージョンではリリースがプレリリースより上位）で比較される。preview チャネルは stable より新しい場合にのみ提示される。
+`shyake update` はこのエンドポイントを**ユーザー自身のインスタンス**（profile 設定の `INSTANCE`）から取得する。したがって各インスタンスが自身の KV キャッシュで GitHub API を中継する。`shyake.eee.coffee` は組み込みのフォールバックにすぎず、インスタンスが未設定の場合にのみ使用される。タグは semver 順序（`vX.Y.Z`、同じベースバージョンではリリースがプレリリースより上位）で比較される。preview チャネルは stable より新しい場合にのみ提示される。
 
 `shyake update stable|preview` は自己更新を実行する：
 
