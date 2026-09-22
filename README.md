@@ -9,8 +9,9 @@ Shyake is an **end-to-end encrypted mail system** powered by
 communication method to resist censorship and surveillance.
 
 The server runs on Cloudflare Workers, so everyone can host an
-instance at no cost. You can also self-host the server on your own
-hardware instead of the Cloudflare Global Network.
+instance at no cost. To self-host on your own hardware instead, run
+the Go server: one binary with one SQLite file. Both servers speak
+the same protocol and federate with each other.
 
 ### Documents
 

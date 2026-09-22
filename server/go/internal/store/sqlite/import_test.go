@@ -118,7 +118,7 @@ func TestImportRejectsOtherDatabases(t *testing.T) {
 	}
 	defer dst.Close()
 	_, err = ImportD1(context.Background(), dst, other, "x.example")
-	if err == nil || !strings.Contains(err.Error(), "not a Shyake D1 database") {
+	if err == nil || !strings.Contains(err.Error(), "has no users, mail and blocks tables") {
 		t.Errorf("err = %v", err)
 	}
 }

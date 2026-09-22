@@ -55,9 +55,11 @@ func ImportD1(ctx context.Context, dst *DB, src, instanceDomain string) (ImportR
 		return rep, fmt.Errorf("import: cannot read %s: %w", src, err)
 	}
 	if tables != 3 {
-		// .wrangler/state/v3/d1 also holds a metadata.sqlite
-		return rep, fmt.Errorf("import: %s is not a Shyake D1 database "+
-			"(no users, mail and blocks tables)", src)
+		// .wrangler/state/v3/d1 also holds a metadata.sqlite, and a D1
+		// file copied without its -wal file can hold no tables yet
+		return rep, fmt.Errorf("import: %s has no users, mail and blocks tables. "+
+			"Pass the D1 file that is not metadata.sqlite. If you copied it, "+
+			"copy its -wal file with it, or pass it where it is", src)
 	}
 
 	err = dst.tx(ctx, func(tx *sql.Tx) error {

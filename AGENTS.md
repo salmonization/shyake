@@ -10,8 +10,10 @@ method to resist censorship and surveillance. It consists of:
 
 - A **C client** (`client/`): a POSIX-style CLI (`shyake`) plus a
   reusable library (`libshyake`) exposing a public FFI API.
-- A **server** (`server/cf/`): a Cloudflare Worker that stores only
-  ciphertext and public keys; it never sees plaintext.
+- A **server** in two implementations with the same HTTP API: a
+  Cloudflare Worker (`server/cf/`) and a Go server for self-hosting
+  (`server/go/`). Both store only ciphertext and public keys; neither
+  sees plaintext.
 
 Key crypto: **ML-KEM-768** for key encapsulation, **ML-DSA-65** for
 signatures, **ChaCha20-Poly1305** for symmetric encryption. Read
@@ -37,6 +39,15 @@ or authentication code.
 - Cloudflare D1 (SQLite) for storage, KV for version cache
 - `mldsa65-wasm`: ML-DSA-65 signature verification in WebAssembly,
   loaded via the Wrangler `CompiledWasm` rule
+
+### Go server (`server/go/`)
+
+- Go 1.26+, no cgo: one static binary, `shyake-server`
+- Standard library `net/http`; `log/slog` for logs
+- SQLite via `modernc.org/sqlite` (pure Go). PostgreSQL is planned
+  behind `internal/store`; a backend must pass `store/storetest`
+- `github.com/cloudflare/circl` for ML-DSA-65 verification
+- Configuration: `SHYAKE_*` environment variables (SPEC.md §11.2)
 
 ## Common Commands
 
@@ -64,6 +75,15 @@ npx wrangler dev --local    # local dev server on http://localhost:8787
 `deploy.sh` and is git-ignored; edit the generated file, not the
 template.
 
+### Go server
+
+```sh
+cd server/go
+go test ./...               # unit tests (store, protocol, api, federation)
+go vet ./... && gofmt -l .  # gofmt must print nothing
+SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 go run ./cmd/shyake-server
+```
+
 ### Formatting
 
 ```sh
@@ -89,6 +109,10 @@ cd client && make
 bash tests/e2e_test.sh      # from repo root: tests/e2e_test.sh
 ```
 
+The e2e suite runs against either server; a protocol change must
+pass against both. `tests/federation_test.sh` starts two Go servers
+itself and tests relays between them.
+
 ## Project Structure
 
 ```
@@ -104,14 +128,22 @@ shyake/
 │   ├── tests/              # unit tests + test account fixtures
 │   └── Makefile
 ├── server/
-│   └── cf/                 # Cloudflare Worker
-│       ├── src/index.ts    # Hono routes
-│       ├── src/utils.ts    # helpers (PoW, usernames, addresses)
-│       ├── migrations/     # D1 schema migrations
-│       ├── deploy.sh       # deploy / upgrade via the Wrangler CLI
-│       └── wrangler.template.toml  # rendered to wrangler.toml
+│   ├── cf/                 # Cloudflare Worker
+│   │   ├── src/index.ts    # Hono routes
+│   │   ├── src/utils.ts    # helpers (PoW, usernames, addresses)
+│   │   ├── migrations/     # D1 schema migrations
+│   │   ├── deploy.sh       # deploy / upgrade via the Wrangler CLI
+│   │   └── wrangler.template.toml  # rendered to wrangler.toml
+│   └── go/                 # Go server (self-hosting)
+│       ├── cmd/shyake-server/      # entry point
+│       ├── internal/protocol/      # addresses, PoW, signatures (no I/O)
+│       ├── internal/api/           # HTTP handlers, auth, rate limits
+│       ├── internal/federation/    # outbound client, key cache, relays
+│       ├── internal/store/         # storage interface + sqlite backend
+│       └── deploy/         # systemd unit, env example
 ├── tests/
-│   └── e2e_test.sh         # end-to-end test suite (bash)
+│   ├── e2e_test.sh         # end-to-end test suite (bash)
+│   └── federation_test.sh  # two Go instances, relays between them
 └── docs/
     ├── SPEC.md             # technical specification (protocol, crypto)
     ├── DEV.md              # developer guide (deps, build, testing)
@@ -141,7 +173,12 @@ Architecture notes:
 - Internal library headers are `lib_internal.h` / `internal.h`; do not
   expose internals through `shyake.h` unless the FFI needs them.
 - Server API changes must stay in sync with the client's network layer
-  (`client/src/lib/network.c`) and with `docs/SPEC.md`.
+  (`client/src/lib/network.c`), with `docs/SPEC.md`, and between the
+  two servers: the Worker and the Go server must answer the same
+  request the same way.
+- In the Go server, `internal/protocol` holds the wire rules and does
+  no I/O. The signed-message rebuild there must stay byte-exact with
+  the client's cJSON; `testdata/liboqs_vectors.json` checks it.
 
 ## Coding Conventions
 
@@ -226,6 +263,17 @@ typedef uintptr_t uptr;
 - **A length-carrying `String` struct**: the public API and the FFI
   consumers are `char *`-based; converting would break every binding
   for readability alone.
+
+### Go
+
+- `gofmt` formatting, `go vet` clean.
+- Same commenting style as C: short purpose annotations at block
+  level. Doc comments on exported identifiers follow Go convention.
+- Errors are values: return them, wrap with `%w`, compare with
+  `errors.Is`. Library packages never log; `internal/api` and
+  `internal/federation` log through the `*slog.Logger` they receive.
+- Never log request paths, usernames, client addresses, or bodies.
+  Log the route pattern (`r.Pattern`) instead.
 
 ### TypeScript
 

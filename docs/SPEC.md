@@ -48,11 +48,14 @@ shyake/
 │   ├── tests/              # library test programs
 │   └── Makefile
 ├── server/
-│   └── cf/                 # Cloudflare Worker
-│       ├── src/index.ts    # Hono routes
-│       ├── src/utils.ts    # helpers (PoW, username validation)
-│       ├── migrations/     # D1 schema migrations
-│       └── wrangler.toml   # Worker configuration
+│   ├── cf/                 # Cloudflare Worker
+│   │   ├── src/index.ts    # Hono routes
+│   │   ├── src/utils.ts    # helpers (PoW, username validation)
+│   │   ├── migrations/     # D1 schema migrations
+│   │   └── wrangler.template.toml  # Worker configuration
+│   └── go/                 # Go server, for self-hosting
+│       ├── cmd/shyake-server/      # entry point
+│       └── internal/       # protocol, store, api, federation
 └── docs/
 ```
 
@@ -73,11 +76,24 @@ shyake/
 
 #### 2.3 Server
 
+Two server implementations serve the same HTTP API (§5). A client
+works with either one, and instances of both kinds federate.
+
+**Worker** (`server/cf/`), for Cloudflare:
+
 - **Runtime**: Cloudflare Workers
 - **Framework**: [Hono](https://hono.dev/)
 - **Database**: Cloudflare D1 (SQLite)
 - **Signature verification**: ML-DSA-65 compiled to WebAssembly
   (`mldsa65-wasm`), loaded via the Wrangler `CompiledWasm` rule.
+
+**Go server** (`server/go/`), for self-hosting:
+
+- **Runtime**: one static binary, `shyake-server`
+- **Database**: one SQLite file. PostgreSQL is planned behind the
+  same storage interface.
+- **Signature verification**: ML-DSA-65 from
+  [circl](https://github.com/cloudflare/circl), in pure Go.
 
 ---
 
@@ -177,15 +193,21 @@ The full request body also carries `enc_key_sender`,
 `enc_key_recipient`, `signature`, and `pow`. These fields are not
 part of the signed subset.
 
-The server verifies the signature with the WASM ML-DSA module. It
-uses the sender's `sig_pubkey` from D1, or fetches it from the
-sender's instance for federated mail.
+The server verifies the signature with the sender's `sig_pubkey`. It
+reads the key from its own database, or fetches it from the sender's
+instance for federated mail.
 
 #### 3.4 Anti-Replay
 
 Every signed message includes a timestamp. The server rejects
 requests whose timestamp deviates from server time by more than
 **300 seconds (5 minutes)**.
+
+The Go server also remembers each signature it accepts. It rejects a
+request that repeats one with HTTP 403. On `POST /api/mail`, a
+repeated signature is not an error: the server answers `201` with the
+id of the stored mail and does not store it again. A client retry or
+a relay retry is therefore safe.
 
 #### 3.5 Proof of Work
 
@@ -196,9 +218,22 @@ Hashcash-v1-style PoW token with a **20-bit** SHA-1 difficulty:
 1:<bits>:<yymmdd>:<resource>::<rand>:<counter-hex>
 ```
 
-`resource` is the acting username. The client mints the token. The
-server verifies the token before it checks the signature or does any
-database work.
+`resource` is the acting user: the username for registration and
+header authentication, the `sender` field for mail. The client mints
+the token. The server verifies the token before it checks the
+signature or does any database work. The server rejects a token when:
+
+- its resource is not the acting user,
+- its date is more than one day from the server's date (UTC), or
+- the first 20 bits of its SHA-1 hash are not all zero.
+
+The resource of a federated sender can contain a colon
+(`alice@host:8787`). The server therefore takes the three leading
+fields and the three trailing fields by position. The resource is
+everything between them.
+
+The Go server also rejects a token that it accepted before, so each
+token pays for one request.
 
 #### 3.6 Key Fingerprint
 
@@ -290,8 +325,14 @@ swap or viminfo files.
 
 ### 4. Database Schema
 
-Managed by Cloudflare D1 (SQLite). Migration:
-`migrations/0001_initial.sql`.
+Both servers use SQLite: Cloudflare D1 for the Worker
+(`server/cf/migrations/`), a local file for the Go server
+(`server/go/internal/store/sqlite/migrations/`). The tables below
+are common to both. The Go server adds:
+
+- a `sig_hash` column on `mail`: the SHA-256 of `signature`, unique.
+  It makes a resubmitted mail recognizable (§3.4).
+- a `relay_outbox` table: the queue of outbound relays (§6.2).
 
 #### `users`
 
@@ -355,14 +396,14 @@ work on relayed mail, where the recipient arrives fully qualified.
 
 ### 5. HTTP API
 
-The Cloudflare Worker hosts all endpoints. The base URL is the
-configured `INSTANCE_DOMAIN`.
+Both servers serve these endpoints with the same status codes and
+response bodies. The base URL is the instance domain.
 
 #### 5.1 Public Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Liveness check, queries D1 |
+| `GET` | `/health` | Liveness check, queries the database |
 | `GET` | `/api/pubkey/:username` | Return `kem_pubkey`, `sig_pubkey` |
 | `GET` | `/api/client/version` | Latest client release tags |
 
@@ -372,9 +413,20 @@ request to the remote instance. This requires federation to be
 enabled.
 
 `/api/client/version` proxies the GitHub Releases API. It returns
-`{"release": "vX.Y.Z", "pre_release": "vX.Y.Z-..."}`. Either field
-may be absent. The server caches results in KV for one hour. See
-§12.
+the newest tag of each channel and the SHA-256 digest of each asset
+of that release:
+
+```json
+{
+  "release": "vX.Y.Z",
+  "release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"},
+  "pre_release": "vX.Y.Z-...",
+  "pre_release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"}
+}
+```
+
+Either channel may be absent. The server caches the result for one
+hour: the Worker in KV, the Go server in memory. See §12.
 
 #### 5.2 Authenticated Endpoints
 
@@ -401,13 +453,27 @@ supplied recipient fingerprint no longer matches), `410`
 (`USER_DESTROYED`), `413` (payload too large), `403` (blocked, bad
 PoW, or stale timestamp).
 
+The Go server can also answer:
+
+- `429` on any endpoint, when a client address exceeds its rate
+  limit.
+- `403` when a request repeats a signature or a PoW token (§3.4,
+  §3.5).
+- `403` on `POST /api/mail` when neither party belongs to the
+  instance. The server does not relay between two other instances.
+- `503` on `POST /api/mail` when the sender's instance does not
+  answer the key lookup. A relaying instance retries after this.
+- `502` on `POST /api/mail` when the recipient's instance does not
+  answer. The Worker answers `404` in this case.
+
 #### 5.3 Size Limit
 
 The server enforces a hard cap on the raw HTTP request body of `POST
-/api/mail`. The default is **196608 bytes (192 KiB)**, configurable
-in `wrangler.toml` via `MAX_MAIL_SIZE`. The absolute ceiling is
-786432 bytes (768 KiB). Cloudflare D1's single-row limit sets this
-ceiling.
+/api/mail`. The default is **196608 bytes (192 KiB)**. The operator
+can change it (§11). The absolute ceiling is 786432 bytes (768 KiB).
+Cloudflare D1's single-row limit sets this ceiling. The Go server
+keeps the same ceiling, so its mail stays within what a Worker
+instance accepts over federation.
 
 ---
 
@@ -428,10 +494,29 @@ When `recipient` belongs to a remote instance:
 
 1. The client posts the signed, encrypted payload to the **sender's
    own instance** (`POST /api/mail`).
-2. The sender's instance stores the mail in its local D1 database.
-3. In the same request lifecycle (via `executionCtx.waitUntil`), the
-   server forwards the original raw payload to
+2. The sender's instance stores the mail in its database.
+3. The sender's instance forwards the original raw payload to
    `https://<recipientDomain>/api/mail`.
+
+The two servers forward in different ways:
+
+- The **Worker** makes one attempt, in the same request lifecycle
+  (`executionCtx.waitUntil`). It does not check the answer. If the
+  attempt fails, the mail does not reach the recipient.
+- The **Go server** writes the mail and a relay entry in one
+  transaction, then delivers the entry from a background queue. It
+  retries after a network error or a `408`, `429`, or `5xx` answer,
+  with backoff (5 s, 15 s, 30 s, then every 60 s). Any other `4xx`
+  answer is final. A queued relay survives a server restart.
+
+Retries stop when the sender's signed timestamp is 280 s old. The
+recipient's instance rejects the payload 300 s after that timestamp
+(§3.4), and the sender's instance cannot sign it again. If the
+remote instance stays down longer, the mail does not reach it.
+
+In both cases the client gets `201` as soon as the sender's instance
+stores the mail. The client does not learn whether the relay
+succeeds.
 
 The recipient's instance independently verifies the sender's
 signature by fetching the sender's public key from the sender's
@@ -443,7 +528,8 @@ remote instance availability.
 
 #### 6.3 Federation Toggle
 
-Configurable via `FEDERATION_ENABLED` in `wrangler.toml`. When
+Configurable via `FEDERATION_ENABLED` (Worker) or
+`SHYAKE_FEDERATION_ENABLED` (Go server). When
 `false`, the instance refuses to resolve remote users. This rejects
 both incoming relayed mail and outgoing cross-instance sends.
 
@@ -643,7 +729,9 @@ Use `enc` and `dec` for debugging and testing.
 
 ---
 
-### 11. Worker Configuration (`wrangler.toml`)
+### 11. Server Configuration
+
+#### 11.1 Worker (`wrangler.toml`)
 
 | Variable | Default | Description |
 |---|---|---|
@@ -666,6 +754,25 @@ A `CompiledWasm` build rule loads the `mldsa65-wasm` module.
 `wrangler.template.toml`. Git does not track `wrangler.toml`. It
 holds the operator's own domain and resource ids.
 
+#### 11.2 Go server (environment)
+
+| Variable | Default | Description |
+|---|---|---|
+| `SHYAKE_INSTANCE_DOMAIN` | — | Canonical domain of this instance (required) |
+| `SHYAKE_LISTEN` | `127.0.0.1:8787` | Listen address |
+| `SHYAKE_DATABASE` | `shyake.db` | SQLite file path |
+| `SHYAKE_REGISTRATION_ENABLED` | `true` | Accept new user registrations |
+| `SHYAKE_RESERVED_USERNAMES` | `admin,system,...` | Reserved names (CSV) |
+| `SHYAKE_FEDERATION_ENABLED` | `true` | Accept and relay federated mail |
+| `SHYAKE_MAX_MAIL_SIZE` | `196608` | Max payload bytes, at most `786432` |
+| `SHYAKE_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Proxies whose `X-Forwarded-For` the server trusts |
+| `SHYAKE_RATE_LIMIT` | `5` | Requests per second per client address |
+| `SHYAKE_RATE_BURST` | `30` | Burst allowance per client address |
+| `SHYAKE_LOG_FORMAT` | `text` | `text` or `json` |
+| `SHYAKE_FEDERATION_INSECURE` | `false` | Tests only: federate over plain HTTP and to private addresses |
+
+The Go server applies its database migrations when it starts.
+
 ---
 
 ### 12. Release Channels & Self-Update
@@ -674,11 +781,11 @@ The project publishes releases on GitHub in two channels:
 **stable** (normal releases) and **preview** (pre-releases). The
 server endpoint `GET /api/client/version` proxies the GitHub
 Releases API. It picks the newest tag of each channel and caches the
-result in KV for one hour.
+result for one hour (§5.1).
 
 `shyake update` fetches this endpoint from the **user's own
 instance** (`INSTANCE` in the profile config). Every instance
-therefore relays the GitHub API with its own KV cache.
+therefore relays the GitHub API with its own cache.
 `shyake.eee.coffee` is only a built-in fallback. The client uses it
 only when no instance is configured. The system compares tags using
 semver ordering (`vX.Y.Z`). A release outranks a pre-release of the
@@ -688,10 +795,10 @@ it is newer than stable.
 `shyake update stable|preview` performs the self-update:
 
 1. Download the OS/arch-matched release asset
-   (`shyake-<os>-<arch>.tar.gz`) and `sha256sums.txt` from GitHub
-   Releases.
-2. Verify the archive's SHA-256 against the checksum file. Abort on
-   mismatch.
+   (`shyake-<os>-<arch>.tar.gz`) from GitHub Releases.
+2. Compare the archive's SHA-256 with the digest for that asset in
+   the `/api/client/version` answer (§5.1). Abort on mismatch, or
+   when the answer has no digest for the asset.
 3. Extract the archive and replace the running binary in place. The
    client resolves the binary path via `/proc/self/exe`,
    `_NSGetExecutablePath`, or `which shyake`.

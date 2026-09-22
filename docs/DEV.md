@@ -10,7 +10,8 @@ This document helps you develop for Shyake.
   * [Install](#install)
   * [Testing](#testing)
 - [Server](#server)
-  * [Local development](#local-development)
+  * [Worker](#worker)
+  * [Go server](#go-server)
 
 ## Client
 
@@ -117,15 +118,30 @@ cp bin/shyake /usr/local/bin/
 
 ### Testing
 
-Run the end-to-end test suite against a local dev server:
+Run the end-to-end test suite against a local server. Either server
+works, and a change to the protocol must pass against both:
 
 ```sh
-# Terminal 1
+# Terminal 1: the Worker
 cd server/cf && npx wrangler dev --local
+# or the Go server
+cd server/go && SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 go run ./cmd/shyake-server
 
 # Terminal 2
 cd client && make
 bash tests/e2e_test.sh
+```
+
+`SHYAKE_TEST_INSTANCE` points the suite at another URL.
+
+The federation test starts two Go servers itself and runs the client
+between them. It covers relays in both directions, a relay that
+waits for a remote instance to come back, and a block on relayed
+mail:
+
+```sh
+cd client && make && cd ..
+bash tests/federation_test.sh
 ```
 
 ### Non-interactive passphrase
@@ -144,7 +160,7 @@ shyake check inbox
 
 ## Server
 
-### Local development
+### Worker
 
 ```sh
 cd server/cf
@@ -157,3 +173,52 @@ The worker listens on `http://localhost:8787` by default.
 `deploy.sh` generates `wrangler.toml` from `wrangler.template.toml`.
 Git does not track `wrangler.toml`. To deploy to Cloudflare, run the
 same script without `--local`. See [DEPLOY.md](DEPLOY.md).
+
+### Go server
+
+Requires Go 1.26 or newer. The server has no cgo dependency.
+
+```sh
+cd server/go
+go test ./...                    # unit tests
+go vet ./...
+gofmt -l .                       # must print nothing
+SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 SHYAKE_DATABASE=/tmp/dev.db \
+    go run ./cmd/shyake-server
+```
+
+Package layout, from the wire inward:
+
+| Package | Purpose |
+|---|---|
+| `internal/protocol` | Addresses, PoW, signatures, signed messages. No I/O. |
+| `internal/api` | HTTP handlers, authentication, rate limits |
+| `internal/federation` | Outbound client, remote key cache, relay queue |
+| `internal/store` | Storage interface and its backend test suite |
+| `internal/store/sqlite` | The SQLite backend and its migrations |
+| `internal/config` | `SHYAKE_*` environment settings |
+
+**Signature test vectors.** `internal/protocol/testdata/liboqs_vectors.json`
+holds signatures that liboqs made over messages that the client's
+own cJSON built. The Go tests check that circl accepts them and that
+the server rebuilds each signed message byte for byte. Regenerate
+the file after a change to the signed messages:
+
+```sh
+cd server/go/internal/protocol/testdata
+cc -std=c11 -o /tmp/gen gen_vectors.c \
+   ../../../../../client/src/lib/vendor/cJSON/cJSON.c \
+   -I../../../../../client/src/lib/vendor/cJSON \
+   /usr/local/lib/liboqs.a -lcrypto
+/tmp/gen > liboqs_vectors.json
+```
+
+**A new storage backend** implements `store.Store` and passes
+`storetest.Run`, the same suite the SQLite backend runs. PostgreSQL
+is planned this way. Keep SQL inside the backend package: the
+interface speaks users, mail, blocks, and relays.
+
+**Federation on one machine.** Instances contact each other over
+HTTPS, and the server refuses private addresses. For local tests,
+`SHYAKE_FEDERATION_INSECURE=true` allows plain HTTP and loopback
+addresses. Never set it on a public instance.
