@@ -42,3 +42,34 @@ export async function verifyPoW(
     return false;
   }
 }
+
+// Address normalization
+//
+// A shyake address is a bare local username, "user@domain", or (for
+// blocklist targets) a bare domain. Usernames match
+// ^(?=.*[a-zA-Z])[a-zA-Z0-9_]{4,16}$ and so can contain neither "@"
+// nor ".", which is what makes the two bare forms distinguishable.
+//
+// Normalizing yields the form the database stores: local users bare,
+// remote users "user@domain" with the domain lowercased.
+export function normalizeAddress(addr: string, instanceDomain: string): string {
+  const at = addr.indexOf('@');
+  if (at < 0) {
+    // bare domain (dotted) or bare local username
+    return addr.includes('.') ? addr.toLowerCase() : addr;
+  }
+  const local = addr.slice(0, at);
+  const domain = addr.slice(at + 1).toLowerCase();
+  return domain === instanceDomain.toLowerCase() ? local : `${local}@${domain}`;
+}
+
+// Domain an address belongs to; bare names belong to this instance.
+export function addressDomain(addr: string, instanceDomain: string): string {
+  const at = addr.indexOf('@');
+  if (at < 0) {
+    return addr.includes('.')
+      ? addr.toLowerCase()
+      : instanceDomain.toLowerCase();
+  }
+  return addr.slice(at + 1).toLowerCase();
+}

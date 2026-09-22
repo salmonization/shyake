@@ -301,6 +301,11 @@ Managed by Cloudflare D1 (SQLite). Migration:
 | `sig_pubkey` | TEXT | Base64-encoded ML-DSA-65 public key |
 | `created_at` | INTEGER | UNIX timestamp |
 
+Usernames are unique **case-insensitively**: registration is rejected
+with HTTP 409 when a name differs from an existing one only by case,
+so `Alice` cannot be taken alongside `alice`. Lookups elsewhere are
+exact matches, so the two are never confused for each other.
+
 On `destroy`, `kem_pubkey` and `sig_pubkey` are set to empty strings
 and all mail and block rows involving the user are deleted. The user
 row itself is **retained** to permanently lock the username.
@@ -334,8 +339,16 @@ sender or recipient.
 | `created_at` | INTEGER | UNIX timestamp |
 | PK | | `(blocker, blocked)` composite |
 
+Addresses are **normalized** before they are stored or matched: an
+`@<INSTANCE_DOMAIN>` suffix is stripped, and the domain part of a
+remote address or a bare domain is lowercased. A local user is
+therefore always `bob`, a remote one always `mallory@evil.example`.
+
 On mail submission the server rejects the send with HTTP 403 if the
-recipient has blocked the sender's local name or the sender's domain.
+recipient has blocked the sender's normalized address or the sender's
+domain. Both parties are normalized first, which is what makes the
+check work on relayed mail, where the recipient arrives fully
+qualified.
 
 ---
 

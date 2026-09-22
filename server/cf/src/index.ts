@@ -1,5 +1,11 @@
 import {Hono} from 'hono';
-import {isValidUsername, isReservedUsername, verifyPoW} from './utils';
+import {
+  isValidUsername,
+  isReservedUsername,
+  verifyPoW,
+  normalizeAddress,
+  addressDomain,
+} from './utils';
 
 // Import the Web build which allows manual instantiation
 import initWasm, {verify as verifySignature} from 'mldsa65-wasm/web/mldsa65.js';
@@ -176,13 +182,23 @@ app.post('/api/register', async c => {
     return c.json({error: 'Signature verification failed'}, 401);
   }
 
+  /* Reject a name that differs from an existing one only by case:
+   * "Alice" alongside "alice" is an impersonation vector. The guard
+   * rides on the INSERT so a racing registration cannot slip past a
+   * separate SELECT. COLLATE NOCASE folds ASCII only, which is the
+   * whole of the username charset. */
   try {
-    await c.env.DB.prepare(
+    const res = await c.env.DB.prepare(
       'INSERT INTO users (username, kem_pubkey, sig_pubkey, ' +
-        'created_at) VALUES (?, ?, ?, ?)',
+        'created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS ' +
+        '(SELECT 1 FROM users WHERE username = ? COLLATE NOCASE)',
     )
-      .bind(username, kem_pubkey, sig_pubkey, serverTs)
+      .bind(username, kem_pubkey, sig_pubkey, serverTs, username)
       .run();
+
+    if (!res.meta || res.meta.changes === 0) {
+      return c.json({error: 'Username already taken'}, 409);
+    }
 
     return c.json({message: 'Registered successfully'}, 201);
   } catch (e: any) {
@@ -337,16 +353,21 @@ app.post('/api/mail', async c => {
     return c.json({error: 'Signature verification failed'}, 401);
   }
 
-  /* check if sender is blocked by recipient */
-  const senderLocal = sender.includes('@') ? sender.split('@')[0] : sender;
-  const senderDomain = sender.includes('@')
-    ? sender.split('@')[1]
-    : c.env.INSTANCE_DOMAIN;
+  /* Normalize both parties to the stored form before any lookup.
+   * Relayed mail arrives fully qualified ("bob@our.domain"), so an
+   * un-normalized blocker never matched the bare name the blocklist
+   * holds - precisely the federated case blocking is for. */
+  const dbSender = normalizeAddress(sender, c.env.INSTANCE_DOMAIN);
+  const dbRecipient = normalizeAddress(recipient, c.env.INSTANCE_DOMAIN);
+  const senderDomain = addressDomain(sender, c.env.INSTANCE_DOMAIN);
+
+  /* check if sender is blocked by recipient: the sender's full
+   * address as stored, or their whole domain */
   const blockCheck = await c.env.DB.prepare(
     'SELECT 1 FROM blocks WHERE blocker = ? AND ' +
       '(blocked = ? OR blocked = ?)',
   )
-    .bind(recipient, senderLocal, senderDomain)
+    .bind(dbRecipient, dbSender, senderDomain)
     .first();
   if (blockCheck) {
     return c.json({error: 'Recipient has blocked this sender'}, 403);
@@ -358,14 +379,6 @@ app.post('/api/mail', async c => {
   for (let i = 0; i < 10; i++) {
     mail_id += charset.charAt(Math.floor(Math.random() * charset.length));
   }
-
-  const suffix = `@${c.env.INSTANCE_DOMAIN}`;
-  const dbSender = sender.endsWith(suffix)
-    ? sender.slice(0, -suffix.length)
-    : sender;
-  const dbRecipient = recipient.endsWith(suffix)
-    ? recipient.slice(0, -suffix.length)
-    : recipient;
 
   try {
     await c.env.DB.prepare(
@@ -667,11 +680,18 @@ async function handleBlock(c: any, unblock: boolean): Promise<Response> {
   const {target} = body;
   if (!target) return c.json({error: 'Missing target'}, 400);
 
+  /* Store the target in the same form the mail path looks up, so
+   * "bob@this.instance", "Bob@Remote.Example" and "Remote.Example"
+   * all match what arrives on the wire. */
+  const normTarget = normalizeAddress(target, c.env.INSTANCE_DOMAIN);
+
   if (unblock) {
+    /* also accept the raw string, to clear rows stored before
+     * normalization existed */
     await c.env.DB.prepare(
-      'DELETE FROM blocks WHERE blocker = ? AND blocked = ?',
+      'DELETE FROM blocks WHERE blocker = ? AND blocked IN (?, ?)',
     )
-      .bind(username, target)
+      .bind(username, normTarget, target)
       .run();
     return c.json({message: 'Unblocked'}, 200);
   } else {
@@ -680,7 +700,7 @@ async function handleBlock(c: any, unblock: boolean): Promise<Response> {
       'INSERT OR REPLACE INTO blocks (blocker, blocked, created_at)' +
         ' VALUES (?, ?, ?)',
     )
-      .bind(username, target, ts)
+      .bind(username, normTarget, ts)
       .run();
     return c.json({message: 'Blocked'}, 201);
   }
