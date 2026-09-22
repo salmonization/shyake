@@ -2,7 +2,12 @@
 # Shyake end-to-end functional test suite
 # Requires: wrangler dev running on 127.0.0.1:8787, shyake binary built
 
-set -euo pipefail
+# No `set -e`: this is a test harness with its own PASS/FAIL accounting.
+# Under -e a failing case kills the run before its assert can report it,
+# which is why the suite used to need `|| true` and set +e/-e toggles
+# scattered through it. Setup failures are checked explicitly instead,
+# and the exit status comes from $FAIL at the bottom.
+set -uo pipefail
 
 # ------------------------------------------------------------------ #
 # Configuration
@@ -478,11 +483,9 @@ echo "first mail" | sh_run "$DIR_D" send -t "$USER_E" \
 SHYAKE_PASSPHRASE="" sh_run "$DIR_E" rotate > /dev/null 2>&1 || true
 
 # D sends to E again — expects failure: local fingerprint mismatch
-set +e
 out_mismatch=$(echo "after rotate" | sh_run "$DIR_D" send -t "$USER_E" \
     -s "Should fail" 2>&1)
 rc_mismatch=$?
-set -e
 assert_exit "409 path: send exits non-zero after key rotation" 1 "$rc_mismatch"
 assert_contains "409 path: FATAL key-changed message" \
     "Remote public key of recipient has changed" "$out_mismatch"
@@ -515,11 +518,9 @@ echo "initial mail" | sh_run "$DIR_G" send -t "$USER_F" \
 echo "$USER_F" | sh_run "$DIR_F" destroy > /dev/null 2>&1 || true
 
 # G tries to send to F — expects failure (destroyed user)
-set +e
 out_destroyed=$(echo "to destroyed" | sh_run "$DIR_G" send -t "$USER_F" \
     -s "Should fail" 2>&1)
 rc_destroyed=$?
-set -e
 assert_exit "410 path: send exits non-zero to destroyed user" 1 "$rc_destroyed"
 assert_not_contains "410 path: mail not sent" "sent" "$out_destroyed"
 # Accept server-side 410 or client-side empty-key mismatch detection
@@ -625,10 +626,8 @@ assert_exit "passphrase: check inbox with correct passphrase exits 0" 0 "$?"
 assert_contains "passphrase: inbox has mail from A" "$USER_A" "$pp_check_out"
 
 # 18e. check inbox with wrong passphrase → exits non-zero
-set +e
 pp_wrong_out=$(SHYAKE_PASSPHRASE="wrong-passphrase" sh_run "$DIR_PP" check inbox 2>&1)
 pp_wrong_rc=$?
-set -e
 assert_exit "passphrase: wrong passphrase → non-zero exit" 1 "$pp_wrong_rc"
 assert_contains "passphrase: wrong passphrase message" \
     "Incorrect passphrase" "$pp_wrong_out"
@@ -744,10 +743,8 @@ rc=$?; assert_exit "compose diary exits 0" 0 "$rc" "$out"
 DIARY_ID=$(echo "$out" | grep -oE 'Draft [0-9]+' | awk '{print $2}' | head -1)
 out=$(sh_run "$DIR_A" check drafts 2>&1)
 assert_contains "check drafts: diary marker" "(null)" "$out"
-set +e
 out=$(sh_run "$DIR_A" send --draft "$DIARY_ID" 2>&1)
 rc=$?
-set -e
 assert_exit "send --draft diary without -t fails" 1 "$rc"
 assert_contains "send --draft: no-recipient message" "no recipient" "$out"
 
@@ -766,10 +763,8 @@ assert_contains "compose <id>: body updated" "Edited body content" "$out"
 
 # 19g. unchanged template aborts without creating a draft
 n_before=$(ls "$DIR_A/drafts" | wc -l)
-set +e
 out=$(EDITOR="true" VISUAL="true" sh_run "$DIR_A" compose 2>&1)
 rc=$?
-set -e
 assert_exit "compose unchanged template exits non-zero" 1 "$rc"
 assert_contains "compose: aborted message" "aborted" "$out"
 n_after=$(ls "$DIR_A/drafts" | wc -l)
@@ -795,10 +790,8 @@ rc=$?; assert_exit "send --draft with -t override exits 0" 0 "$rc" "$out"
 assert_contains "send --draft -t: sent" "sent" "$out"
 
 # 19j. unknown draft id fails cleanly
-set +e
 out=$(sh_run "$DIR_A" send --draft 9999 2>&1)
 rc=$?
-set -e
 assert_exit "send --draft unknown id fails" 1 "$rc"
 assert_contains "send --draft: not-found message" "not found" "$out"
 
@@ -811,11 +804,9 @@ rc=$?; assert_exit "compose with encrypted keys (no passphrase)" 0 \
 out=$(sh_run_pp "$PP_PASS" "$DIR_PP" check drafts 2>&1)
 assert_exit "check drafts with correct passphrase exits 0" 0 "$?"
 assert_contains "check drafts: pp draft listed" "Dear diary" "$out"
-set +e
 out=$(SHYAKE_PASSPHRASE="wrong-passphrase" \
     sh_run "$DIR_PP" check drafts 2>&1)
 rc=$?
-set -e
 assert_exit "check drafts with wrong passphrase fails" 1 "$rc"
 assert_contains "check drafts: wrong passphrase message" \
     "Incorrect passphrase" "$out"
