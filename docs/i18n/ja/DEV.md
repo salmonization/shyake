@@ -123,7 +123,7 @@ cp bin/shyake /usr/local/bin/
 
 ```sh
 # ターミナル 1
-cd server && npx wrangler dev --local
+cd server/cf && npx wrangler dev --local
 
 # ターミナル 2
 cd client && make
@@ -145,6 +145,7 @@ shyake check inbox
 ### ローカル開発
 
 ```sh
+cd server/cf
 npx wrangler dev --local
 ```
 

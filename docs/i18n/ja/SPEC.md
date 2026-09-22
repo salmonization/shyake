@@ -43,11 +43,12 @@ shyake/
 │   ├── include/shyake.h    # 公開 API（不透明ポインタ）
 │   ├── tests/              # ライブラリテストプログラム
 │   └── Makefile
-├── server/                 # Cloudflare Worker
-│   ├── src/index.ts        # Hono ルート
-│   ├── src/utils.ts        # ヘルパー（PoW、ユーザー名検証）
-│   ├── migrations/         # D1 スキーママイグレーション
-│   └── wrangler.toml       # Worker 設定
+├── server/
+│   └── cf/                 # Cloudflare Worker
+│       ├── src/index.ts    # Hono ルート
+│       ├── src/utils.ts    # ヘルパー（PoW、ユーザー名検証）
+│       ├── migrations/     # D1 スキーママイグレーション
+│       └── wrangler.toml   # Worker 設定
 └── docs/
 ```
 

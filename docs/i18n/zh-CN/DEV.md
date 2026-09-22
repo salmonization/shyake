@@ -121,7 +121,7 @@ cp bin/shyake /usr/local/bin/
 
 ```sh
 # 终端 1
-cd server && npx wrangler dev --local
+cd server/cf && npx wrangler dev --local
 
 # 终端 2
 cd client && make
@@ -143,6 +143,7 @@ shyake check inbox
 ### 本地开发
 
 ```sh
+cd server/cf
 npx wrangler dev --local
 ```
 

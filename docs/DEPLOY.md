@@ -61,7 +61,7 @@ namespace caches the lookup for one hour. The binding is optional —
 without it the endpoint still works but hits GitHub on every
 request.
 
-5. **Edit `server/wrangler.toml`** in your fork:
+5. **Edit `server/cf/wrangler.toml`** in your fork:
 
 ```toml
 [vars]
@@ -92,7 +92,7 @@ if you do not have a custom domain.
 6. **Apply database migrations** (creates all tables):
 
 ```sh
-cd server
+cd server/cf
 npx wrangler d1 migrations apply shyake-db --remote
 ```
 
@@ -115,14 +115,14 @@ time), select your fork, and set:
 | Framework preset | None |
 | Build command | None |
 | Deploy command | `npx wrangler deploy` |
-| Root directory | `/server` |
+| Root directory | `/server/cf` |
 
 Future pushes to your fork will redeploy automatically.
 
 **Option B: CLI only**:
 
 ```sh
-cd server
+cd server/cf
 npm install
 npx wrangler deploy
 ```
@@ -155,11 +155,11 @@ Steps:
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server
+cd shyake/server/cf
 npm install
 ```
 
-2. **Edit `server/wrangler.toml`**: only the `[vars]` section
+2. **Edit `server/cf/wrangler.toml`**: only the `[vars]` section
 matters. The `database_id` and KV `id` are ignored in local mode, so
 the placeholder values can stay as they are:
 
@@ -234,7 +234,7 @@ Wants=network-online.target
 
 [Service]
 User=shyake
-WorkingDirectory=/home/shyake/shyake/server
+WorkingDirectory=/home/shyake/shyake/server/cf
 ExecStart=/usr/bin/npx wrangler dev --local --ip 127.0.0.1 --port 8787
 Restart=always
 RestartSec=5
@@ -251,7 +251,7 @@ sudo systemctl enable --now shyake
 **Data location and backups**
 
 All local state (the D1 SQLite database and the KV cache) lives
-under `server/.wrangler/state/`. Backing up your instance means
+under `server/cf/.wrangler/state/`. Backing up your instance means
 backing up that directory (stop the server first, or use SQLite-safe
 tooling, to avoid copying a database mid-write). Deleting it resets
 the instance to an empty database. Pass `--persist-to <dir>` to
@@ -266,7 +266,7 @@ it holds up fine, but be aware of its development-oriented behavior:
 
 - **File watching / hot reload.** It watches the source tree and
   reloads the Worker when files change. Convenient in development,
-  but on a server it means an edit or a `git pull` in `server/`
+  but on a server it means an edit or a `git pull` in `server/cf/`
   restarts your instance immediately. Update deliberately: pull,
   review, then let it reload (or restart the service yourself).
 - **Single process, no supervision of its own.** There is no

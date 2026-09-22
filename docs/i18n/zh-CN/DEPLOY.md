@@ -58,7 +58,7 @@ npx wrangler kv namespace create VERSION_CACHE
 从输出中复制 `id`。每个实例都会为自己的客户端中继 GitHub
 Releases API 以支持 `shyake update`；此 KV 命名空间将查询结果缓存一小时。该绑定是可选的。没有它端点仍然可用，只是每次请求都会访问 GitHub。
 
-5. **编辑你 fork 中的 `server/wrangler.toml`**：
+5. **编辑你 fork 中的 `server/cf/wrangler.toml`**：
 
 ```toml
 [vars]
@@ -87,7 +87,7 @@ id      = "<your kv namespace id>" # 在此粘贴你的 KV 命名空间 id
 6. **应用数据库迁移**（创建所有表）：
 
 ```sh
-cd server
+cd server/cf
 npx wrangler d1 migrations apply shyake-db --remote
 ```
 
@@ -107,14 +107,14 @@ Worker 的每次 API 调用都会报错。
 | Framework preset | None |
 | Build command | None |
 | Deploy command | `npx wrangler deploy` |
-| Root directory | `/server` |
+| Root directory | `/server/cf` |
 
 之后推送到你的 fork 时会自动重新部署。
 
 **方式 B：仅使用 CLI**：
 
 ```sh
-cd server
+cd server/cf
 npm install
 npx wrangler deploy
 ```
@@ -144,11 +144,11 @@ npx wrangler deploy
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server
+cd shyake/server/cf
 npm install
 ```
 
-2. **编辑 `server/wrangler.toml`**：只有 `[vars]` 部分是重要的。本地模式下会忽略
+2. **编辑 `server/cf/wrangler.toml`**：只有 `[vars]` 部分是重要的。本地模式下会忽略
 `database_id` 和 KV 的 `id`，占位符保持原样即可：
 
 ```toml
@@ -215,7 +215,7 @@ Wants=network-online.target
 
 [Service]
 User=shyake
-WorkingDirectory=/home/shyake/shyake/server
+WorkingDirectory=/home/shyake/shyake/server/cf
 ExecStart=/usr/bin/npx wrangler dev --local --ip 127.0.0.1 --port 8787
 Restart=always
 RestartSec=5
@@ -232,7 +232,7 @@ sudo systemctl enable --now shyake
 **数据位置与备份**
 
 所有本地状态（D1 的 SQLite 数据库和 KV 缓存）都存放在
-`server/.wrangler/state/` 目录下。备份实例就是备份这个目录（先停止服务端，或使用对
+`server/cf/.wrangler/state/` 目录下。备份实例就是备份这个目录（先停止服务端，或使用对
 SQLite 安全的工具，避免在写入过程中复制数据库）。删除该目录会把实例重置为空数据库。可以给
 `wrangler dev` 传 `--persist-to <dir>` 把状态存到别的位置。
 
@@ -243,7 +243,7 @@ SQLite 安全的工具，避免在写入过程中复制数据库）。删除该�
 Workers 的同一个 `workerd` 运行时，对个人或小型社区实例来说完全够用，但要了解它面向开发的行为特性：
 
 - **文件监听 / 热重载**: 它会监听源码目录，文件变更时重新加载
-  Worker。开发时很方便，但在服务器上意味着在 `server/` 里编辑文件或执行
+  Worker。开发时很方便，但在服务器上意味着在 `server/cf/` 里编辑文件或执行
   `git pull` 会立即重启你的实例。请谨慎更新：先 pull、检查改动，再让它重载（或自己重启服务）。
 - **单进程，自身没有守护能力**: 没有集群，也没有内置的崩溃恢复。这正是上面
   systemd 单元的作用。

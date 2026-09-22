@@ -121,7 +121,7 @@ Run the end-to-end test suite against a local dev server:
 
 ```sh
 # Terminal 1
-cd server && npx wrangler dev --local
+cd server/cf && npx wrangler dev --local
 
 # Terminal 2
 cd client && make
@@ -147,6 +147,7 @@ shyake check inbox
 ### Local development
 
 ```sh
+cd server/cf
 npx wrangler dev --local
 ```
 

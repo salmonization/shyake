@@ -47,11 +47,12 @@ shyake/
 │   ├── include/shyake.h    # public API (opaque pointer)
 │   ├── tests/              # library test programs
 │   └── Makefile
-├── server/                 # Cloudflare Worker
-│   ├── src/index.ts        # Hono routes
-│   ├── src/utils.ts        # helpers (PoW, username validation)
-│   ├── migrations/         # D1 schema migrations
-│   └── wrangler.toml       # Worker configuration
+├── server/
+│   └── cf/                 # Cloudflare Worker
+│       ├── src/index.ts    # Hono routes
+│       ├── src/utils.ts    # helpers (PoW, username validation)
+│       ├── migrations/     # D1 schema migrations
+│       └── wrangler.toml   # Worker configuration
 └── docs/
 ```
 

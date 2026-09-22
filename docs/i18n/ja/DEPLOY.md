@@ -57,7 +57,7 @@ npx wrangler kv namespace create VERSION_CACHE
 出力から `id` をコピーします。各インスタンスは自身のクライアント向けに GitHub Releases API を中継して `shyake update`
 を支えます。この KV ネームスペースはその照会結果を 1 時間キャッシュします。このバインディングは省略可能です。なくてもエンドポイントは動作しますが、リクエストごとに GitHub へアクセスします。
 
-5. fork 内の **`server/wrangler.toml` を編集**します：
+5. fork 内の **`server/cf/wrangler.toml` を編集**します：
 
 ```toml
 [vars]
@@ -87,7 +87,7 @@ id      = "<your kv namespace id>" # ここに KV ネームスペースの id �
 6. **データベースマイグレーションを適用**します（すべてのテーブルが作成されます）：
 
 ```sh
-cd server
+cd server/cf
 npx wrangler d1 migrations apply shyake-db --remote
 ```
 
@@ -106,14 +106,14 @@ Cloudflare の CI パイプラインはデータベースマイグレーショ�
 | Framework preset | None |
 | Build command | None |
 | Deploy command | `npx wrangler deploy` |
-| Root directory | `/server` |
+| Root directory | `/server/cf` |
 
 以降、fork への push で自動的に再デプロイされます。
 
 **方法 B: CLI のみ**：
 
 ```sh
-cd server
+cd server/cf
 npm install
 npx wrangler deploy
 ```
@@ -143,11 +143,11 @@ KV は Wrangler 自身がローカルでエミュレートするため、**Cloud
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server
+cd shyake/server/cf
 npm install
 ```
 
-2. **`server/wrangler.toml` を編集**します。重要なのは `[vars]`
+2. **`server/cf/wrangler.toml` を編集**します。重要なのは `[vars]`
 セクションだけです。ローカルモードでは `database_id` と KV の `id`
 は無視されるため、プレースホルダーのままで構いません：
 
@@ -217,7 +217,7 @@ Wants=network-online.target
 
 [Service]
 User=shyake
-WorkingDirectory=/home/shyake/shyake/server
+WorkingDirectory=/home/shyake/shyake/server/cf
 ExecStart=/usr/bin/npx wrangler dev --local --ip 127.0.0.1 --port 8787
 Restart=always
 RestartSec=5
@@ -234,7 +234,7 @@ sudo systemctl enable --now shyake
 **データの場所とバックアップ**
 
 すべてのローカル状態（D1 の SQLite データベースと KV キャッシュ）は
-`server/.wrangler/state/`
+`server/cf/.wrangler/state/`
 以下に保存されます。インスタンスのバックアップとは、このディレクトリのバックアップです（書き込み中のデータベースをコピーしないよう、先にサーバーを停止するか、SQLite
 に安全なツールを使ってください）。このディレクトリを削除するとインスタンスは空のデータベースにリセットされます。`wrangler dev`
 に `--persist-to <dir>` を渡せば、状態を別の場所に保存できます。
@@ -247,7 +247,7 @@ Workers を支えているのと同じ `workerd`
 ランタイムを実行するため、個人や小規模コミュニティのインスタンスなら十分に持ちこたえますが、開発向けの挙動には注意が必要です：
 
 - **ファイル監視 / ホットリロード**: ソースツリーを監視し、ファイルが変更されると
-  Worker をリロードします。開発中は便利ですが、サーバー上では `server/`
+  Worker をリロードします。開発中は便利ですが、サーバー上では `server/cf/`
   内のファイル編集や `git pull` が即座にインスタンスの再起動を意味します。更新は慎重に：pull
   して、変更を確認してから、リロードさせる（または自分でサービスを再起動する）ようにしてください。
 - **単一プロセスで、自前の監視機能なし**: クラスタリングも組み込みのクラッシュ復旧もありません。それを担うのが上記の

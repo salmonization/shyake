@@ -45,11 +45,12 @@ shyake/
 │   ├── include/shyake.h    # 公开 API（不透明指针）
 │   ├── tests/              # 库测试程序
 │   └── Makefile
-├── server/                 # Cloudflare Worker
-│   ├── src/index.ts        # Hono 路由
-│   ├── src/utils.ts        # 辅助函数（PoW、用户名校验）
-│   ├── migrations/         # D1 模式迁移
-│   └── wrangler.toml       # Worker 配置
+├── server/
+│   └── cf/                 # Cloudflare Worker
+│       ├── src/index.ts    # Hono 路由
+│       ├── src/utils.ts    # 辅助函数（PoW、用户名校验）
+│       ├── migrations/     # D1 模式迁移
+│       └── wrangler.toml   # Worker 配置
 └── docs/
 ```
 

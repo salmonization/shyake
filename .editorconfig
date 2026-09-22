@@ -18,7 +18,7 @@ indent_size = 8
 tab_width = 8
 
 # Google TypeScript Style (see .prettierrc)
-[server/**.ts]
+[server/cf/**.ts]
 indent_size = 2
 
 [*.md]

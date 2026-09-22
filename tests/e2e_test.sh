@@ -101,7 +101,7 @@ wait_for_server() {
         retries=$((retries - 1))
         if [ $retries -eq 0 ]; then
             echo -e "${RED}ERROR: Server at $INSTANCE is not responding.${NC}"
-            echo "Start the server with: cd server && npx wrangler dev"
+            echo "Start the server with: cd server/cf && npx wrangler dev"
             exit 1
         fi
         sleep 1

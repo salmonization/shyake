@@ -10,7 +10,7 @@ method to resist censorship and surveillance. It consists of:
 
 - A **C client** (`client/`): a POSIX-style CLI (`shyake`) plus a
   reusable library (`libshyake`) exposing a public FFI API.
-- A **server** (`server/`): a Cloudflare Worker that stores only
+- A **server** (`server/cf/`): a Cloudflare Worker that stores only
   ciphertext and public keys; it never sees plaintext.
 
 Key crypto: **ML-KEM-768** for key encapsulation, **ML-DSA-65** for
@@ -30,7 +30,7 @@ or authentication code.
   - `libcrypto` (OpenSSL): SHA-256, ChaCha20-Poly1305, scrypt (dynamic)
   - `cJSON`: vendored at `client/src/lib/vendor/cJSON/`
 
-### Server (`server/`)
+### Server (`server/cf/`)
 
 - TypeScript on Cloudflare Workers
 - [Hono](https://hono.dev/) for routing
@@ -54,7 +54,7 @@ The release version is set by `VERSION` in `client/Makefile`.
 ### Server
 
 ```sh
-cd server
+cd server/cf
 npm install                 # postinstall patches mldsa65-wasm exports
 npx wrangler dev --local    # local dev server on http://localhost:8787
 npx wrangler d1 migrations apply shyake-db --local   # apply D1 migrations
@@ -67,7 +67,7 @@ npx wrangler d1 migrations apply shyake-db --local   # apply D1 migrations
 clang-format -i client/src/**/*.c client/src/**/*.h
 
 # TypeScript: .prettierrc at repo root
-cd server
+cd server/cf
 npm run format          # rewrite src/
 npm run format:check    # check only
 ```
@@ -78,7 +78,7 @@ Vendored code (`client/src/lib/vendor/`) is excluded from formatting.
 
 ```sh
 # Terminal 1
-cd server && npx wrangler dev --local
+cd server/cf && npx wrangler dev --local
 
 # Terminal 2
 cd client && make
@@ -99,11 +99,12 @@ shyake/
 │   ├── include/shyake.h    # public FFI API (opaque context pointer)
 │   ├── tests/              # unit tests + test account fixtures
 │   └── Makefile
-├── server/                 # Cloudflare Worker
-│   ├── src/index.ts        # Hono routes
-│   ├── src/utils.ts        # helpers (PoW, username validation)
-│   ├── migrations/         # D1 schema migrations
-│   └── wrangler.toml       # Worker config, bindings, env vars
+├── server/
+│   └── cf/                 # Cloudflare Worker
+│       ├── src/index.ts    # Hono routes
+│       ├── src/utils.ts    # helpers (PoW, username validation)
+│       ├── migrations/     # D1 schema migrations
+│       └── wrangler.toml   # Worker config, bindings, env vars
 ├── tests/
 │   └── e2e_test.sh         # end-to-end test suite (bash)
 └── docs/
