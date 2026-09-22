@@ -144,7 +144,10 @@ shyake check inbox
 
 ```sh
 cd server/cf
+./deploy.sh --local      # 依赖、wrangler.toml、本地数据库
 npx wrangler dev --local
 ```
 
 Worker 默认监听 `http://localhost:8787`。
+
+`wrangler.toml` 由 `wrangler.template.toml` 生成，不受 git 跟踪。部署到 Cloudflare 用的是同一个脚本，只是不带 `--local`；见 [DEPLOY.md](DEPLOY.md)。

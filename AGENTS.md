@@ -55,10 +55,14 @@ The release version is set by `VERSION` in `client/Makefile`.
 
 ```sh
 cd server/cf
-npm install                 # postinstall patches mldsa65-wasm exports
+./deploy.sh --local         # set up for local dev (config + database)
 npx wrangler dev --local    # local dev server on http://localhost:8787
-npx wrangler d1 migrations apply shyake-db --local   # apply D1 migrations
+./deploy.sh                 # deploy to Cloudflare; --update to upgrade
 ```
+
+`wrangler.toml` is generated from `wrangler.template.toml` by
+`deploy.sh` and is git-ignored; edit the generated file, not the
+template.
 
 ### Formatting
 
@@ -102,9 +106,10 @@ shyake/
 ├── server/
 │   └── cf/                 # Cloudflare Worker
 │       ├── src/index.ts    # Hono routes
-│       ├── src/utils.ts    # helpers (PoW, username validation)
+│       ├── src/utils.ts    # helpers (PoW, usernames, addresses)
 │       ├── migrations/     # D1 schema migrations
-│       └── wrangler.toml   # Worker config, bindings, env vars
+│       ├── deploy.sh       # deploy / upgrade via the Wrangler CLI
+│       └── wrangler.template.toml  # rendered to wrangler.toml
 ├── tests/
 │   └── e2e_test.sh         # end-to-end test suite (bash)
 └── docs/

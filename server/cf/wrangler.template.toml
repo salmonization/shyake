@@ -1,26 +1,34 @@
+# Template for wrangler.toml.
+#
+# deploy.sh renders this into wrangler.toml on first run and fills in
+# the generated resource ids. wrangler.toml is git-ignored, so your
+# instance settings survive `git pull` and never conflict.
+#
+# Edit wrangler.toml (not this file) to change your instance's
+# settings; re-running deploy.sh preserves your edits.
+
 name = "shyake-server"
 main = "src/index.ts"
 compatibility_date = "2024-04-05"
 
 # env variables
 [vars]
-INSTANCE_DOMAIN = "shyake.eee.coffee"
+INSTANCE_DOMAIN = "__INSTANCE_DOMAIN__"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED = true
-MAX_MAIL_SIZE = 196608 # 192 KiB
+MAX_MAIL_SIZE = 196608 # 192 KiB; do not exceed 786432 (768 KiB)
 
 # caches /api/client/version lookups for one hour
-# create with: npx wrangler kv namespace create VERSION_CACHE
 # optional: without it the endpoint hits GitHub on every request
 [[kv_namespaces]]
 binding = "VERSION_CACHE"
-id = "00000000000000000000000000000000"
+id = "__KV_ID__"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "shyake-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "__D1_ID__"
 migrations_dir = "migrations"
 
 [[rules]]

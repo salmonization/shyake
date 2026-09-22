@@ -17,3 +17,6 @@ dist/
 *.bin
 *.pem
 *.key
+
+# rendered by server/cf/deploy.sh from wrangler.template.toml
+server/cf/wrangler.toml

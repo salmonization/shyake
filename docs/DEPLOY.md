@@ -23,116 +23,79 @@ FEDERATION_ENABLED = false
 
 ### Using Cloudflare
 
+Everything runs from your own machine with the Wrangler CLI. You do
+not need to fork this repository, connect it to Cloudflare, or touch
+the dashboard.
+
 Prerequisites:
 
 - Node.js 18+
 - A Cloudflare account
 
-Steps:
-
-1. **Fork and clone** this repo on GitHub.
-
-2. **Authenticate** Cloudflare **Wrangler CLI** in your terminal:
-
 ```sh
-npx wrangler login
+git clone https://github.com/salmonization/shyake.git
+cd shyake/server/cf
+./deploy.sh
 ```
 
-`npx` will prompt you to install Wrangler on first run if it is
-not already present. No separate install step is needed.
+`deploy.sh` walks the whole deployment:
 
-3. **Create the D1 database**:
+1. installs the Worker's dependencies
+2. runs `npx wrangler login` if you are not authenticated yet
+3. asks for your instance domain
+4. creates the D1 database and the KV cache namespace, reusing them
+   if they already exist
+5. writes `server/cf/wrangler.toml` with the resulting ids
+6. applies the database migrations
+7. deploys the Worker and checks `/health`
+
+Your instance domain is embedded in every address on your instance
+(`user@your.domain.example`) and other instances use it to route
+federated mail back to you. The default `*.workers.dev` URL works if
+you do not have a custom domain.
+
+Options:
+
+| Option | Effect |
+|---|---|
+| `--domain <d>` | set the instance domain non-interactively |
+| `--update` | pull the latest code first, then redeploy |
+| `--no-kv` | skip the KV version cache |
+| `--config-only` | write `wrangler.toml` and stop |
+| `--local` | set up for local self-hosting instead (see below) |
+
+#### Upgrading
 
 ```sh
-npx wrangler d1 create shyake-db
+cd shyake/server/cf
+./deploy.sh --update
 ```
 
-Copy the `database_id` from the output.
+This pulls the latest code, reapplies any new migrations, and
+redeploys. Existing resources are reused and your settings are kept.
 
-4. **Create the KV namespace** (version relay cache):
+#### Changing settings
 
-```sh
-npx wrangler kv namespace create VERSION_CACHE
-```
-
-Copy the `id` from the output. Every instance relays the GitHub
-Releases API for `shyake update` on its own clients; this KV
-namespace caches the lookup for one hour. The binding is optional —
-without it the endpoint still works but hits GitHub on every
-request.
-
-5. **Edit `server/cf/wrangler.toml`** in your fork:
+`server/cf/wrangler.toml` is generated from `wrangler.template.toml`
+on first run and is **not** tracked by git, so your instance settings
+survive `git pull` and never conflict. Edit it and re-run
+`./deploy.sh`:
 
 ```toml
 [vars]
-INSTANCE_DOMAIN      = "your.domain.example" # edit this
+INSTANCE_DOMAIN      = "your.domain.example"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED   = true
 MAX_MAIL_SIZE        = 196608 # 192 KiB; do not exceed 786432 (768 KiB)
-
-[[d1_databases]]
-binding        = "DB"
-database_name  = "shyake-db"
-database_id    = "<your database_id>" # paste your database_id here
-migrations_dir = "migrations"
-
-[[kv_namespaces]]
-binding = "VERSION_CACHE"
-id      = "<your kv namespace id>" # paste your KV namespace id here
 ```
 
-The `[[d1_databases]]` block must be present and contain the
-correct `database_id`. Without it the Worker has no database
-binding and every request will fail.
+Re-running the script never overwrites these; it only fills in
+resource ids that are still unset.
 
-You can use the default `*.workers.dev` URL as `INSTANCE_DOMAIN`
-if you do not have a custom domain.
-
-6. **Apply database migrations** (creates all tables):
-
-```sh
-cd server/cf
-npx wrangler d1 migrations apply shyake-db --remote
-```
-
-Cloudflare's CI pipeline does not apply database migrations
-automatically. You must run `wrangler d1 migrations apply` once
-manually. Skipping this leaves the database empty and the Worker
-will error on every API call.
-
-7. **Deploy**
-
-Choose one of the following:
-
-**Option A: Dashboard**: Go to
-`Compute → Workers & Pages → Create application → Continue with GitHub`
-in the Cloudflare Dashboard (you may need to `Add GitHub account` at the first
-time), select your fork, and set:
-
-| Field | Value |
-|-------|-------|
-| Framework preset | None |
-| Build command | None |
-| Deploy command | `npx wrangler deploy` |
-| Root directory | `/server/cf` |
-
-Future pushes to your fork will redeploy automatically.
-
-**Option B: CLI only**:
-
-```sh
-cd server/cf
-npm install
-npx wrangler deploy
-```
-
-8. **Verify**
-
-Wait for deployment to complete and then open
-`https://<worker>.workers.dev/health` (or your custom domain).
-A `200 OK` confirms the Worker and database are working correctly.
-
+If you deployed an instance before `wrangler.toml` became generated,
+`./deploy.sh --update` moves your settings aside as
+`wrangler.toml.bak` and restores them after pulling.
 ### Self-hosting
 
 Self-hosting runs the exact same Worker code on your own machine,
@@ -151,42 +114,40 @@ Prerequisites:
 
 Steps:
 
-1. **Clone** this repo (a fork is not required):
+1. **Set it up** (a fork is not required):
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
 cd shyake/server/cf
-npm install
+./deploy.sh --local --domain your.domain.example
 ```
 
-2. **Edit `server/cf/wrangler.toml`**: only the `[vars]` section
-matters. The `database_id` and KV `id` are ignored in local mode, so
-the placeholder values can stay as they are:
+`--local` skips everything that needs a Cloudflare account: no
+`wrangler login`, no remote resources. It installs the dependencies,
+writes `wrangler.toml`, and creates the local SQLite database.
+
+`--domain` must be the domain your instance is reachable at from the
+outside. It is embedded in every address on your instance
+(`user@your.domain.example`) and other instances use it to route
+federated mail back to you. Omit the flag and the script asks.
+
+2. **Adjust settings** if you want to, in the generated
+`server/cf/wrangler.toml`. Only the `[vars]` section matters; the
+`database_id` and KV `id` are ignored in local mode:
 
 ```toml
 [vars]
-INSTANCE_DOMAIN      = "your.domain.example" # edit this
+INSTANCE_DOMAIN      = "your.domain.example"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED   = true
 MAX_MAIL_SIZE        = 196608 # 192 KiB; do not exceed 786432 (768 KiB)
 ```
 
-`INSTANCE_DOMAIN` must be the domain your instance is reachable at
-from the outside. It is embedded in every address on your instance
-(`user@your.domain.example`) and other instances use it to route
-federated mail back to you.
+The file is git-ignored, so your edits survive `git pull`. Upgrade
+later with `./deploy.sh --update --local`.
 
-3. **Apply database migrations** locally (creates all tables):
-
-```sh
-npx wrangler d1 migrations apply shyake-db --local
-```
-
-Note the `--local` flag. This writes to a SQLite file on disk
-instead of a Cloudflare-hosted database.
-
-4. **Run the server**:
+3. **Run the server**:
 
 ```sh
 npx wrangler dev --local --ip 127.0.0.1 --port 8787
@@ -199,7 +160,7 @@ Keep the server bound to `127.0.0.1` and let a reverse proxy handle
 outside traffic (next step). Binding to `0.0.0.0` directly is only
 reasonable on a trusted LAN without federation.
 
-5. **Set up a reverse proxy with TLS**
+4. **Set up a reverse proxy with TLS**
 
 This step is **required for federation**. Instances always contact
 each other over `https://<domain>/...`, so your instance must be
@@ -220,7 +181,7 @@ your.domain.example {
 nginx with a certbot-managed certificate works just as well. Proxy
 `https://your.domain.example` to `http://127.0.0.1:8787`.
 
-6. **Keep it running**
+5. **Keep it running**
 
 `wrangler dev` is a foreground process; use a supervisor to start it
 on boot and restart it on failure. A minimal systemd unit

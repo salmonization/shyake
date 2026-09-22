@@ -148,7 +148,12 @@ shyake check inbox
 
 ```sh
 cd server/cf
+./deploy.sh --local      # dependencies, wrangler.toml, local database
 npx wrangler dev --local
 ```
 
 The worker listens on `http://localhost:8787` by default.
+
+`wrangler.toml` is generated from `wrangler.template.toml` and is
+git-ignored. Deploying to Cloudflare is the same script without
+`--local`; see [DEPLOY.md](DEPLOY.md).

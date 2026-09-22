@@ -653,6 +653,10 @@ Required bindings:
 
 A `CompiledWasm` build rule loads the `mldsa65-wasm` module.
 
+`wrangler.toml` is generated from `wrangler.template.toml` by
+`server/cf/deploy.sh` and is not tracked by git: it holds the
+operator's own domain and resource ids.
+
 ---
 
 ### 12. Release Channels & Self-Update

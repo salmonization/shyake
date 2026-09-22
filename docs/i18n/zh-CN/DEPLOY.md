@@ -24,106 +24,74 @@ FEDERATION_ENABLED = false
 
 ### 使用 Cloudflare
 
+全部操作都在你自己的机器上通过 Wrangler CLI 完成。不需要 fork 本仓库，
+不需要把仓库连接到 Cloudflare，也不需要在控制台里点来点去。
+
 前提条件：
 
 - Node.js 18+
 - 一个 Cloudflare 账户
 
-步骤：
-
-1. 在 GitHub 上 **fork 并克隆**本仓库。
-
-2. 在终端中**认证** Cloudflare **Wrangler CLI**：
-
 ```sh
-npx wrangler login
+git clone https://github.com/salmonization/shyake.git
+cd shyake/server/cf
+./deploy.sh
 ```
 
-如果 Wrangler 尚未安装，`npx` 会在首次运行时提示安装。无需单独的安装步骤。
+`deploy.sh` 会完成整个部署流程：
 
-3. **创建 D1 数据库**：
+1. 安装 Worker 的依赖
+2. 如果尚未认证，运行 `npx wrangler login`
+3. 询问你的实例域名
+4. 创建 D1 数据库和 KV 缓存命名空间；若已存在则直接复用
+5. 把得到的资源 id 写入 `server/cf/wrangler.toml`
+6. 应用数据库迁移
+7. 部署 Worker 并检查 `/health`
+
+实例域名会嵌入到你实例上的每一个地址中（`user@your.domain.example`），
+其他实例也依靠它把联邦邮件路由回你这里。如果你没有自定义域名，默认的
+`*.workers.dev` 地址同样可用。
+
+选项：
+
+| 选项 | 作用 |
+|---|---|
+| `--domain <d>` | 非交互式地指定实例域名 |
+| `--update` | 先拉取最新代码，再重新部署 |
+| `--no-kv` | 跳过 KV 版本缓存 |
+| `--config-only` | 只生成 `wrangler.toml` 然后退出 |
+| `--local` | 改为配置本地自托管（见下文） |
+
+#### 升级
 
 ```sh
-npx wrangler d1 create shyake-db
+cd shyake/server/cf
+./deploy.sh --update
 ```
 
-从输出中复制 `database_id`。
+它会拉取最新代码、应用新增的迁移并重新部署。已有资源会被复用，你的配置
+也会保留。
 
-4. **创建 KV 命名空间**（版本中继缓存）：
+#### 修改配置
 
-```sh
-npx wrangler kv namespace create VERSION_CACHE
-```
-
-从输出中复制 `id`。每个实例都会为自己的客户端中继 GitHub
-Releases API 以支持 `shyake update`；此 KV 命名空间将查询结果缓存一小时。该绑定是可选的。没有它端点仍然可用，只是每次请求都会访问 GitHub。
-
-5. **编辑你 fork 中的 `server/cf/wrangler.toml`**：
+`server/cf/wrangler.toml` 由 `wrangler.template.toml` 在首次运行时生成，
+并且**不受 git 跟踪**，因此你的实例配置能在 `git pull` 后保留，也永远
+不会产生冲突。编辑它，然后重新运行 `./deploy.sh`：
 
 ```toml
 [vars]
-INSTANCE_DOMAIN      = "your.domain.example" # 修改此处
+INSTANCE_DOMAIN      = "your.domain.example"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED   = true
 MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
-
-[[d1_databases]]
-binding        = "DB"
-database_name  = "shyake-db"
-database_id    = "<your database_id>" # 在此粘贴你的 database_id
-migrations_dir = "migrations"
-
-[[kv_namespaces]]
-binding = "VERSION_CACHE"
-id      = "<your kv namespace id>" # 在此粘贴你的 KV 命名空间 id
 ```
 
-`[[d1_databases]]` 块必须存在且包含正确的 `database_id`。缺少它的话 Worker 没有数据库绑定，所有请求都会失败。
+重新运行脚本不会覆盖这些设置，它只会补上仍未填写的资源 id。
 
-如果没有自定义域名，可以使用默认的 `*.workers.dev` URL 作为
-`INSTANCE_DOMAIN`。
-
-6. **应用数据库迁移**（创建所有表）：
-
-```sh
-cd server/cf
-npx wrangler d1 migrations apply shyake-db --remote
-```
-
-Cloudflare 的 CI 流水线不会自动应用数据库迁移。你必须手动运行一次 `wrangler d1 migrations apply`。跳过这一步会导致数据库为空，
-Worker 的每次 API 调用都会报错。
-
-7. **部署**
-
-选择以下方式之一：
-
-**方式 A：控制台（Dashboard）**：在 Cloudflare 控制台中进入
-`Compute → Workers & Pages → Create application → Continue with GitHub`
-（首次使用可能需要先 `Add GitHub account`），选择你的 fork，并设置：
-
-| 字段 | 值 |
-|-------|-------|
-| Framework preset | None |
-| Build command | None |
-| Deploy command | `npx wrangler deploy` |
-| Root directory | `/server/cf` |
-
-之后推送到你的 fork 时会自动重新部署。
-
-**方式 B：仅使用 CLI**：
-
-```sh
-cd server/cf
-npm install
-npx wrangler deploy
-```
-
-8. **验证**
-
-等待部署完成，然后打开
-`https://<worker>.workers.dev/health`（或你的自定义域名）。返回 `200 OK` 即表示 Worker 和数据库工作正常。
-
+如果你的实例是在 `wrangler.toml` 改为生成式之前部署的，
+`./deploy.sh --update` 会先把你的配置另存为 `wrangler.toml.bak`，
+拉取代码后再恢复回来。
 ### 自托管
 
 自托管就是在你自己的机器上、通过 Wrangler 自带的本地 `workerd`
@@ -140,38 +108,38 @@ npx wrangler deploy
 
 步骤：
 
-1. **克隆**本仓库（不需要 fork）：
+1. **完成配置**（不需要 fork）：
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
 cd shyake/server/cf
-npm install
+./deploy.sh --local --domain your.domain.example
 ```
 
-2. **编辑 `server/cf/wrangler.toml`**：只有 `[vars]` 部分是重要的。本地模式下会忽略
-`database_id` 和 KV 的 `id`，占位符保持原样即可：
+`--local` 会跳过一切需要 Cloudflare 账户的步骤：不需要 `wrangler login`，
+也不会创建任何远端资源。它会安装依赖、生成 `wrangler.toml`
+并创建本地 SQLite 数据库。
+
+`--domain` 必须是你的实例在外部可访问到的域名。它会嵌入到你实例上的每个
+地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回
+你这里。不加这个参数时脚本会询问。
+
+2. 如有需要，在生成的 `server/cf/wrangler.toml` 里**调整配置**。只有
+`[vars]` 部分是重要的；本地模式下会忽略 `database_id` 和 KV 的 `id`：
 
 ```toml
 [vars]
-INSTANCE_DOMAIN      = "your.domain.example" # 修改此处
+INSTANCE_DOMAIN      = "your.domain.example"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED   = true
 MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
 ```
 
-`INSTANCE_DOMAIN` 必须是你的实例在外部可访问到的域名。它会嵌入到你实例上的每个地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回你这里。
+该文件不受 git 跟踪，因此你的修改能在 `git pull` 后保留。之后用
+`./deploy.sh --update --local` 升级。
 
-3. 在本地**应用数据库迁移**（创建所有表）：
-
-```sh
-npx wrangler d1 migrations apply shyake-db --local
-```
-
-注意 `--local` 标志。它会写入磁盘上的 SQLite
-文件，而不是 Cloudflare 托管的数据库。
-
-4. **运行服务端**：
+3. **运行服务端**：
 
 ```sh
 npx wrangler dev --local --ip 127.0.0.1 --port 8787
@@ -183,7 +151,7 @@ npx wrangler dev --local --ip 127.0.0.1 --port 8787
 让服务端只绑定 `127.0.0.1`，由反向代理处理外部流量（见下一步）。直接绑定
 `0.0.0.0` 只在不参与联邦网络的受信任局域网中才算合理。
 
-5. **配置带 TLS 的反向代理**
+4. **配置带 TLS 的反向代理**
 
 这一步是**参与联邦网络的必要条件**。实例之间总是通过
 `https://<domain>/...` 互相通信，所以你的实例必须能在
@@ -202,7 +170,7 @@ your.domain.example {
 用 nginx 加 certbot 管理的证书同样可行。把
 `https://your.domain.example` 代理到 `http://127.0.0.1:8787`。
 
-6. **保持运行**
+5. **保持运行**
 
 `wrangler dev` 是前台进程；用进程守护工具让它开机自启并在崩溃后自动重启。一个最小的
 systemd 单元（`/etc/systemd/system/shyake.service`）：

@@ -146,7 +146,10 @@ shyake check inbox
 
 ```sh
 cd server/cf
+./deploy.sh --local      # 依存関係、wrangler.toml、ローカルデータベース
 npx wrangler dev --local
 ```
 
 Worker はデフォルトで `http://localhost:8787` をリッスンします。
+
+`wrangler.toml` は `wrangler.template.toml` から生成され、git の管理対象ではありません。Cloudflare へのデプロイは同じスクリプトを `--local` なしで実行します。[DEPLOY.md](DEPLOY.md) を参照してください。

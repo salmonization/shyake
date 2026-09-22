@@ -23,106 +23,66 @@ FEDERATION_ENABLED = false
 
 ### Cloudflare を使用する
 
+すべての操作は Wrangler CLI を使って自分のマシン上で完結します。このリポジトリを fork する必要も、Cloudflare に接続する必要も、ダッシュボードを操作する必要もありません。
+
 前提条件：
 
 - Node.js 18+
 - Cloudflare アカウント
 
-手順：
-
-1. GitHub でこのリポジトリを **fork してクローン**します。
-
-2. ターミナルで Cloudflare **Wrangler CLI** を**認証**します：
-
 ```sh
-npx wrangler login
+git clone https://github.com/salmonization/shyake.git
+cd shyake/server/cf
+./deploy.sh
 ```
 
-Wrangler が未インストールの場合、初回実行時に `npx` がインストールを促します。別途のインストール手順は不要です。
+`deploy.sh` はデプロイ全体を実行します：
 
-3. **D1 データベースを作成**します：
+1. Worker の依存関係をインストールする
+2. 未認証であれば `npx wrangler login` を実行する
+3. インスタンスのドメインを尋ねる
+4. D1 データベースと KV キャッシュネームスペースを作成する（既存のものがあれば再利用する）
+5. 得られたリソース id を `server/cf/wrangler.toml` に書き込む
+6. データベースマイグレーションを適用する
+7. Worker をデプロイし、`/health` を確認する
+
+インスタンスのドメインはそのインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスはこれを使ってフェデレーションメールを送り返します。独自ドメインがない場合は、デフォルトの `*.workers.dev` の URL がそのまま使えます。
+
+オプション：
+
+| オプション | 効果 |
+|---|---|
+| `--domain <d>` | インスタンスのドメインを対話なしで指定する |
+| `--update` | 最新のコードを取得してから再デプロイする |
+| `--no-kv` | KV バージョンキャッシュを省略する |
+| `--config-only` | `wrangler.toml` を生成して終了する |
+| `--local` | 代わりにローカルのセルフホスティング用に設定する（後述） |
+
+#### アップグレード
 
 ```sh
-npx wrangler d1 create shyake-db
+cd shyake/server/cf
+./deploy.sh --update
 ```
 
-出力から `database_id` をコピーします。
+最新のコードを取得し、新しいマイグレーションを適用して再デプロイします。既存のリソースは再利用され、設定もそのまま保たれます。
 
-4. **KV ネームスペースを作成**します（バージョン中継キャッシュ）：
+#### 設定の変更
 
-```sh
-npx wrangler kv namespace create VERSION_CACHE
-```
-
-出力から `id` をコピーします。各インスタンスは自身のクライアント向けに GitHub Releases API を中継して `shyake update`
-を支えます。この KV ネームスペースはその照会結果を 1 時間キャッシュします。このバインディングは省略可能です。なくてもエンドポイントは動作しますが、リクエストごとに GitHub へアクセスします。
-
-5. fork 内の **`server/cf/wrangler.toml` を編集**します：
+`server/cf/wrangler.toml` は初回実行時に `wrangler.template.toml` から生成され、git の管理対象では**ありません**。そのためインスタンスの設定は `git pull` しても残り、競合することもありません。編集したら `./deploy.sh` を再実行してください：
 
 ```toml
 [vars]
-INSTANCE_DOMAIN      = "your.domain.example" # ここを編集
+INSTANCE_DOMAIN      = "your.domain.example"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED   = true
-MAX_MAIL_SIZE        = 196608 # 192 KiB；786432（768 KiB）を超えないこと
-
-[[d1_databases]]
-binding        = "DB"
-database_name  = "shyake-db"
-database_id    = "<your database_id>" # ここに database_id を貼り付け
-migrations_dir = "migrations"
-
-[[kv_namespaces]]
-binding = "VERSION_CACHE"
-id      = "<your kv namespace id>" # ここに KV ネームスペースの id を貼り付け
+MAX_MAIL_SIZE        = 196608 # 192 KiB。786432（768 KiB）を超えないこと
 ```
 
-`[[d1_databases]]` ブロックは必ず存在し、正しい `database_id`
-を含んでいる必要があります。これがないと Worker はデータベースバインディングを持たず、すべてのリクエストが失敗します。
+スクリプトを再実行してもこれらの設定は上書きされません。まだ設定されていないリソース id を補うだけです。
 
-カスタムドメインを持っていない場合は、デフォルトの
-`*.workers.dev` URL を `INSTANCE_DOMAIN` として使用できます。
-
-6. **データベースマイグレーションを適用**します（すべてのテーブルが作成されます）：
-
-```sh
-cd server/cf
-npx wrangler d1 migrations apply shyake-db --remote
-```
-
-Cloudflare の CI パイプラインはデータベースマイグレーションを自動では適用しません。`wrangler d1 migrations apply` を一度手動で実行する必要があります。これを省略するとデータベースが空のままになり、Worker はすべての API 呼び出しでエラーになります。
-
-7. **デプロイ**
-
-以下のいずれかを選択します：
-
-**方法 A: ダッシュボード**：Cloudflare ダッシュボードで
-`Compute → Workers & Pages → Create application → Continue with GitHub`
-に進み（初回は `Add GitHub account` が必要な場合があります）、自分の fork を選択して次のように設定します：
-
-| 項目 | 値 |
-|-------|-------|
-| Framework preset | None |
-| Build command | None |
-| Deploy command | `npx wrangler deploy` |
-| Root directory | `/server/cf` |
-
-以降、fork への push で自動的に再デプロイされます。
-
-**方法 B: CLI のみ**：
-
-```sh
-cd server/cf
-npm install
-npx wrangler deploy
-```
-
-8. **確認**
-
-デプロイの完了を待ってから
-`https://<worker>.workers.dev/health`（またはカスタムドメイン）を開きます。`200 OK` が返れば、Worker とデータベースが正常に動作しています。
-
+`wrangler.toml` が生成式になる前にデプロイしたインスタンスの場合、`./deploy.sh --update` が設定を `wrangler.toml.bak` として退避し、取得後に復元します。
 ### セルフホスティング
 
 セルフホスティングでは、Wrangler に同梱されているローカルの `workerd`
@@ -139,39 +99,32 @@ KV は Wrangler 自身がローカルでエミュレートするため、**Cloud
 
 手順：
 
-1. このリポジトリを**クローン**します（fork は不要です）：
+1. **セットアップ**します（fork は不要です）：
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
 cd shyake/server/cf
-npm install
+./deploy.sh --local --domain your.domain.example
 ```
 
-2. **`server/cf/wrangler.toml` を編集**します。重要なのは `[vars]`
-セクションだけです。ローカルモードでは `database_id` と KV の `id`
-は無視されるため、プレースホルダーのままで構いません：
+`--local` を付けると、Cloudflare アカウントを必要とする処理はすべて省略されます。`wrangler login` もリモートリソースの作成もありません。依存関係のインストール、`wrangler.toml` の生成、ローカル SQLite データベースの作成だけを行います。
+
+`--domain` は、あなたのインスタンスに外部から到達できるドメインでなければなりません。この値はインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスもこれを使ってフェデレーションメールをあなたのインスタンスへルーティングします。省略した場合はスクリプトが尋ねます。
+
+2. 必要であれば、生成された `server/cf/wrangler.toml` で**設定を調整**します。重要なのは `[vars]` セクションだけで、ローカルモードでは `database_id` と KV の `id` は無視されます：
 
 ```toml
 [vars]
-INSTANCE_DOMAIN      = "your.domain.example" # ここを編集
+INSTANCE_DOMAIN      = "your.domain.example"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED   = true
-MAX_MAIL_SIZE        = 196608 # 192 KiB；786432（768 KiB）を超えないこと
+MAX_MAIL_SIZE        = 196608 # 192 KiB。786432（768 KiB）を超えないこと
 ```
 
-`INSTANCE_DOMAIN` は、あなたのインスタンスに外部から到達できるドメインでなければなりません。この値はインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスもこれを使ってフェデレーションメールをあなたのインスタンスへルーティングします。
+このファイルは git の管理対象ではないため、編集内容は `git pull` しても残ります。以降のアップグレードは `./deploy.sh --update --local` で行います。
 
-3. ローカルで**データベースマイグレーションを適用**します（すべてのテーブルが作成されます）：
-
-```sh
-npx wrangler d1 migrations apply shyake-db --local
-```
-
-`--local` フラグに注意してください。Cloudflare
-がホストするデータベースではなく、ディスク上の SQLite ファイルに書き込みます。
-
-4. **サーバーを起動**します：
+3. **サーバーを起動**します：
 
 ```sh
 npx wrangler dev --local --ip 127.0.0.1 --port 8787
@@ -183,7 +136,7 @@ npx wrangler dev --local --ip 127.0.0.1 --port 8787
 サーバーは `127.0.0.1` にバインドしたままにし、外部トラフィックはリバースプロキシに処理させます（次の手順）。`0.0.0.0`
 へ直接バインドするのは、フェデレーションに参加しない信頼できる LAN 内でのみ妥当です。
 
-5. **TLS 付きリバースプロキシを設定**します
+4. **TLS 付きリバースプロキシを設定**します
 
 この手順は**フェデレーションに必須**です。インスタンス同士は常に
 `https://<domain>/...` で通信するため、あなたのインスタンスは
@@ -203,7 +156,7 @@ your.domain.example {
 certbot で管理する証明書を使った nginx でも同様に動作します。`https://your.domain.example`
 を `http://127.0.0.1:8787` へプロキシしてください。
 
-6. **常時稼働させる**
+5. **常時稼働させる**
 
 `wrangler dev`
 はフォアグラウンドプロセスです。ブート時の起動と障害時の再起動はスーパーバイザーに任せます。最小構成の

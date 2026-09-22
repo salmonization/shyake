@@ -538,6 +538,8 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 
 `CompiledWasm` ビルドルールが `mldsa65-wasm` モジュールをロードする。
 
+`wrangler.toml` は `server/cf/deploy.sh` が `wrangler.template.toml` から生成するもので、git の管理対象ではない。運用者自身のドメインとリソース id を保持する。
+
 ---
 
 ### 12. リリースチャネルと自己更新

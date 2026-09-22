@@ -529,6 +529,8 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 
 `CompiledWasm` 构建规则加载 `mldsa65-wasm` 模块。
 
+`wrangler.toml` 由 `server/cf/deploy.sh` 从 `wrangler.template.toml` 生成，不受 git 跟踪：它保存运维者自己的域名和资源 id。
+
 ---
 
 ### 12. 发布渠道与自更新
