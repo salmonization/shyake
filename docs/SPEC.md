@@ -603,7 +603,7 @@ Recognized environment variables:
 | `init [-c <dir>]` | Generate config directory and key pairs |
 | `register -u <user> -i <url>` | Register on an instance |
 | `whoami` | Print current profile (no network) |
-| `send -t <to> [-s <subj>] [file]` | Send a mail (text only) |
+| `send -t <to> [-s <subj>] [file]` | Send a mail (text only); saved as a draft if it fails |
 | `send --draft <id> [-t <to>] [-s <subj>]` | Send a stored draft (deleted on success) |
 | `compose [<id>]` | Compose or edit an encrypted draft (§3.8) |
 | `check inbox\|sent [opts]` | List mailbox metadata |

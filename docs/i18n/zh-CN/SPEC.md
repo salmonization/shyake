@@ -481,7 +481,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `init [-c <dir>]` | 生成配置目录和密钥对 |
 | `register -u <user> -i <url>` | 在实例上注册 |
 | `whoami` | 打印当前配置文件（无网络请求） |
-| `send -t <to> [-s <subj>] [file]` | 发送邮件（仅文本） |
+| `send -t <to> [-s <subj>] [file]` | 发送邮件（仅文本）；失败时存为草稿 |
 | `send --draft <id> [-t <to>] [-s <subj>]` | 发送已存草稿（成功后删除） |
 | `compose [<id>]` | 撰写或编辑加密草稿（§3.8） |
 | `check inbox\|sent [opts]` | 列出邮件箱元数据 |

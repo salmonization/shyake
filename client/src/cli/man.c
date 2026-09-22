@@ -54,6 +54,8 @@ static const struct man_entry man_table[] = {
 		  "Note:\n"
 		  "    shyake transmits text only. Binary data\n"
 		  "    must be base64-encoded before sending.\n\n"
+		  "    A send that fails is saved as a draft so the\n"
+		  "    text is not lost; retry it with -d <id>.\n\n"
 		  "Tips:\n"
 		  "    Send a small image:\n"
 		  "        base64 < image.png | shyake send -t salmon -s "

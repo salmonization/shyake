@@ -127,6 +127,10 @@ shyake send -t flat_white < content.txt
 
 Please note that the subject must not exceed 128 bytes in length.
 
+If a send fails, for any reason, what you wrote is saved as a draft
+instead of being lost. The message tells you the draft id; retry it
+with `shyake send -d <id>`.
+
 Use `username@instance` as the recipient to reach a user on an
 external instance.
 
