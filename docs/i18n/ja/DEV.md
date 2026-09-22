@@ -14,7 +14,8 @@
   * [インストール](#インストール)
   * [テスト](#テスト)
 - [サーバー](#サーバー)
-  * [ローカル開発](#ローカル開発)
+  * [Worker](#worker)
+  * [Go サーバー](#go-サーバー)
 
 ## クライアント
 
@@ -119,15 +120,26 @@ cp bin/shyake /usr/local/bin/
 
 ### テスト
 
-ローカル開発サーバーに対してエンドツーエンドのテストスイートを実行します：
+ローカルのサーバーに対してエンドツーエンドのテストスイートを実行します。どちらのサーバーでも構いませんが、プロトコルに関わる変更は両方で通る必要があります：
 
 ```sh
-# ターミナル 1
+# ターミナル 1：Worker
 cd server/cf && npx wrangler dev --local
+# または Go サーバー
+cd server/go && SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 go run ./cmd/shyake-server
 
 # ターミナル 2
 cd client && make
 bash tests/e2e_test.sh
+```
+
+`SHYAKE_TEST_INSTANCE` でテストスイートの接続先 URL を変えられます。
+
+フェデレーションのテストは Go サーバーを 2 つ自分で起動し、その間でクライアントを動かします。双方向のリレー、リモートインスタンスの復帰を待ってから届くリレー、リレーされたメールに対するブロックを確認します：
+
+```sh
+cd client && make && cd ..
+bash tests/federation_test.sh
 ```
 
 ### 非対話的なパスフレーズ
@@ -142,7 +154,7 @@ shyake check inbox
 
 ## サーバー
 
-### ローカル開発
+### Worker
 
 ```sh
 cd server/cf
@@ -153,3 +165,42 @@ npx wrangler dev --local
 Worker はデフォルトで `http://localhost:8787` をリッスンします。
 
 `wrangler.toml` は `wrangler.template.toml` から生成され、git の管理対象ではありません。Cloudflare へのデプロイは同じスクリプトを `--local` なしで実行します。[DEPLOY.md](DEPLOY.md) を参照してください。
+
+### Go サーバー
+
+Go 1.26 以降が必要です。サーバーは cgo に依存しません。
+
+```sh
+cd server/go
+go test ./...                    # ユニットテスト
+go vet ./...
+gofmt -l .                       # 何も出力されないこと
+SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 SHYAKE_DATABASE=/tmp/dev.db \
+    go run ./cmd/shyake-server
+```
+
+パッケージの構成（外側から内側へ）：
+
+| パッケージ | 役割 |
+|---|---|
+| `internal/protocol` | アドレス、PoW、署名、署名対象メッセージ。I/O は行いません。 |
+| `internal/api` | HTTP ハンドラー、認証、レート制限 |
+| `internal/federation` | 送信クライアント、リモート公開鍵キャッシュ、リレーキュー |
+| `internal/store` | ストレージインターフェースとバックエンドのテストスイート |
+| `internal/store/sqlite` | SQLite バックエンドとマイグレーション |
+| `internal/config` | `SHYAKE_*` 環境変数の設定 |
+
+**署名のテストベクター。** `internal/protocol/testdata/liboqs_vectors.json` には、クライアント自身の cJSON で組み立てたメッセージに liboqs が付けた署名が入っています。Go のテストは、circl がそれらの署名を受け入れること、そしてサーバーが署名対象メッセージをバイト単位で正確に再構築できることを確認します。署名対象メッセージを変更したら、このファイルを再生成してください：
+
+```sh
+cd server/go/internal/protocol/testdata
+cc -std=c11 -o /tmp/gen gen_vectors.c \
+   ../../../../../client/src/lib/vendor/cJSON/cJSON.c \
+   -I../../../../../client/src/lib/vendor/cJSON \
+   /usr/local/lib/liboqs.a -lcrypto
+/tmp/gen > liboqs_vectors.json
+```
+
+**新しいストレージバックエンド**は `store.Store` を実装し、`storetest.Run`（SQLite バックエンドと同じテストスイート）に通る必要があります。PostgreSQL はこの方法で対応する予定です。SQL はバックエンドのパッケージ内に閉じ込めてください。インターフェースが扱うのはユーザー、メール、ブロック、リレーだけです。
+
+**1 台のマシンでのフェデレーション。** インスタンス同士は HTTPS で通信し、サーバーはプライベートアドレスへの接続を拒否します。ローカルでのテストでは、`SHYAKE_FEDERATION_INSECURE=true` で平文 HTTP とループバックアドレスを許可できます。公開インスタンスでは絶対に設定しないでください。

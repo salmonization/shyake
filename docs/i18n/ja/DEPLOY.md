@@ -4,22 +4,16 @@
 
 > Translated by Claude Fable 5
 
-サーバーは D1 データベースを備えた Cloudflare Worker として動作します。ただし、自分のハードウェア上でセルフホストすることも可能です。
+Shyake のサーバーには、同じ HTTP API を提供する 2 つの実装があります。クライアントはどちらにも接続でき、両者は互いにフェデレーションできます。
 
-サーバーのデプロイ方法は 2 通りあります：
-
-* Cloudflare を使用する
-* セルフホスティング
+* **Cloudflare を使用する**：`server/cf/` の Worker。Cloudflare Workers 上で D1 データベースとともに動作します。自分のマシンは必要ありません。
+* **セルフホスティング**：`server/go/` の Go サーバー。バイナリ 1 つと SQLite ファイル 1 つで、自分のマシン上で動作します。
 
 **フェデレーション**
 
-2 つのインスタンスは、双方が `FEDERATION_ENABLED = true` になっていると自動的にフェデレーションします。追加の設定は不要です。インスタンス間のメールはサーバー間で直接ルーティングされ、クライアントは常に自分のインスタンスとのみ通信します。
+2 つのインスタンスは、双方でフェデレーションが有効（デフォルト）であれば自動的にフェデレーションします。追加の設定は不要です。インスタンス間のメールはサーバー間で直接ルーティングされ、クライアントは常に自分のインスタンスとのみ通信します。
 
-受信・送信フェデレーションを無効にするには：
-
-```toml
-FEDERATION_ENABLED = false
-```
+受信・送信フェデレーションを無効にするには、`wrangler.toml` で `FEDERATION_ENABLED = false`（Worker）、または `SHYAKE_FEDERATION_ENABLED=false`（Go サーバー）を設定します。
 
 ### Cloudflare を使用する
 
@@ -56,7 +50,7 @@ cd shyake/server/cf
 | `--update` | 最新のコードを取得してから再デプロイする |
 | `--no-kv` | KV バージョンキャッシュを省略する |
 | `--config-only` | `wrangler.toml` を生成して終了する |
-| `--local` | 代わりにローカルのセルフホスティング用に設定する（後述） |
+| `--local` | ローカルの開発用サーバーを準備する（[DEV.md](DEV.md) を参照） |
 
 #### アップグレード
 
@@ -86,67 +80,59 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB。786432（768 KiB）を超えないこ�
 
 ### セルフホスティング
 
-セルフホスティングでは、Wrangler に同梱されているローカルの `workerd`
-ランタイム上で、まったく同じ Worker コードを自分のマシンで動かします。D1（SQLite）と
-KV は Wrangler 自身がローカルでエミュレートするため、**Cloudflare アカウントは不要**です。`wrangler login` も、ダッシュボードでのリソース作成も必要ありません。
+Go サーバーは自分のマシン上で動作します。単一の静的バイナリ `shyake-server` で、すべてのデータを 1 つの SQLite ファイルに保存します。Node.js も Cloudflare アカウントも必要ありません。
 
 前提条件：
 
-- Node.js 18+
-- 常時オンラインのマシン（Node.js が動作する OS なら何でも可。以下の例は
-  systemd を備えた Linux を想定しています）
-- フェデレーションに参加する場合：そのマシンを指す公開ドメイン名と、有効な
-  TLS 証明書を持つリバースプロキシ（後述）
+- 常時オンラインのマシン。以下の例は systemd を備えた Linux を想定しています。
+- ビルド用の Go 1.26 以降、または Docker。
+- フェデレーションに参加する場合：そのマシンを指す公開ドメイン名と、有効な TLS 証明書を持つリバースプロキシ（手順 4）。
 
 手順：
 
-1. **セットアップ**します（fork は不要です）：
+1. **バイナリをビルド**します：
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server/cf
-./deploy.sh --local --domain your.domain.example
+cd shyake/server/go
+CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
 ```
 
-`--local` を付けると、Cloudflare アカウントを必要とする処理はすべて省略されます。`wrangler login` もリモートリソースの作成もありません。依存関係のインストール、`wrangler.toml` の生成、ローカル SQLite データベースの作成だけを行います。
+できあがるのは静的バイナリで、CPU アーキテクチャが同じ任意の Linux マシンにコピーして使えます。
 
-`--domain` は、あなたのインスタンスに外部から到達できるドメインでなければなりません。この値はインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスもこれを使ってフェデレーションメールをあなたのインスタンスへルーティングします。省略した場合はスクリプトが尋ねます。
-
-2. 必要であれば、生成された `server/cf/wrangler.toml` で**設定を調整**します。重要なのは `[vars]` セクションだけで、ローカルモードでは `database_id` と KV の `id` は無視されます：
-
-```toml
-[vars]
-INSTANCE_DOMAIN      = "your.domain.example"
-REGISTRATION_ENABLED = true
-RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
-FEDERATION_ENABLED   = true
-MAX_MAIL_SIZE        = 196608 # 192 KiB。786432（768 KiB）を超えないこと
-```
-
-このファイルは git の管理対象ではないため、編集内容は `git pull` しても残ります。以降のアップグレードは `./deploy.sh --update --local` で行います。
-
-3. **サーバーを起動**します：
+2. **systemd でインストール**します。サービス用のシステムユーザーを作成してから、`server/go/deploy/` のファイルをインストールします：
 
 ```sh
-npx wrangler dev --local --ip 127.0.0.1 --port 8787
+sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo install -D -m 640 -g shyake deploy/shyake.env.example /etc/shyake/shyake.env
+sudo install -m 644 deploy/shyake-server.service /etc/systemd/system/
 ```
 
-`curl http://127.0.0.1:8787/health` で確認します。`200 OK`
-が返れば、Worker とデータベースが正常に動作しています。
+3. **設定**します。`/etc/shyake/shyake.env` を編集し、少なくともインスタンスのドメインを設定します：
 
-サーバーは `127.0.0.1` にバインドしたままにし、外部トラフィックはリバースプロキシに処理させます（次の手順）。`0.0.0.0`
-へ直接バインドするのは、フェデレーションに参加しない信頼できる LAN 内でのみ妥当です。
+```sh
+SHYAKE_INSTANCE_DOMAIN=your.domain.example
+SHYAKE_LISTEN=127.0.0.1:8787
+```
+
+インスタンスのドメインはそのインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスはこれを使ってフェデレーションメールを送り返します。このファイルには他のすべての設定がデフォルト値とともに記載されています。詳細は [SPEC.md §11.2](SPEC.md) を参照してください。
+
+次にサービスを起動します：
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now shyake-server
+curl http://127.0.0.1:8787/health
+```
+
+`200 OK` が返れば、サーバーとデータベースは正常に動作しています。サービスは `shyake` ユーザーとして動作し、データベースを置く `/var/lib/shyake` にしか書き込めません。
 
 4. **TLS 付きリバースプロキシを設定**します
 
-この手順は**フェデレーションに必須**です。インスタンス同士は常に
-`https://<domain>/...` で通信するため、あなたのインスタンスは
-`https://your.domain.example`
-で到達可能であり、他のインスタンスが受け入れる証明書を持っていなければなりません。自己署名証明書は使えません。インスタンスが私的なもの（ユーザー同士でのみメールをやり取りする）であれば、この手順を省略してクライアントに平文
-HTTP で接続させることもできます。
+この手順は**フェデレーションに必須**です。インスタンス同士は常に `https://<domain>/...` で通信するため、あなたのインスタンスは `https://your.domain.example` で到達可能で、他のインスタンスが受け入れる証明書を持っている必要があります。自己署名証明書は使えません。インスタンスが非公開（ユーザー同士でしかメールしない）であれば、この手順を省略して、クライアントを平文 HTTP で接続させることもできます。
 
-[Caddy](https://caddyserver.com/) を使えば証明書の取得と更新は自動です。`Caddyfile`
-全体は次のとおりです：
+[Caddy](https://caddyserver.com/) を使えば、証明書の取得と更新は自動で行われます。`Caddyfile` はこれだけです：
 
 ```
 your.domain.example {
@@ -154,66 +140,83 @@ your.domain.example {
 }
 ```
 
-certbot で管理する証明書を使った nginx でも同様に動作します。`https://your.domain.example`
-を `http://127.0.0.1:8787` へプロキシしてください。
+certbot で証明書を管理する nginx でも同様に動作します。`https://your.domain.example` を `http://127.0.0.1:8787` にプロキシしてください。
 
-5. **常時稼働させる**
+サーバーはクライアントアドレスごとにリクエスト数を制限します。プロキシの背後では `X-Forwarded-For` からクライアントアドレスを読み取りますが、それはプロキシのアドレスが `SHYAKE_TRUSTED_PROXIES` に含まれている場合に限られます。デフォルトでは同じマシン上のプロキシ（`127.0.0.1`、`::1`）だけを信頼します。プロキシが別の場所で動いている場合は、そのアドレスを追加してください。そうしないと、すべてのクライアントがプロキシのアドレスとみなされ、1 つのレート制限を共有することになります。
 
-`wrangler dev`
-はフォアグラウンドプロセスです。ブート時の起動と障害時の再起動はスーパーバイザーに任せます。最小構成の
-systemd ユニット（`/etc/systemd/system/shyake.service`）：
-
-```ini
-[Unit]
-Description=Shyake server (local workerd)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=shyake
-WorkingDirectory=/home/shyake/shyake/server/cf
-ExecStart=/usr/bin/npx wrangler dev --local --ip 127.0.0.1 --port 8787
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+#### Docker で動かす
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now shyake
+docker build -t shyake-server server/go
+docker run -d --name shyake --restart unless-stopped \
+    -p 127.0.0.1:8787:8787 -v shyake:/data \
+    -e SHYAKE_INSTANCE_DOMAIN=your.domain.example \
+    -e SHYAKE_TRUSTED_PROXIES=172.16.0.0/12 \
+    shyake-server
 ```
 
-**データの場所とバックアップ**
+データベースは `shyake` ボリューム上の `/data/shyake.db` です。コンテナからはリバースプロキシが Docker ブリッジのアドレスに見えるため、上の例のように `SHYAKE_TRUSTED_PROXIES` をブリッジのネットワークに設定してください。
 
-すべてのローカル状態（D1 の SQLite データベースと KV キャッシュ）は
-`server/cf/.wrangler/state/`
-以下に保存されます。インスタンスのバックアップとは、このディレクトリのバックアップです（書き込み中のデータベースをコピーしないよう、先にサーバーを停止するか、SQLite
-に安全なツールを使ってください）。このディレクトリを削除するとインスタンスは空のデータベースにリセットされます。`wrangler dev`
-に `--persist-to <dir>` を渡せば、状態を別の場所に保存できます。
+#### アップグレード
 
-**注意事項：何を動かしているのかを理解する**
+```sh
+cd shyake
+git pull
+cd server/go
+CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo systemctl restart shyake-server
+```
 
-`wrangler dev` は Wrangler
-の開発サーバーであり、堅牢化された本番サーバーではありません。Cloudflare
-Workers を支えているのと同じ `workerd`
-ランタイムを実行するため、個人や小規模コミュニティのインスタンスなら十分に持ちこたえますが、開発向けの挙動には注意が必要です：
+サーバーは起動時に新しいデータベースマイグレーションを適用します。再起動時には処理中のリレーを完了させ、キューに残ったリレーは次の起動後に再開します。
 
-- **ファイル監視 / ホットリロード**: ソースツリーを監視し、ファイルが変更されると
-  Worker をリロードします。開発中は便利ですが、サーバー上では `server/cf/`
-  内のファイル編集や `git pull` が即座にインスタンスの再起動を意味します。更新は慎重に：pull
-  して、変更を確認してから、リロードさせる（または自分でサービスを再起動する）ようにしてください。
-- **単一プロセスで、自前の監視機能なし**: クラスタリングも組み込みのクラッシュ復旧もありません。それを担うのが上記の
-  systemd ユニットです。
-- **レート制限や DDoS 防御なし**: Cloudflare
-  上ではプラットフォームが提供します。セルフホストでインスタンスを公開する場合、レート制限を加える場所はリバースプロキシです。
-- **対話的なキーバインド**: 端末に接続していると `wrangler dev` は stdin
-  からホットキーを読み取ります。systemd 下では TTY
-  がないため問題になりませんが、代わりに `tmux`
-  で動かす場合は誤入力に注意してください（`x` はコンソールをクリアし、`Ctrl+C` は終了します）。
+#### データの場所とバックアップ
 
-インスタンスがこの構成の限界を超えたら、スケールできるのは前述の
-Cloudflare デプロイの方です。データベースは、ローカルの SQLite
-ファイルをエクスポートして `wrangler d1 execute --remote`
-でインポートすれば移行できます。
+すべてのデータは 1 つの SQLite ファイルにあります。systemd では `/var/lib/shyake/shyake.db`、Docker では `/data/shyake.db` です。データベースは WAL モードで動作するため、サーバーの稼働中はその隣にさらに 2 つのファイル（`-wal`、`-shm`）があります。
+
+稼働中のサーバーをバックアップするには、書き込み中でも安全な SQLite のオンラインバックアップを使います：
+
+```sh
+sudo sqlite3 /var/lib/shyake/shyake.db ".backup /root/shyake-backup.db"
+```
+
+または、サービスを停止してから 3 つのファイルをコピーします。
+
+#### Worker からの移行
+
+Go サーバーは Worker インスタンスのデータ（ユーザー、メール、ブロック）を引き継げます。保存されているアドレスはインスタンスのドメインに依存するため、ドメインは変えないでください。
+
+Cloudflare 上の Worker からは、まずデータベースをエクスポートします：
+
+```sh
+cd shyake/server/cf
+npx wrangler d1 export shyake-db --remote --output=d1-export.sql
+```
+
+ローカルの `wrangler dev` インスタンスからは、まずそれを停止し、そのデータベースファイルを使います。`server/cf/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/` にある、`metadata.sqlite` ではない方の `.sqlite` ファイルです。このファイルは WAL モードで、データの大部分は隣の `-wal` ファイルにあります。データベースをコピーする場合は、`-wal` ファイルも一緒にコピーしてください。
+
+次に、サービスを初めて起動する前に、`shyake` ユーザーとして新しいデータベースにインポートします。このユーザーがエクスポートファイルを読めるようにしておく必要があります：
+
+```sh
+sudo install -d -o shyake -g shyake -m 700 /var/lib/shyake
+sudo install -o shyake -m 600 d1-export.sql /var/lib/shyake/
+# D1 ファイルの場合：<file>.sqlite と <file>.sqlite-wal の両方をインストールする
+sudo -u shyake env \
+    SHYAKE_INSTANCE_DOMAIN=your.domain.example \
+    SHYAKE_DATABASE=/var/lib/shyake/shyake.db \
+    shyake-server -import-d1 /var/lib/shyake/d1-export.sql
+sudo rm /var/lib/shyake/d1-export.sql
+```
+
+インポートは、すでにユーザーがいるデータベースを拒否します。そのままコピーできなかったものは出力で報告されます：
+
+- 大文字小文字だけが異なる 2 つの名前：先に登録したアカウントがその名前を保持します。Go サーバーはこのような組を許しません。
+- 同じ署名で 2 回保存されたメール：1 通だけ残します。
+
+また、ブロックの記録を正規化された形式（[SPEC.md §4](SPEC.md)）に書き換えます。
+
+あとはドメインを新しいマシンに向けるだけです。クライアントは何も変更する必要がありません。鍵もアドレスもそのままです。
+
+#### データベース
+
+Go サーバーが現在サポートしているのは SQLite だけです。ストレージ層はインターフェースの背後にあり、すべてのバックエンドが通過しなければならないテストスイートを備えています。PostgreSQL のサポートはこの仕組みの上に実装する予定です。それまでは、`SHYAKE_DATABASE` に `postgres://` を指定するとサーバーは起動を拒否します。

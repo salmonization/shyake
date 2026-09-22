@@ -46,11 +46,14 @@ shyake/
 │   ├── tests/              # 库测试程序
 │   └── Makefile
 ├── server/
-│   └── cf/                 # Cloudflare Worker
-│       ├── src/index.ts    # Hono 路由
-│       ├── src/utils.ts    # 辅助函数（PoW、用户名校验）
-│       ├── migrations/     # D1 模式迁移
-│       └── wrangler.toml   # Worker 配置
+│   ├── cf/                 # Cloudflare Worker
+│   │   ├── src/index.ts    # Hono 路由
+│   │   ├── src/utils.ts    # 辅助函数（PoW、用户名校验）
+│   │   ├── migrations/     # D1 模式迁移
+│   │   └── wrangler.template.toml  # Worker 配置
+│   └── go/                 # Go 服务端（自托管）
+│       ├── cmd/shyake-server/      # 入口
+│       └── internal/       # protocol、store、api、federation
 └── docs/
 ```
 
@@ -71,10 +74,20 @@ shyake/
 
 #### 2.3 服务端
 
+服务端有两个实现，提供同一套 HTTP API（§5）。客户端可以连接其中任意一个，两种实例之间也能互相联邦。
+
+**Worker**（`server/cf/`），部署在 Cloudflare 上：
+
 - **运行时**：Cloudflare Workers
 - **框架**：[Hono](https://hono.dev/)
 - **数据库**：Cloudflare D1（SQLite）
 - **签名验证**：ML-DSA-65 编译为 WebAssembly（`mldsa65-wasm`），通过 Wrangler 的 `CompiledWasm` 规则加载。
+
+**Go 服务端**（`server/go/`），用于自托管：
+
+- **运行时**：单个静态二进制文件 `shyake-server`
+- **数据库**：单个 SQLite 文件。PostgreSQL 已在规划中，将接在同一个存储接口之后。
+- **签名验证**：纯 Go 实现的 ML-DSA-65，来自 [circl](https://github.com/cloudflare/circl)。
 
 ---
 
@@ -158,11 +171,13 @@ GET:/api/mail?type=inbox:salmon:1749513600
 完整请求体还携带 `enc_key_sender`、`enc_key_recipient`、
 `signature` 和 `pow`，它们不属于被签名的子集。
 
-服务器使用存储在 D1 中的发件人 `sig_pubkey`（对于联邦网络邮件则从发件人所在实例获取），通过 WASM ML-DSA 模块验证签名。
+服务器用发件人的 `sig_pubkey` 验证签名。公钥从本实例的数据库读取；对于联邦网络邮件，则从发件人所在实例获取。
 
 #### 3.4 防重放
 
 每条被签名的消息中都包含时间戳。服务器拒绝时间戳与服务器时间偏差超过 **300 秒**（5 分钟）的请求。
+
+Go 服务端还会记住每个已接受的签名，重复使用同一签名的请求会被以 HTTP 403 拒绝。`POST /api/mail` 是例外：重复的签名不算错误，服务器返回 `201` 和已存储邮件的 id，不会重复存储。因此客户端重试和中继重试都是安全的。
 
 #### 3.5 工作量证明（PoW）
 
@@ -173,7 +188,15 @@ PoW 令牌，SHA-1 难度为 **20 位**：
 1:<bits>:<yymmdd>:<resource>::<rand>:<counter-hex>
 ```
 
-`resource` 为操作用户的用户名。令牌在客户端铸造，并在签名验证或任何数据库操作之前在服务端完成验证。
+`resource` 为操作用户：注册和请求头认证时是用户名，发送邮件时是 `sender` 字段。令牌在客户端铸造，并在签名验证或任何数据库操作之前在服务端完成验证。出现以下任一情况时，服务器拒绝该令牌：
+
+- resource 不是操作用户；
+- 日期与服务器日期（UTC）相差超过一天；
+- SHA-1 哈希的前 20 位不全为零。
+
+联邦网络发件人的 resource 可能含有冒号（`alice@host:8787`），因此服务器按位置取前三个字段和后三个字段，两者之间的部分即为 resource。
+
+Go 服务端还会拒绝已经接受过的令牌，因此每个令牌只能用于一次请求。
 
 #### 3.6 密钥指纹
 
@@ -236,8 +259,10 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 
 ### 4. 数据库模式
 
-由 Cloudflare D1（SQLite）管理。迁移文件：
-`migrations/0001_initial.sql`。
+两个服务端都使用 SQLite：Worker 使用 Cloudflare D1（`server/cf/migrations/`），Go 服务端使用本地文件（`server/go/internal/store/sqlite/migrations/`）。下面的表为两者共有。Go 服务端另外增加了：
+
+- `mail` 表的 `sig_hash` 列：`signature` 的 SHA-256，唯一。用于识别重复提交的邮件（§3.4）。
+- `relay_outbox` 表：出站中继的队列（§6.2）。
 
 #### `users`
 
@@ -287,20 +312,30 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 
 ### 5. HTTP API
 
-所有端点均托管在 Cloudflare Worker 上。基础 URL 为配置的 `INSTANCE_DOMAIN`。
+两个服务端提供相同的端点，状态码和响应体也相同。基础 URL 为实例域名。
 
 #### 5.1 公开端点
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/health` | 存活检查；查询 D1 |
+| `GET` | `/health` | 存活检查；查询数据库 |
 | `GET` | `/api/pubkey/:username` | 返回 `kem_pubkey`、`sig_pubkey` |
 | `GET` | `/api/client/version` | 最新客户端发布标签 |
 
 `/api/pubkey/:username` 支持 `user@domain` 语法；如果域名与本地实例不同，服务器会将请求代理到远程实例（需要启用联邦网络）。
 
-`/api/client/version` 代理 GitHub Releases API，返回
-`{"release": "vX.Y.Z", "pre_release": "vX.Y.Z-..."}`（任一字段都可能缺失）。结果在 KV 中缓存一小时。参见 §12。
+`/api/client/version` 代理 GitHub Releases API，返回每个渠道的最新标签，以及该版本每个发布产物的 SHA-256 摘要：
+
+```json
+{
+  "release": "vX.Y.Z",
+  "release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"},
+  "pre_release": "vX.Y.Z-...",
+  "pre_release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"}
+}
+```
+
+任一渠道都可能缺失。结果缓存一小时：Worker 缓存在 KV 中，Go 服务端缓存在内存中。参见 §12。
 
 #### 5.2 认证端点
 
@@ -321,9 +356,17 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 
 `POST /api/mail` 值得注意的状态码：`409`（`KEY_MISMATCH`，提供的收件人指纹已不匹配）、`410`（`USER_DESTROYED`）、`413`（载荷过大）、`403`（被屏蔽、PoW 无效或时间戳过期）。
 
+Go 服务端还可能返回：
+
+- `429`：任意端点，客户端地址超过速率限制时。
+- `403`：请求重复使用了签名或 PoW 令牌时（§3.4、§3.5）。
+- `403`：`POST /api/mail` 的收发双方都不属于本实例时。服务器不在两个第三方实例之间中继。
+- `503`：`POST /api/mail` 查询发件人公钥时发件人实例无响应。中继方实例收到后会重试。
+- `502`：`POST /api/mail` 时收件人实例无响应。Worker 在这种情况下返回 `404`。
+
 #### 5.3 大小限制
 
-服务器对 `POST /api/mail` 的原始 HTTP 请求体强制施加硬性上限。默认为 **196608 字节（192 KiB）**，可在 `wrangler.toml` 中通过 `MAX_MAIL_SIZE` 配置。绝对上限为 786432 字节（768 KiB），由 Cloudflare D1 的单行限制决定。
+服务器对 `POST /api/mail` 的原始 HTTP 请求体强制施加硬性上限。默认为 **196608 字节（192 KiB）**，运维者可以修改（§11）。绝对上限为 786432 字节（768 KiB），由 Cloudflare D1 的单行限制决定。Go 服务端沿用同一上限，以保证它的邮件在联邦网络中仍能被 Worker 实例接受。
 
 ---
 
@@ -341,8 +384,17 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 当 `recipient` 属于远程实例时：
 
 1. 客户端将签名并加密的载荷提交到**发件人自己的实例**（`POST /api/mail`）。
-2. 发件人的实例将邮件存储在其本地 D1 数据库中。
-3. 在同一请求生命周期内（通过 `executionCtx.waitUntil`），服务器将原始载荷转发到 `https://<recipientDomain>/api/mail`。
+2. 发件人的实例将邮件存储在其数据库中。
+3. 发件人的实例将原始载荷转发到 `https://<recipientDomain>/api/mail`。
+
+两个服务端的转发方式不同：
+
+- **Worker** 在同一请求生命周期内（通过 `executionCtx.waitUntil`）只尝试一次，且不检查响应。如果这次尝试失败，邮件就不会到达收件人。
+- **Go 服务端**在同一事务中写入邮件和一条中继记录，再由后台队列投递。遇到网络错误或 `408`、`429`、`5xx` 响应时按退避间隔重试（5 秒、15 秒、30 秒，之后每 60 秒）；其他 `4xx` 响应视为最终结果。排队中的中继在服务器重启后仍会继续。
+
+当发件人签名的时间戳已过去 280 秒时，重试停止。收件人实例会在该时间戳 300 秒后拒绝这份载荷（§3.4），而发件人实例无法重新签名。如果远程实例宕机的时间比这更长，邮件就无法送达。
+
+两种情况下，只要发件人的实例存储了邮件，客户端就会收到 `201`，客户端无法得知中继是否成功。
 
 收件人的实例独立验证发件人的签名，方法是从发件人的实例获取其公钥（`GET /api/pubkey/<sender>`）。
 
@@ -350,8 +402,7 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 
 #### 6.3 联邦网络开关
 
-通过 `wrangler.toml` 中的 `FEDERATION_ENABLED` 配置。设为
-`false` 时，实例拒绝解析远程用户，从而同时拒绝传入的中继邮件和传出的跨实例发送。
+通过 `FEDERATION_ENABLED`（Worker）或 `SHYAKE_FEDERATION_ENABLED`（Go 服务端）配置。设为 `false` 时，实例拒绝解析远程用户，从而同时拒绝传入的中继邮件和传出的跨实例发送。
 
 ---
 
@@ -510,7 +561,9 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 
 ---
 
-### 11. Worker 配置（`wrangler.toml`）
+### 11. 服务端配置
+
+#### 11.1 Worker（`wrangler.toml`）
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -531,24 +584,40 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 
 `wrangler.toml` 由 `server/cf/deploy.sh` 从 `wrangler.template.toml` 生成，不受 git 跟踪：它保存运维者自己的域名和资源 id。
 
+#### 11.2 Go 服务端（环境变量）
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `SHYAKE_INSTANCE_DOMAIN` | — | 本实例的规范域名（必填） |
+| `SHYAKE_LISTEN` | `127.0.0.1:8787` | 监听地址 |
+| `SHYAKE_DATABASE` | `shyake.db` | SQLite 文件路径 |
+| `SHYAKE_REGISTRATION_ENABLED` | `true` | 接受新用户注册 |
+| `SHYAKE_RESERVED_USERNAMES` | `admin,system,...` | 保留用户名（CSV） |
+| `SHYAKE_FEDERATION_ENABLED` | `true` | 接受并中继联邦网络邮件 |
+| `SHYAKE_MAX_MAIL_SIZE` | `196608` | 最大载荷字节数，不超过 `786432` |
+| `SHYAKE_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | 信任其 `X-Forwarded-For` 的代理 |
+| `SHYAKE_RATE_LIMIT` | `5` | 每个客户端地址每秒请求数 |
+| `SHYAKE_RATE_BURST` | `30` | 每个客户端地址的突发额度 |
+| `SHYAKE_LOG_FORMAT` | `text` | `text` 或 `json` |
+| `SHYAKE_FEDERATION_INSECURE` | `false` | 仅用于测试：允许通过明文 HTTP 与私有地址进行联邦 |
+
+Go 服务端在启动时自动执行数据库迁移。
+
 ---
 
 ### 12. 发布渠道与自更新
 
 发布通过 GitHub 分两个渠道进行：**stable**（正式发布）和
-**preview**（预发布）。服务端端点 `GET /api/client/version`
-代理 GitHub Releases API，选取每个渠道的最新标签，并将结果在
-KV 中缓存一小时。
+**preview**（预发布）。服务端端点 `GET /api/client/version` 代理 GitHub Releases API，选取每个渠道的最新标签，并将结果缓存一小时（§5.1）。
 
 `shyake update` 从**用户自己的实例**（profile 配置中的
-`INSTANCE`）获取该端点，因此每个实例都用自己的 KV 缓存中继
-GitHub API；`shyake.eee.coffee` 只是内置的回退目标，仅在未配置实例时使用。标签使用 semver 排序比较（`vX.Y.Z`；同一基础版本下正式发布高于预发布）。仅当 preview
+`INSTANCE`）获取该端点，因此每个实例都用自己的缓存中继 GitHub API；`shyake.eee.coffee` 只是内置的回退目标，仅在未配置实例时使用。标签使用 semver 排序比较（`vX.Y.Z`；同一基础版本下正式发布高于预发布）。仅当 preview
 渠道比 stable 更新时才会提供。
 
 `shyake update stable|preview` 执行自更新：
 
-1. 从 GitHub Releases 下载与操作系统/架构匹配的发布产物（`shyake-<os>-<arch>.tar.gz`）和 `sha256sums.txt`。
-2. 用校验和文件验证压缩包的 SHA-256；不匹配则中止。
+1. 从 GitHub Releases 下载与操作系统/架构匹配的发布产物（`shyake-<os>-<arch>.tar.gz`）。
+2. 将压缩包的 SHA-256 与 `/api/client/version` 响应中该产物的摘要比较（§5.1）。不匹配，或响应中没有该产物的摘要时，中止更新。
 3. 解压压缩包并原地替换正在运行的二进制文件（通过
    `/proc/self/exe`、`_NSGetExecutablePath` 或 `which shyake`
    解析路径）。

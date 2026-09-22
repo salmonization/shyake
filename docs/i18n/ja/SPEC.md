@@ -44,11 +44,14 @@ shyake/
 │   ├── tests/              # ライブラリテストプログラム
 │   └── Makefile
 ├── server/
-│   └── cf/                 # Cloudflare Worker
-│       ├── src/index.ts    # Hono ルート
-│       ├── src/utils.ts    # ヘルパー（PoW、ユーザー名検証）
-│       ├── migrations/     # D1 スキーママイグレーション
-│       └── wrangler.toml   # Worker 設定
+│   ├── cf/                 # Cloudflare Worker
+│   │   ├── src/index.ts    # Hono ルート
+│   │   ├── src/utils.ts    # ヘルパー（PoW、ユーザー名検証）
+│   │   ├── migrations/     # D1 スキーママイグレーション
+│   │   └── wrangler.template.toml  # Worker 設定
+│   └── go/                 # Go サーバー（セルフホスティング用）
+│       ├── cmd/shyake-server/      # エントリポイント
+│       └── internal/       # protocol、store、api、federation
 └── docs/
 ```
 
@@ -70,11 +73,20 @@ shyake/
 
 #### 2.3 サーバー
 
+サーバーには 2 つの実装があり、同じ HTTP API（§5）を提供する。クライアントはどちらにも接続でき、両種のインスタンスは相互にフェデレーションできる。
+
+**Worker**（`server/cf/`）、Cloudflare 向け：
+
 - **ランタイム**：Cloudflare Workers
 - **フレームワーク**：[Hono](https://hono.dev/)
 - **データベース**：Cloudflare D1（SQLite）
-- **署名検証**：WebAssembly にコンパイルされた ML-DSA-65
-  （`mldsa65-wasm`）を、Wrangler の `CompiledWasm` ルール経由でロードする。
+- **署名検証**：WebAssembly にコンパイルされた ML-DSA-65（`mldsa65-wasm`）を、Wrangler の `CompiledWasm` ルール経由でロードする。
+
+**Go サーバー**（`server/go/`）、セルフホスティング向け：
+
+- **ランタイム**：単一の静的バイナリ `shyake-server`
+- **データベース**：単一の SQLite ファイル。PostgreSQL は同じストレージインターフェースの背後に追加する計画である。
+- **署名検証**：[circl](https://github.com/cloudflare/circl) の純粋な Go 実装による ML-DSA-65
 
 ---
 
@@ -156,13 +168,13 @@ GET:/api/mail?type=inbox:salmon:1749513600
 完全なリクエストボディはさらに `enc_key_sender`、
 `enc_key_recipient`、`signature`、`pow` を運ぶが、これらは署名対象の部分集合には含まれない。
 
-サーバーは、D1 に保存された送信者の `sig_pubkey`
-（フェデレーションメールの場合は送信者のインスタンスから取得）を用い、WASM ML-DSA モジュール経由で署名を検証する。
+サーバーは送信者の `sig_pubkey` で署名を検証する。公開鍵は自インスタンスのデータベースから読み出すか、フェデレーションメールの場合は送信者のインスタンスから取得する。
 
 #### 3.4 リプレイ対策
 
-署名対象のすべてのメッセージにタイムスタンプが含まれる。サーバーは、タイムスタンプがサーバー時刻から **300 秒（5 分）**
-を超えて乖離しているリクエストを拒否する。
+署名対象のすべてのメッセージにタイムスタンプが含まれる。サーバーは、タイムスタンプがサーバー時刻から **300 秒（5 分）**を超えて乖離しているリクエストを拒否する。
+
+Go サーバーはさらに、受け入れた署名をすべて記憶し、同じ署名を再利用したリクエストを HTTP 403 で拒否する。ただし `POST /api/mail` では、署名の重複はエラーではない。サーバーは保存済みメールの id とともに `201` を返し、二重には保存しない。したがってクライアントの再送やリレーの再試行は安全である。
 
 #### 3.5 プルーフ・オブ・ワーク（PoW）
 
@@ -173,7 +185,15 @@ GET:/api/mail?type=inbox:salmon:1749513600
 1:<bits>:<yymmdd>:<resource>::<rand>:<counter-hex>
 ```
 
-`resource` は操作するユーザーのユーザー名である。トークンはクライアント側で生成（マイニング）され、署名検証やデータベース処理より前にサーバー側で検証される。
+`resource` は操作するユーザーである。登録とヘッダー認証ではユーザー名、メール送信では `sender` フィールドとなる。トークンはクライアント側で生成（マイニング）され、署名検証やデータベース処理より前にサーバー側で検証される。サーバーは次のいずれかに当てはまるトークンを拒否する：
+
+- resource が操作するユーザーでない
+- 日付がサーバーの日付（UTC）から 1 日を超えて離れている
+- SHA-1 ハッシュの先頭 20 ビットがすべて 0 ではない
+
+フェデレーションの送信者の resource にはコロンが含まれることがある（`alice@host:8787`）。そのためサーバーは先頭 3 フィールドと末尾 3 フィールドを位置で取り出し、その間をすべて resource とみなす。
+
+Go サーバーはさらに、一度受け入れたトークンを拒否する。したがって 1 つのトークンで支払えるのは 1 回のリクエストだけである。
 
 #### 3.6 鍵フィンガープリント
 
@@ -240,8 +260,10 @@ compose のエディタが扱う平文一時ファイルは `mkstemp`（モー�
 
 ### 4. データベーススキーマ
 
-Cloudflare D1（SQLite）で管理される。マイグレーション：
-`migrations/0001_initial.sql`。
+どちらのサーバーも SQLite を使う。Worker は Cloudflare D1（`server/cf/migrations/`）、Go サーバーはローカルファイル（`server/go/internal/store/sqlite/migrations/`）である。以下のテーブルは両者に共通する。Go サーバーはさらに次を追加する：
+
+- `mail` テーブルの `sig_hash` 列：`signature` の SHA-256 で、一意である。再送されたメールを識別するために使う（§3.4）。
+- `relay_outbox` テーブル：送信リレーのキュー（§6.2）。
 
 #### `users`
 
@@ -293,21 +315,30 @@ Cloudflare D1（SQLite）で管理される。マイグレーション：
 
 ### 5. HTTP API
 
-すべてのエンドポイントは Cloudflare Worker 上でホストされる。ベース URL は設定された `INSTANCE_DOMAIN` である。
+両サーバーは同じエンドポイントを、同じステータスコードとレスポンスボディで提供する。ベース URL はインスタンスのドメインである。
 
 #### 5.1 公開エンドポイント
 
 | メソッド | パス | 説明 |
 |---|---|---|
-| `GET` | `/health` | 死活チェック、D1 に問い合わせ |
+| `GET` | `/health` | 死活チェック、データベースに問い合わせ |
 | `GET` | `/api/pubkey/:username` | `kem_pubkey`、`sig_pubkey` を返す |
 | `GET` | `/api/client/version` | 最新のクライアントリリースタグ |
 
 `/api/pubkey/:username` は `user@domain` 構文をサポートする。ドメインがローカルインスタンスと異なる場合、サーバーはリクエストをリモートインスタンスへプロキシする（フェデレーションの有効化が必要）。
 
-`/api/client/version` は GitHub Releases API をプロキシし、
-`{"release": "vX.Y.Z", "pre_release": "vX.Y.Z-..."}` を返す（どちらのフィールドも欠けることがある）。結果は KV に
-1 時間キャッシュされる。§12 を参照。
+`/api/client/version` は GitHub Releases API をプロキシし、各チャネルの最新タグと、そのリリースの各アセットの SHA-256 ダイジェストを返す：
+
+```json
+{
+  "release": "vX.Y.Z",
+  "release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"},
+  "pre_release": "vX.Y.Z-...",
+  "pre_release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"}
+}
+```
+
+どちらのチャネルも欠けることがある。結果は 1 時間キャッシュされる。Worker は KV に、Go サーバーはメモリに保持する。§12 を参照。
 
 #### 5.2 認証エンドポイント
 
@@ -328,13 +359,19 @@ ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と
 | `POST` | `/api/rotate` | 公開鍵をローテーション |
 | `DELETE` | `/api/destroy` | アカウントを抹消 |
 
-`POST /api/mail` の注目すべきステータスコード：`409`
-（`KEY_MISMATCH`、送信された受信者フィンガープリントがもはや一致しない）、`410`（`USER_DESTROYED`）、`413`（ペイロードが大きすぎる）、`403`（ブロック済み、不正な PoW、または古いタイムスタンプ）。
+`POST /api/mail` の注目すべきステータスコード：`409`（`KEY_MISMATCH`、送信された受信者フィンガープリントがもはや一致しない）、`410`（`USER_DESTROYED`）、`413`（ペイロードが大きすぎる）、`403`（ブロック済み、不正な PoW、または古いタイムスタンプ）。
+
+Go サーバーはさらに次を返すことがある：
+
+- `429`：任意のエンドポイントで、クライアントアドレスがレート制限を超えたとき。
+- `403`：リクエストが署名または PoW トークンを再利用したとき（§3.4、§3.5）。
+- `403`：`POST /api/mail` で、送信者と受信者のどちらもこのインスタンスに属さないとき。サーバーは第三者のインスタンス間ではリレーしない。
+- `503`：`POST /api/mail` で、送信者のインスタンスが公開鍵の問い合わせに応答しないとき。リレー元のインスタンスはこれを受けて再試行する。
+- `502`：`POST /api/mail` で、受信者のインスタンスが応答しないとき。Worker はこの場合 `404` を返す。
 
 #### 5.3 サイズ制限
 
-サーバーは `POST /api/mail` の生の HTTP リクエストボディにハードキャップを課す。デフォルトは **196608 バイト**（192 KiB）で、`wrangler.toml` の
-`MAX_MAIL_SIZE` で設定可能である。絶対上限は 786432 バイト（768 KiB）で、Cloudflare D1 の単一行制限によるものである。
+サーバーは `POST /api/mail` の生の HTTP リクエストボディにハードキャップを課す。デフォルトは **196608 バイト**（192 KiB）で、運用者が変更できる（§11）。絶対上限は 786432 バイト（768 KiB）で、Cloudflare D1 の単一行制限によるものである。Go サーバーも同じ上限を守る。これにより、そのメールはフェデレーションで Worker インスタンスにも受け入れられる。
 
 ---
 
@@ -353,8 +390,17 @@ ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と
 `recipient` がリモートインスタンスに属する場合：
 
 1. クライアントは署名・暗号化済みペイロードを**送信者自身のインスタンス**に POST する（`POST /api/mail`）。
-2. 送信者のインスタンスはメールをローカルの D1 データベースに保存する。
-3. 同一リクエストのライフサイクル内で（`executionCtx.waitUntil` 経由）、サーバーは元の生ペイロードを `https://<recipientDomain>/api/mail` へ転送する。
+2. 送信者のインスタンスはメールを自身のデータベースに保存する。
+3. 送信者のインスタンスは元の生ペイロードを `https://<recipientDomain>/api/mail` へ転送する。
+
+転送の仕方は 2 つのサーバーで異なる：
+
+- **Worker** は同一リクエストのライフサイクル内で（`executionCtx.waitUntil` 経由）1 回だけ試み、応答を確認しない。その試みが失敗すると、メールは受信者に届かない。
+- **Go サーバー**はメールとリレー記録を 1 つのトランザクションで書き込み、バックグラウンドのキューから配送する。ネットワークエラーや `408`、`429`、`5xx` の応答の後は、間隔を空けて再試行する（5 秒、15 秒、30 秒、その後は 60 秒ごと）。それ以外の `4xx` の応答は最終結果とみなす。キュー内のリレーはサーバーを再起動しても失われない。
+
+送信者が署名したタイムスタンプから 280 秒が経つと、再試行は止まる。受信者のインスタンスはそのタイムスタンプの 300 秒後にペイロードを拒否し（§3.4）、送信者のインスタンスは署名し直すことができない。リモートインスタンスの停止がそれより長引けば、メールは届かない。
+
+どちらの場合も、送信者のインスタンスがメールを保存した時点でクライアントは `201` を受け取る。クライアントはリレーの成否を知ることができない。
 
 受信者のインスタンスは、送信者のインスタンスから送信者の公開鍵を取得して（`GET /api/pubkey/<sender>`）、送信者の署名を独立に検証する。
 
@@ -362,8 +408,7 @@ ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と
 
 #### 6.3 フェデレーションの切り替え
 
-`wrangler.toml` の `FEDERATION_ENABLED` で設定できる。
-`false` の場合、インスタンスはリモートユーザーの解決を拒否し、受信のリレーメールと送信のインスタンス間送信の両方が拒否される。
+`FEDERATION_ENABLED`（Worker）または `SHYAKE_FEDERATION_ENABLED`（Go サーバー）で設定できる。`false` の場合、インスタンスはリモートユーザーの解決を拒否し、受信のリレーメールと送信のインスタンス間送信の両方が拒否される。
 
 ---
 
@@ -519,7 +564,9 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 
 ---
 
-### 11. Worker 設定（`wrangler.toml`）
+### 11. サーバー設定
+
+#### 11.1 Worker（`wrangler.toml`）
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
@@ -540,21 +587,36 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 
 `wrangler.toml` は `server/cf/deploy.sh` が `wrangler.template.toml` から生成するもので、git の管理対象ではない。運用者自身のドメインとリソース id を保持する。
 
+#### 11.2 Go サーバー（環境変数）
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `SHYAKE_INSTANCE_DOMAIN` | — | このインスタンスの正規ドメイン（必須） |
+| `SHYAKE_LISTEN` | `127.0.0.1:8787` | 待ち受けアドレス |
+| `SHYAKE_DATABASE` | `shyake.db` | SQLite ファイルのパス |
+| `SHYAKE_REGISTRATION_ENABLED` | `true` | 新規ユーザー登録を受け付ける |
+| `SHYAKE_RESERVED_USERNAMES` | `admin,system,...` | 予約済みの名前（CSV） |
+| `SHYAKE_FEDERATION_ENABLED` | `true` | フェデレーションメールの受信とリレー |
+| `SHYAKE_MAX_MAIL_SIZE` | `196608` | 最大ペイロードバイト数（最大 `786432`） |
+| `SHYAKE_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | `X-Forwarded-For` を信頼するプロキシ |
+| `SHYAKE_RATE_LIMIT` | `5` | クライアントアドレスごとの毎秒リクエスト数 |
+| `SHYAKE_RATE_BURST` | `30` | クライアントアドレスごとのバースト許容量 |
+| `SHYAKE_LOG_FORMAT` | `text` | `text` または `json` |
+| `SHYAKE_FEDERATION_INSECURE` | `false` | テスト専用：平文 HTTP とプライベートアドレスでのフェデレーションを許可する |
+
+Go サーバーは起動時にデータベースのマイグレーションを適用する。
+
 ---
 
 ### 12. リリースチャネルと自己更新
 
-リリースは GitHub で 2 つのチャネルで公開される：**stable**
-（通常リリース）と **preview**（プレリリース）。サーバーエンドポイント `GET /api/client/version` は GitHub Releases API
-をプロキシし、各チャネルの最新タグを選択して、結果を KV に
-1 時間キャッシュする。
+リリースは GitHub で 2 つのチャネルで公開される：**stable**（通常リリース）と **preview**（プレリリース）。サーバーエンドポイント `GET /api/client/version` は GitHub Releases API をプロキシし、各チャネルの最新タグを選択して、結果を 1 時間キャッシュする（§5.1）。
 
-`shyake update` はこのエンドポイントを**ユーザー自身のインスタンス**（profile 設定の `INSTANCE`）から取得する。したがって各インスタンスが自身の KV キャッシュで GitHub API を中継する。`shyake.eee.coffee` は組み込みのフォールバックにすぎず、インスタンスが未設定の場合にのみ使用される。タグは semver 順序（`vX.Y.Z`、同じベースバージョンではリリースがプレリリースより上位）で比較される。preview チャネルは stable より新しい場合にのみ提示される。
+`shyake update` はこのエンドポイントを**ユーザー自身のインスタンス**（profile 設定の `INSTANCE`）から取得する。したがって各インスタンスが自身のキャッシュで GitHub API を中継する。`shyake.eee.coffee` は組み込みのフォールバックにすぎず、インスタンスが未設定の場合にのみ使用される。タグは semver 順序（`vX.Y.Z`、同じベースバージョンではリリースがプレリリースより上位）で比較される。preview チャネルは stable より新しい場合にのみ提示される。
 
 `shyake update stable|preview` は自己更新を実行する：
 
-1. OS／アーキテクチャに一致するリリースアセット（`shyake-<os>-<arch>.tar.gz`）と `sha256sums.txt` を
-   GitHub Releases からダウンロードする。
-2. アーカイブの SHA-256 をチェックサムファイルと照合し、不一致なら中止する。
+1. OS／アーキテクチャに一致するリリースアセット（`shyake-<os>-<arch>.tar.gz`）を GitHub Releases からダウンロードする。
+2. アーカイブの SHA-256 を、`/api/client/version` の応答に含まれるそのアセットのダイジェストと照合する（§5.1）。不一致の場合、または応答にそのアセットのダイジェストがない場合は中止する。
 3. アーカイブを展開し、実行中のバイナリをその場で置き換える（パスは `/proc/self/exe`、`_NSGetExecutablePath`、または
    `which shyake` で解決）。

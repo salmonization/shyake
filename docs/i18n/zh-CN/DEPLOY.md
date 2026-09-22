@@ -4,23 +4,16 @@
 
 > Translated by Claude Fable 5
 
-服务端以带有 D1 数据库的 Cloudflare Worker 形式运行。不过，你也可以在自己的硬件上自托管。
+Shyake 的服务端有两个实现，提供同一套 HTTP API。客户端可以连接其中任意一个，两种实例之间也能互相联邦。
 
-部署服务端有两种方式：
-
-* 使用 Cloudflare
-* 自托管
+* **使用 Cloudflare**：`server/cf/` 中的 Worker，运行在 Cloudflare Workers 上，使用 D1 数据库。不需要自己的机器。
+* **自托管**：`server/go/` 中的 Go 服务端，单个二进制文件加单个 SQLite 文件，运行在你自己的机器上。
 
 **联邦网络**
 
-当两个实例都设置了 `FEDERATION_ENABLED = true` 时，它们会自动进行联邦网络通信，无需额外配置。跨实例邮件以
-server-to-server 的方式路由；客户端始终只与自己的实例通信。
+两个实例都启用联邦网络（默认启用）时，它们会自动互相通信，无需额外配置。跨实例邮件以 server-to-server 的方式直接路由；客户端始终只与自己的实例通信。
 
-要禁用入站和出站的联邦网络通信：
-
-```toml
-FEDERATION_ENABLED = false
-```
+要禁用入站和出站的联邦网络通信，在 `wrangler.toml` 中设置 `FEDERATION_ENABLED = false`（Worker），或设置 `SHYAKE_FEDERATION_ENABLED=false`（Go 服务端）。
 
 ### 使用 Cloudflare
 
@@ -60,7 +53,7 @@ cd shyake/server/cf
 | `--update` | 先拉取最新代码，再重新部署 |
 | `--no-kv` | 跳过 KV 版本缓存 |
 | `--config-only` | 只生成 `wrangler.toml` 然后退出 |
-| `--local` | 改为配置本地自托管（见下文） |
+| `--local` | 配置本地开发服务器（见 [DEV.md](DEV.md)） |
 
 #### 升级
 
@@ -95,72 +88,59 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
 
 ### 自托管
 
-自托管就是在你自己的机器上、通过 Wrangler 自带的本地 `workerd`
-运行时来运行完全相同的 Worker 代码。D1（SQLite）和 KV 都由 Wrangler
-在本地模拟，因此**不需要 Cloudflare 账户**。不需要 `wrangler login`，也不需要在控制台创建任何资源。
+Go 服务端运行在你自己的机器上。它是单个静态二进制文件 `shyake-server`，所有数据保存在一个 SQLite 文件中。不需要 Node.js，也不需要 Cloudflare 账户。
 
 前提条件：
 
-- Node.js 18+
-- 一台保持在线的机器（任何 Node.js 支持的操作系统均可；下面的示例假设是带
-  systemd 的 Linux）
-- 若要参与联邦网络：一个指向该机器的公网域名，以及一个带有效
-  TLS 证书的反向代理（见下文）
+- 一台保持在线的机器。下面的示例假设是带 systemd 的 Linux。
+- 用于构建的 Go 1.26 或更新版本，或者 Docker。
+- 若要参与联邦网络：一个指向该机器的公网域名，以及一个带有效 TLS 证书的反向代理（第 4 步）。
 
 步骤：
 
-1. **完成配置**（不需要 fork）：
+1. **构建二进制文件**：
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server/cf
-./deploy.sh --local --domain your.domain.example
+cd shyake/server/go
+CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
 ```
 
-`--local` 会跳过一切需要 Cloudflare 账户的步骤：不需要 `wrangler login`，
-也不会创建任何远端资源。它会安装依赖、生成 `wrangler.toml`
-并创建本地 SQLite 数据库。
+得到的是静态二进制文件，可以复制到任何 CPU 架构相同的 Linux 机器上运行。
 
-`--domain` 必须是你的实例在外部可访问到的域名。它会嵌入到你实例上的每个
-地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回
-你这里。不加这个参数时脚本会询问。
-
-2. 如有需要，在生成的 `server/cf/wrangler.toml` 里**调整配置**。只有
-`[vars]` 部分是重要的；本地模式下会忽略 `database_id` 和 KV 的 `id`：
-
-```toml
-[vars]
-INSTANCE_DOMAIN      = "your.domain.example"
-REGISTRATION_ENABLED = true
-RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
-FEDERATION_ENABLED   = true
-MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
-```
-
-该文件不受 git 跟踪，因此你的修改能在 `git pull` 后保留。之后用
-`./deploy.sh --update --local` 升级。
-
-3. **运行服务端**：
+2. **用 systemd 安装**。先为服务创建一个系统用户，再安装 `server/go/deploy/` 中的文件：
 
 ```sh
-npx wrangler dev --local --ip 127.0.0.1 --port 8787
+sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo install -D -m 640 -g shyake deploy/shyake.env.example /etc/shyake/shyake.env
+sudo install -m 644 deploy/shyake-server.service /etc/systemd/system/
 ```
 
-用 `curl http://127.0.0.1:8787/health` 验证。返回 `200 OK`
-即表示 Worker 和数据库工作正常。
+3. **配置**。编辑 `/etc/shyake/shyake.env`，至少设置实例域名：
 
-让服务端只绑定 `127.0.0.1`，由反向代理处理外部流量（见下一步）。直接绑定
-`0.0.0.0` 只在不参与联邦网络的受信任局域网中才算合理。
+```sh
+SHYAKE_INSTANCE_DOMAIN=your.domain.example
+SHYAKE_LISTEN=127.0.0.1:8787
+```
+
+实例域名会嵌入到你实例上的每一个地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回你这里。该文件列出了其余所有设置及其默认值，完整说明见 [SPEC.md §11.2](SPEC.md)。
+
+然后启动服务：
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now shyake-server
+curl http://127.0.0.1:8787/health
+```
+
+返回 `200 OK` 即表示服务端和数据库工作正常。服务以 `shyake` 用户运行，只能写入存放数据库的 `/var/lib/shyake`。
 
 4. **配置带 TLS 的反向代理**
 
-这一步是**参与联邦网络的必要条件**。实例之间总是通过
-`https://<domain>/...` 互相通信，所以你的实例必须能在
-`https://your.domain.example` 被访问到，并且证书要能被其他实例接受。自签名证书不行。如果你的实例是私有的（用户之间只互发邮件），可以跳过这一步，让客户端用明文
-HTTP 连接。
+这一步是**联邦网络所必需的**。实例之间总是通过 `https://<domain>/...` 互相联系，因此你的实例必须能通过 `https://your.domain.example` 访问，并且持有其他实例认可的证书。自签名证书无效。如果你的实例是私有的（其用户只在彼此之间通信），可以跳过这一步，让客户端通过明文 HTTP 连接。
 
-使用 [Caddy](https://caddyserver.com/) 时，证书会自动获取和续期；整个
-`Caddyfile` 只需：
+使用 [Caddy](https://caddyserver.com/) 时，证书会自动获取并续期，整个 `Caddyfile` 只需：
 
 ```
 your.domain.example {
@@ -168,60 +148,83 @@ your.domain.example {
 }
 ```
 
-用 nginx 加 certbot 管理的证书同样可行。把
-`https://your.domain.example` 代理到 `http://127.0.0.1:8787`。
+使用由 certbot 管理证书的 nginx 同样可行，把 `https://your.domain.example` 代理到 `http://127.0.0.1:8787` 即可。
 
-5. **保持运行**
+服务端按客户端地址限制请求速率。在代理之后时，它从 `X-Forwarded-For` 读取客户端地址，但仅当代理的地址在 `SHYAKE_TRUSTED_PROXIES` 中时才会这样做。默认只信任同一台机器上的代理（`127.0.0.1`、`::1`）。如果你的代理在别处运行，请加入它的地址；否则所有客户端都会被视为代理的地址，共用同一个速率限制。
 
-`wrangler dev` 是前台进程；用进程守护工具让它开机自启并在崩溃后自动重启。一个最小的
-systemd 单元（`/etc/systemd/system/shyake.service`）：
-
-```ini
-[Unit]
-Description=Shyake server (local workerd)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=shyake
-WorkingDirectory=/home/shyake/shyake/server/cf
-ExecStart=/usr/bin/npx wrangler dev --local --ip 127.0.0.1 --port 8787
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+#### 用 Docker 运行
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now shyake
+docker build -t shyake-server server/go
+docker run -d --name shyake --restart unless-stopped \
+    -p 127.0.0.1:8787:8787 -v shyake:/data \
+    -e SHYAKE_INSTANCE_DOMAIN=your.domain.example \
+    -e SHYAKE_TRUSTED_PROXIES=172.16.0.0/12 \
+    shyake-server
 ```
 
-**数据位置与备份**
+数据库位于 `shyake` 卷上的 `/data/shyake.db`。容器看到的反向代理地址是 Docker 网桥地址，因此要像上面那样把 `SHYAKE_TRUSTED_PROXIES` 设为网桥网段。
 
-所有本地状态（D1 的 SQLite 数据库和 KV 缓存）都存放在
-`server/cf/.wrangler/state/` 目录下。备份实例就是备份这个目录（先停止服务端，或使用对
-SQLite 安全的工具，避免在写入过程中复制数据库）。删除该目录会把实例重置为空数据库。可以给
-`wrangler dev` 传 `--persist-to <dir>` 把状态存到别的位置。
+#### 升级
 
-**注意事项：了解你在运行什么**
+```sh
+cd shyake
+git pull
+cd server/go
+CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo systemctl restart shyake-server
+```
 
-`wrangler dev` 是 Wrangler
-的开发服务器，不是加固过的生产服务器。它运行的正是驱动 Cloudflare
-Workers 的同一个 `workerd` 运行时，对个人或小型社区实例来说完全够用，但要了解它面向开发的行为特性：
+服务端启动时会自动执行新的数据库迁移。重启时，正在进行的中继会先完成；排队中的中继会在再次启动后继续。
 
-- **文件监听 / 热重载**: 它会监听源码目录，文件变更时重新加载
-  Worker。开发时很方便，但在服务器上意味着在 `server/cf/` 里编辑文件或执行
-  `git pull` 会立即重启你的实例。请谨慎更新：先 pull、检查改动，再让它重载（或自己重启服务）。
-- **单进程，自身没有守护能力**: 没有集群，也没有内置的崩溃恢复。这正是上面
-  systemd 单元的作用。
-- **没有限流或 DDoS 防护**: 在 Cloudflare
-  上这些由平台提供。自托管时，如果实例对公网开放，应在反向代理层添加限流。
-- **交互式快捷键**: 连接到终端时 `wrangler dev` 会从 stdin
-  读取热键。在 systemd 下没有 TTY，因此不受影响；但如果改在 `tmux`
-  里运行，注意不要误按按键（`x` 会清空控制台，`Ctrl+C` 会退出）。
+#### 数据位置与备份
 
-如果实例规模超出了这套方案的承载能力，上文的 Cloudflare
-部署路径才是可扩展的选择。数据库可以通过导出本地 SQLite 文件并用
-`wrangler d1 execute --remote` 导入来迁移。
+所有数据都在一个 SQLite 文件中：systemd 下为 `/var/lib/shyake/shyake.db`，Docker 中为 `/data/shyake.db`。数据库运行在 WAL 模式下，因此服务运行期间旁边还有两个文件（`-wal`、`-shm`）。
+
+要备份运行中的服务端，请使用 SQLite 的在线备份，它在写入期间也是安全的：
+
+```sh
+sudo sqlite3 /var/lib/shyake/shyake.db ".backup /root/shyake-backup.db"
+```
+
+或者先停止服务，再复制这三个文件。
+
+#### 从 Worker 迁移
+
+Go 服务端可以接管 Worker 实例的数据：用户、邮件和屏蔽记录。请保持实例域名不变，因为存储的地址依赖于它。
+
+如果 Worker 部署在 Cloudflare 上，先导出数据库：
+
+```sh
+cd shyake/server/cf
+npx wrangler d1 export shyake-db --remote --output=d1-export.sql
+```
+
+如果是本地的 `wrangler dev` 实例，先停止它，然后直接使用它的数据库文件：`server/cf/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/` 下不叫 `metadata.sqlite` 的那个 `.sqlite` 文件。该文件运行在 WAL 模式下，大部分数据都在旁边的 `-wal` 文件里。如果要复制数据库，请把 `-wal` 文件一起复制。
+
+然后在服务首次启动之前，以 `shyake` 用户导入到一个新的数据库中。该用户必须能读取导出文件：
+
+```sh
+sudo install -d -o shyake -g shyake -m 700 /var/lib/shyake
+sudo install -o shyake -m 600 d1-export.sql /var/lib/shyake/
+# 若使用 D1 文件：请同时安装 <file>.sqlite 和 <file>.sqlite-wal
+sudo -u shyake env \
+    SHYAKE_INSTANCE_DOMAIN=your.domain.example \
+    SHYAKE_DATABASE=/var/lib/shyake/shyake.db \
+    shyake-server -import-d1 /var/lib/shyake/d1-export.sql
+sudo rm /var/lib/shyake/d1-export.sql
+```
+
+导入命令会拒绝已有用户的数据库。无法原样复制的内容会在输出中报告：
+
+- 只有大小写不同的两个用户名：较早注册的账户保留该名字。Go 服务端不允许这样的用户名并存。
+- 以同一签名存储了两次的邮件：只保留一份。
+
+它还会把屏蔽记录改写为归一化形式（[SPEC.md §4](SPEC.md)）。
+
+最后把域名指向新机器即可。客户端无需任何修改：它们的密钥和地址都保持不变。
+
+#### 数据库
+
+Go 服务端目前只支持 SQLite。存储层位于一个接口之后，并配有一套所有后端都必须通过的测试。PostgreSQL 的支持将在此基础上实现。在此之前，服务端会拒绝 `SHYAKE_DATABASE` 中的 `postgres://` 值。
