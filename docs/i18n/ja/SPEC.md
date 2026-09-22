@@ -8,7 +8,7 @@ Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 <table>
 <tr><td>バージョン</td><td>0.2</td></tr>
-<tr><td>最終更新</td><td>2026-07-11</td></tr>
+<tr><td>最終更新</td><td>2026-09-22</td></tr>
 </table>
 
 ---
