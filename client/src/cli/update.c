@@ -376,10 +376,19 @@ int cli_self_update(const char *version_url, const char *current_version,
 
 	/* archive layout: <artifact>/shyake */
 	char extract_cmd[1024];
-	snprintf(extract_cmd, sizeof(extract_cmd),
-		 "tar xzf '%s' -C /tmp && cp '/tmp/%s/shyake' '%s' && "
-		 "chmod 755 '%s' && rm -rf '/tmp/%s'",
-		 tar_path, artifact, self_path, self_path, artifact);
+	int cmd_len = snprintf(extract_cmd, sizeof(extract_cmd),
+			       "tar xzf '%s' -C /tmp && cp '/tmp/%s/shyake' "
+			       "'%s' && chmod 755 '%s' && rm -rf '/tmp/%s'",
+			       tar_path, artifact, self_path, self_path,
+			       artifact);
+	if (cmd_len < 0 || (usize)cmd_len >= sizeof(extract_cmd)) {
+		fprintf(stderr, "Install path is too long to update in "
+				"place. Reinstall manually.\n");
+		remove(tar_path);
+		free(tar_path);
+		cli_free_version_info(info);
+		return -1;
+	}
 	int ext_ret = system(extract_cmd);
 
 	char installed_ver[64];
