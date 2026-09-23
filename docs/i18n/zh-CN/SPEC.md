@@ -15,17 +15,13 @@ Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 ### 1. 概述
 
-Shyake 是一个后量子、端到端加密的异步邮件系统，配备一个 POSIX
-风格的 CLI 客户端，旨在提供一种去中心化，抗审查，防嗅探的文本通信方式。
+Shyake 是一个后量子、端到端加密的异步邮件系统，配备一个 POSIX 风格的 CLI 客户端，旨在提供一种去中心化，抗审查，防嗅探的文本通信方式。
 
 关键特性：
 
 - **端到端加密**：服务器从不持有明文。所有消息内容在传输前均在客户端加密。
-- **后量子密码学**：密钥封装使用 ML-KEM-768；身份认证使用
-  ML-DSA-65（CRYSTALS-Dilithium），两者均来自
-  [liboqs](https://github.com/open-quantum-safe/liboqs)。
-- **去中心化**：任何运营者都能以几乎为零的成本托管自己的实例。实例之间可选地通过
-  server-to-server 的中继模型进行联邦网络通信。
+- **后量子密码学**：密钥封装使用 ML-KEM-768；身份认证使用 ML-DSA-65（CRYSTALS-Dilithium），两者均来自 [liboqs](https://github.com/open-quantum-safe/liboqs)。
+- **去中心化**：任何运营者都能以几乎为零的成本托管自己的实例。实例之间可选地通过 server-to-server 的中继模型进行联邦网络通信。
 - **无状态服务器**：服务器只存储密文和公钥。
 - **静态加密的密钥**：客户端私钥可选地通过 passphrase（scrypt + ChaCha20-Poly1305）在磁盘上受到保护。
 
@@ -68,8 +64,7 @@ shyake/
 - **依赖**：
   - `liboqs`（始终静态链接）: ML-KEM 与 ML-DSA
   - `libcurl`: HTTP 传输
-  - `libcrypto`（OpenSSL）: SHA-256 指纹、SHA-1 (PoW)、ChaCha20-Poly1305
-  AEAD、scrypt KDF (`EVP_PBE_scrypt`)
+  - `libcrypto`（OpenSSL）: SHA-256 指纹、SHA-1 (PoW)、ChaCha20-Poly1305 AEAD、scrypt KDF (`EVP_PBE_scrypt`)
   - `cJSON`（内置）: JSON 解析
 
 #### 2.3 服务端
@@ -102,25 +97,18 @@ shyake/
 | 密钥封装 | ML-KEM-768 | `kem_pk.bin`、`kem_sk.bin` |
 | 认证/签名 | ML-DSA-65 | `sig_pk.bin`、`sig_sk.bin` |
 
-公钥以原始字节存储，并在注册时上传到服务器。设置 passphrase 时，私钥以
-§3.7 描述的静态加密格式存储；未设置 passphrase 时，以原始字节存储。
+公钥以原始字节存储，并在注册时上传到服务器。设置 passphrase 时，私钥以 §3.7 描述的静态加密格式存储；未设置 passphrase 时，以原始字节存储。
 
 #### 3.2 消息加密
 
 1. 生成一个随机的 256 位对称密钥。
-2. 使用该密钥通过 **ChaCha20-Poly1305** 加密 `subject` 和
-   `body`，各自使用独立的随机 96 位 nonce。每段密文以
-   `base64(nonce || ciphertext || tag)` 形式传输。
-3. 向**收件人的 ML-KEM 公钥**进行封装：KEM 封装产生一段 KEM
-   密文和一个 32 字节共享密钥；对称密钥与共享密钥异或后附加在其后：`enc_key_recipient
-   = base64(kem_ct || (sym_key XOR ss))`。
-4. 对**发件人自己的 ML-KEM 公钥**重复该封装过程 →
-   `enc_key_sender`（使发件人能够读取自己的已发送邮件箱）。
+2. 使用该密钥通过 **ChaCha20-Poly1305** 加密 `subject` 和 `body`，各自使用独立的随机 96 位 nonce。每段密文以 `base64(nonce || ciphertext || tag)` 形式传输。
+3. 向**收件人的 ML-KEM 公钥**进行封装：KEM 封装产生一段 KEM 密文和一个 32 字节共享密钥；对称密钥与共享密钥异或后附加在其后：`enc_key_recipient = base64(kem_ct || (sym_key XOR ss))`。
+4. 对**发件人自己的 ML-KEM 公钥**重复该封装过程 → `enc_key_sender`（使发件人能够读取自己的已发送邮件箱）。
 
 解密是上述过程的逆过程：客户端用自己的 KEM 私钥解封装出共享密钥，将其与加密密钥字段异或以恢复对称密钥，然后解密内容。
 
-独立文件加密命令（`enc` / `dec`）使用相同的
-ML-KEM-768 + ChaCha20-Poly1305 构造，采用带长度前缀的二进制容器（`.enc` 文件）。
+独立文件加密命令（`enc` / `dec`）使用相同的 ML-KEM-768 + ChaCha20-Poly1305 构造，采用带长度前缀的二进制容器（`.enc` 文件）。
 
 #### 3.3 认证协议
 
@@ -176,8 +164,7 @@ POST:/api/block:salmon:1749513600:<请求体的 sha256 十六进制>
 }
 ```
 
-完整请求体还携带 `enc_key_sender`、`enc_key_recipient`、
-`signature` 和 `pow`，它们不属于被签名的子集。
+完整请求体还携带 `enc_key_sender`、`enc_key_recipient`、`signature` 和 `pow`，它们不属于被签名的子集。
 
 服务器用发件人的 `sig_pubkey` 验证签名。公钥从本实例的数据库读取；对于联邦网络邮件，则从发件人所在实例获取。
 
@@ -189,8 +176,7 @@ Go 服务端还会记住每个已接受的签名，重复使用同一签名的�
 
 #### 3.5 工作量证明（PoW）
 
-每个认证请求（包括读取操作）都需要一个 Hashcash-v1 风格的
-PoW 令牌，SHA-1 难度为 **20 位**：
+每个认证请求（包括读取操作）都需要一个 Hashcash-v1 风格的 PoW 令牌，SHA-1 难度为 **20 位**：
 
 ```
 1:<bits>:<yymmdd>:<resource>::<rand>:<counter-hex>
@@ -299,8 +285,7 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 | `signature` | TEXT | 发件人的 ML-DSA-65 签名，base64 |
 | `timestamp` | INTEGER | 服务器分配的 UNIX 时间戳 |
 
-本地地址以裸用户名存储：插入前会剥离 `@<INSTANCE_DOMAIN>` 后缀。`recipient` 和
-`sender` 上的索引服务于邮件箱查询。`rotate` 会删除该用户作为发件人或收件人的所有邮件行。
+本地地址以裸用户名存储：插入前会剥离 `@<INSTANCE_DOMAIN>` 后缀。`recipient` 和 `sender` 上的索引服务于邮件箱查询。`rotate` 会删除该用户作为发件人或收件人的所有邮件行。
 
 #### `blocks`
 
@@ -426,13 +411,9 @@ Go 服务端还可能返回：
 
 Shyake 使用**首次使用信任**（TOFU）进行公钥管理：
 
-- **首次联系**：客户端查询 `GET /api/pubkey/<recipient>`，计算 KEM
-    指纹，并静默地将其追加到 `~/.config/shyake/known_hosts`。
-- **后续联系**：每次发送前，将获取到的密钥与 `known_hosts`
-    中的条目比对；不匹配时在本地以 `KEY_MISMATCH` 中止，任何数据都不会被传输。
-- **服务端二次校验**：载荷中嵌入
-    `recipient_kem_fingerprint`；如果它与存储的密钥不再匹配，服务器独立地以 HTTP 409
-    拒绝。
+- **首次联系**：客户端查询 `GET /api/pubkey/<recipient>`，计算 KEM 指纹，并静默地将其追加到 `~/.config/shyake/known_hosts`。
+- **后续联系**：每次发送前，将获取到的密钥与 `known_hosts` 中的条目比对；不匹配时在本地以 `KEY_MISMATCH` 中止，任何数据都不会被传输。
+- **服务端二次校验**：载荷中嵌入 `recipient_kem_fingerprint`；如果它与存储的密钥不再匹配，服务器独立地以 HTTP 409 拒绝。
 - **检测到密钥轮换**：客户端打印致命错误并停止：
 
 ```
@@ -440,9 +421,7 @@ FATAL: Remote public key of recipient has changed!
 RUN 'shyake fingerprint <username>' to inspect and update trust.
 ```
 
-`fingerprint` 命令提供**带外（OOB）验证**：它从服务器获取当前公钥，计算指纹，并与
-`known_hosts` 比对。输出显示 GPG 风格的十六进制分组以及 OpenSSH 风格的 randomart
-图案。在用户通过可信渠道核实新指纹后，`--update` 标志会重写 `known_hosts`。
+`fingerprint` 命令提供**带外（OOB）验证**：它从服务器获取当前公钥，计算指纹，并与 `known_hosts` 比对。输出显示 GPG 风格的十六进制分组以及 OpenSSH 风格的 randomart 图案。在用户通过可信渠道核实新指纹后，`--update` 标志会重写 `known_hosts`。
 
 ---
 
@@ -450,8 +429,7 @@ RUN 'shyake fingerprint <username>' to inspect and update trust.
 
 `libshyake` 是协议的实现本体，随附的 CLI 只是构建在其之上的一个参考客户端。库中只包含核心的、普适性的逻辑：密码学、线格式编码，以及本规范定义的收发操作。客户端特有的部分（参数解析、显示、交互提示、自更新）位于 `src/cli/`，不得迁入库中。第三方开发者可以仅基于 `libshyake` 构建完全兼容协议的客户端（无论是 TUI、GUI，还是通过 FFI 使用任何语言）。
 
-核心库通过 `include/shyake.h` 暴露稳定的 C API。内部状态隐藏在不透明指针之后，以防止
-ABI 破坏：
+核心库通过 `include/shyake.h` 暴露稳定的 C API。内部状态隐藏在不透明指针之后，以防止 ABI 破坏：
 
 ```c
 typedef struct shyake_ctx shyake_ctx;
@@ -486,15 +464,13 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 
 草稿与自更新属于 CLI 层功能（`src/cli/`），不在库 API 之内。草稿的磁盘格式（§3.8）完全基于公开的自加密原语构建；其他客户端可以复用该格式，也可以用自己的方式存储草稿。
 
-共享库（`libshyake.so` / `libshyake.dylib`）面向第三方 FFI
-使用者。CLI 二进制文件链接静态归档（`libshyake.a`）以实现单文件分发。
+共享库（`libshyake.so` / `libshyake.dylib`）面向第三方 FFI 使用者。CLI 二进制文件链接静态归档（`libshyake.a`）以实现单文件分发。
 
 ---
 
 ### 9. 本地配置
 
-配置目录：`~/.config/shyake/`（默认），或通过 `-c` / `--config`
-指定的自定义路径。
+配置目录：`~/.config/shyake/`（默认），或通过 `-c` / `--config` 指定的自定义路径。
 
 | 文件 | 内容 |
 |---|---|
@@ -572,8 +548,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `man [<command>]` | 显示文档 |
 | `version` | 打印版本字符串 |
 
-`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和
-`--no-header`。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
+`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
 
 ---
 

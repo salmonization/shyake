@@ -17,8 +17,7 @@ Shyake 的服务端有两个实现，提供同一套 HTTP API。客户端可以�
 
 ### 使用 Cloudflare
 
-全部操作都在你自己的机器上通过 Wrangler CLI 完成。不需要 fork 本仓库，
-不需要把仓库连接到 Cloudflare，也不需要在控制台里点来点去。
+全部操作都在你自己的机器上通过 Wrangler CLI 完成。不需要 fork 本仓库，不需要把仓库连接到 Cloudflare，也不需要在控制台里点来点去。
 
 前提条件：
 
@@ -41,9 +40,7 @@ cd shyake/server/cf
 6. 应用数据库迁移
 7. 部署 Worker 并检查 `/health`
 
-实例域名会嵌入到你实例上的每一个地址中（`user@your.domain.example`），
-其他实例也依靠它把联邦邮件路由回你这里。如果你没有自定义域名，默认的
-`*.workers.dev` 地址同样可用。
+实例域名会嵌入到你实例上的每一个地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回你这里。如果你没有自定义域名，默认的 `*.workers.dev` 地址同样可用。
 
 选项：
 
@@ -68,9 +65,7 @@ cd shyake/server/cf
 
 #### 修改配置
 
-`server/cf/wrangler.toml` 由 `wrangler.template.toml` 在首次运行时生成，
-并且**不受 git 跟踪**，因此你的实例配置能在 `git pull` 后保留，也永远
-不会产生冲突。编辑它，然后重新运行 `./deploy.sh`：
+`server/cf/wrangler.toml` 由 `wrangler.template.toml` 在首次运行时生成，并且**不受 git 跟踪**，因此你的实例配置能在 `git pull` 后保留，也永远不会产生冲突。编辑它，然后重新运行 `./deploy.sh`：
 
 ```toml
 [vars]
@@ -83,9 +78,7 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
 
 重新运行脚本不会覆盖这些设置，它只会补上仍未填写的资源 id。
 
-如果你的实例是在 `wrangler.toml` 改为生成式之前部署的，
-`./deploy.sh --update` 会先把你的配置另存为 `wrangler.toml.bak`，
-拉取代码后再恢复回来。
+如果你的实例是在 `wrangler.toml` 改为生成式之前部署的，`./deploy.sh --update` 会先把你的配置另存为 `wrangler.toml.bak`，拉取代码后再恢复回来。
 
 ### 自托管
 

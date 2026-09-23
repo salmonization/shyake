@@ -79,8 +79,7 @@ make -j$(nproc)
 sudo make install
 ```
 
-在 **Termux** 中编译时，必须指定安装前缀（`$PREFIX`）并省略
-`sudo`：
+在 **Termux** 中编译时，必须指定安装前缀（`$PREFIX`）并省略 `sudo`：
 
 ```sh
 cmake -DCMAKE_BUILD_TYPE=Release \
