@@ -206,31 +206,17 @@ func sigHash(signature string) []byte {
 	return h[:]
 }
 
-func (db *DB) InsertMail(ctx context.Context, m store.Mail, relay *store.Relay) (string, bool, error) {
+func (db *DB) InsertMail(ctx context.Context, m store.Mail) (string, bool, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		m.ID = store.NewMailID()
-		err := db.tx(ctx, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO mail (mail_id, sender, recipient, enc_key_sender,
+		_, err := db.w.ExecContext(ctx,
+			`INSERT INTO mail (mail_id, sender, recipient, enc_key_sender,
 				   enc_key_recipient, enc_subject, enc_body, size, signature,
 				   timestamp, sig_hash)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				m.ID, m.Sender, m.Recipient, m.EncKeySender, m.EncKeyRecipient,
-				m.EncSubject, m.EncBody, m.Size, m.Signature, m.Timestamp,
-				sigHash(m.Signature)); err != nil {
-				return err
-			}
-			if relay == nil {
-				return nil
-			}
-			_, err := tx.ExecContext(ctx,
-				`INSERT INTO relay_outbox (mail_id, domain, payload, signed_at,
-				   next_try_at, created_at)
-				 VALUES (?, ?, ?, ?, ?, ?)`,
-				m.ID, relay.Domain, relay.Payload, relay.SignedAt,
-				relay.NextTryAt, m.Timestamp)
-			return err
-		})
+			m.ID, m.Sender, m.Recipient, m.EncKeySender, m.EncKeyRecipient,
+			m.EncSubject, m.EncBody, m.Size, m.Signature, m.Timestamp,
+			sigHash(m.Signature))
 		if err == nil {
 			return m.ID, false, nil
 		}
@@ -355,48 +341,6 @@ func (db *DB) ListBlocks(ctx context.Context, blocker string) ([]store.Block, er
 		out = append(out, b)
 	}
 	return out, rows.Err()
-}
-
-// ----------------------------------------------------------------- relays
-
-func (db *DB) DueRelays(ctx context.Context, now int64, limit int) ([]store.Relay, error) {
-	rows, err := db.r.QueryContext(ctx,
-		`SELECT id, mail_id, domain, payload, signed_at, attempts, next_try_at
-		 FROM relay_outbox WHERE status = 'pending' AND next_try_at <= ?
-		 ORDER BY next_try_at LIMIT ?`, now, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.Relay
-	for rows.Next() {
-		var r store.Relay
-		if err := rows.Scan(&r.ID, &r.MailID, &r.Domain, &r.Payload,
-			&r.SignedAt, &r.Attempts, &r.NextTryAt); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-func (db *DB) RelayDone(ctx context.Context, id int64) error {
-	_, err := db.w.ExecContext(ctx, `DELETE FROM relay_outbox WHERE id = ?`, id)
-	return err
-}
-
-func (db *DB) RelayRetry(ctx context.Context, id, nextTryAt int64, lastErr string) error {
-	_, err := db.w.ExecContext(ctx,
-		`UPDATE relay_outbox SET attempts = attempts + 1, next_try_at = ?, last_error = ?
-		 WHERE id = ?`, nextTryAt, lastErr, id)
-	return err
-}
-
-func (db *DB) RelayDead(ctx context.Context, id int64, lastErr string) error {
-	_, err := db.w.ExecContext(ctx,
-		`UPDATE relay_outbox SET attempts = attempts + 1, status = 'dead', last_error = ?
-		 WHERE id = ?`, lastErr, id)
-	return err
 }
 
 func (db *DB) tx(ctx context.Context, fn func(*sql.Tx) error) error {

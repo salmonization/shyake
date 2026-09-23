@@ -49,19 +49,6 @@ type Block struct {
 	CreatedAt int64
 }
 
-// Relay is a queued delivery of a mail to a remote instance. Payload is
-// the original request body, byte for byte: the remote instance
-// re-verifies the sender's signature over it.
-type Relay struct {
-	ID        int64
-	MailID    string
-	Domain    string
-	Payload   string
-	SignedAt  int64 // sender's signed timestamp
-	Attempts  int
-	NextTryAt int64
-}
-
 // Store is implemented by every database backend.
 type Store interface {
 	Ping(ctx context.Context) error
@@ -78,11 +65,10 @@ type Store interface {
 	// every block row that names the user.
 	DestroyUser(ctx context.Context, username string) error
 
-	// InsertMail stores m and, if relay is not nil, queues it in the
-	// same transaction. It fills in m.ID. A mail with the same
+	// InsertMail stores m under a new ID. A mail with the same
 	// signature already stored is not stored again: InsertMail then
 	// returns its ID and dup = true.
-	InsertMail(ctx context.Context, m Mail, relay *Relay) (id string, dup bool, err error)
+	InsertMail(ctx context.Context, m Mail) (id string, dup bool, err error)
 	// MailIDBySignature finds an already stored copy of a submission.
 	MailIDBySignature(ctx context.Context, signature string) (string, error)
 	// ListMail lists a mailbox newest first, without bodies.
@@ -98,13 +84,6 @@ type Store interface {
 	// RemoveBlock removes each of the given forms of one target.
 	RemoveBlock(ctx context.Context, blocker string, blocked ...string) error
 	ListBlocks(ctx context.Context, blocker string) ([]Block, error)
-
-	// DueRelays returns pending relays with NextTryAt <= now.
-	DueRelays(ctx context.Context, now int64, limit int) ([]Relay, error)
-	RelayDone(ctx context.Context, id int64) error
-	RelayRetry(ctx context.Context, id int64, nextTryAt int64, lastErr string) error
-	// RelayDead keeps the row for the operator but stops retrying it.
-	RelayDead(ctx context.Context, id int64, lastErr string) error
 }
 
 // NewMailID returns a 10-character base58 id, the Worker's format.

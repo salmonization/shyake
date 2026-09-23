@@ -5,6 +5,8 @@ import {
   verifyPoW,
   normalizeAddress,
   addressDomain,
+  relayMail,
+  readSignedBody,
 } from './utils';
 
 // Import the Web build which allows manual instantiation
@@ -34,6 +36,13 @@ export interface Env {
   MAX_MAIL_SIZE: string;
 }
 
+/* release tag from server/VERSION, set by deploy.sh through
+ * `wrangler deploy --define`; absent under a plain `wrangler dev` */
+declare const SERVER_VERSION: string;
+
+/* protocol level: 2 signs the bodies of header-authenticated requests */
+const PROTOCOL_LEVEL = 2;
+
 const app = new Hono<{Bindings: Env}>();
 
 app.get('/health', async c => {
@@ -45,9 +54,20 @@ app.get('/health', async c => {
   }
 });
 
+app.get('/api/version', c =>
+  c.json(
+    {
+      version: typeof SERVER_VERSION === 'string' ? SERVER_VERSION : 'dev',
+      implementation: 'cf',
+      protocol: PROTOCOL_LEVEL,
+    },
+    200,
+  ),
+);
+
 /* proxy GitHub Releases API with 1-hour KV cache */
 app.get('/api/client/version', async c => {
-  const CACHE_KEY = 'client_version_v2';
+  const CACHE_KEY = 'client_version_v3';
   const CACHE_TTL = 3600;
 
   try {
@@ -83,8 +103,19 @@ app.get('/api/client/version', async c => {
       }
     };
 
+    /* a release with only server builds (shyake-server-*) has nothing
+     * for clients to install */
+    const hasClientAsset = (r: any) =>
+      (r.assets ?? []).some(
+        (a: any) =>
+          typeof a.name === 'string' &&
+          a.name.startsWith('shyake-') &&
+          !a.name.startsWith('shyake-server-') &&
+          a.name.endsWith('.tar.gz'),
+      );
+
     for (const r of releases) {
-      if (r.draft) continue;
+      if (r.draft || !hasClientAsset(r)) continue;
       if (!r.prerelease && !release) {
         release = r.tag_name;
         collectDigests(r, release_digests);
@@ -380,6 +411,16 @@ app.post('/api/mail', async c => {
     mail_id += charset.charAt(Math.floor(Math.random() * charset.length));
   }
 
+  /* relay before storing the sender's copy: a failed relay leaves
+   * nothing behind, and the client keeps the mail as a draft */
+  const recipientDomain = addressDomain(recipient, c.env.INSTANCE_DOMAIN);
+  if (recipientDomain !== c.env.INSTANCE_DOMAIN.toLowerCase()) {
+    const refused = await relayMail(recipientDomain, rawBody);
+    if (refused) {
+      return c.json({error: refused.error}, refused.status);
+    }
+  }
+
   try {
     await c.env.DB.prepare(
       'INSERT INTO mail (mail_id, sender, recipient, ' +
@@ -400,18 +441,6 @@ app.post('/api/mail', async c => {
         serverTs,
       )
       .run();
-
-    const recipientDomain = recipient.includes('@')
-      ? recipient.split('@')[1]
-      : c.env.INSTANCE_DOMAIN;
-    if (recipientDomain !== c.env.INSTANCE_DOMAIN) {
-      const forwardReq = fetch(`https://${recipientDomain}/api/mail`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: rawBody,
-      }).catch(e => console.error('Failed to forward mail:', e));
-      c.executionCtx.waitUntil(forwardReq);
-    }
 
     return c.json({message: 'Mail sent', id: mail_id}, 201);
   } catch (e) {
@@ -640,6 +669,9 @@ app.delete('/api/mail/:id', async c => {
 
 /* block/unblock: POST /api/block and DELETE /api/block */
 async function handleBlock(c: any, unblock: boolean): Promise<Response> {
+  const raw = await readSignedBody(c.req.raw);
+  if (!raw) return c.json({error: 'Payload too large'}, 413);
+
   const username = c.req.header('X-Shyake-Username');
   const timestamp = c.req.header('X-Shyake-Timestamp');
   const signature = c.req.header('X-Shyake-Signature');
@@ -666,7 +698,7 @@ async function handleBlock(c: any, unblock: boolean): Promise<Response> {
   await initWasm({module_or_path: wasmModule});
   const method = unblock ? 'DELETE' : 'POST';
   try {
-    const message = `${method}:/api/block:${username}:${timestamp}`;
+    const message = `${method}:/api/block:${username}:${timestamp}:${raw.digest}`;
     const msgBytes = new TextEncoder().encode(message);
     const sigUrl = toBase64Url(signature);
     const pkUrl = toBase64Url(user.sig_pubkey as string);
@@ -676,7 +708,12 @@ async function handleBlock(c: any, unblock: boolean): Promise<Response> {
     return c.json({error: 'Signature verification failed'}, 401);
   }
 
-  const body = await c.req.json();
+  let body;
+  try {
+    body = JSON.parse(raw.text);
+  } catch (e) {
+    return c.json({error: 'Invalid JSON'}, 400);
+  }
   const {target} = body;
   if (!target) return c.json({error: 'Missing target'}, 400);
 
@@ -760,6 +797,11 @@ app.get('/api/block', async c => {
 });
 
 app.post('/api/rotate', async c => {
+  const raw = await readSignedBody(c.req.raw);
+  if (!raw) {
+    return c.json({error: 'Payload too large'}, 413);
+  }
+
   const username = c.req.header('X-Shyake-Username');
   const timestamp = c.req.header('X-Shyake-Timestamp');
   const signature = c.req.header('X-Shyake-Signature');
@@ -792,7 +834,7 @@ app.post('/api/rotate', async c => {
 
   await initWasm({module_or_path: wasmModule});
   try {
-    const message = `POST:/api/rotate:${username}:${timestamp}`;
+    const message = `POST:/api/rotate:${username}:${timestamp}:${raw.digest}`;
     const msgBytes = new TextEncoder().encode(message);
     const toBase64Url = (b64: string) =>
       b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
@@ -808,7 +850,7 @@ app.post('/api/rotate', async c => {
 
   let body;
   try {
-    body = await c.req.json();
+    body = JSON.parse(raw.text);
   } catch (e) {
     return c.json({error: 'Invalid JSON'}, 400);
   }

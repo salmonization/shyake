@@ -23,7 +23,8 @@ import (
 	"github.com/salmonization/shyake/server/go/internal/store/sqlite"
 )
 
-// version is set at build time: -ldflags "-X main.version=v0.3.0".
+// version is set at build time from server/VERSION:
+// -ldflags "-X main.version=v0.3.0".
 var version = "dev"
 
 func main() {
@@ -66,14 +67,12 @@ func run() error {
 	}
 	defer db.Close()
 
+	cfg.Version = version
 	client := federation.NewClient(cfg.FederationInsecure, "shyake-server/"+version)
-	outbox := federation.NewOutbox(db, client, log)
-	outbox.Start(ctx)
-	defer outbox.Stop()
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           api.New(cfg, db, federation.NewKeys(client), outbox, log).Handler(),
+		Handler:           api.New(cfg, db, federation.NewKeys(client), client, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

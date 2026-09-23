@@ -21,7 +21,6 @@ func Run(t *testing.T, open func(t *testing.T) store.Store) {
 		{"IdempotentMail", testIdempotentMail},
 		{"Blocks", testBlocks},
 		{"RotateAndDestroy", testRotateAndDestroy},
-		{"Relays", testRelays},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, open(t)) })
 	}
@@ -66,9 +65,9 @@ func testUsers(t *testing.T, s store.Store) {
 }
 
 func testMail(t *testing.T, s store.Store) {
-	id1, _, err := s.InsertMail(ctx, mail("alice", "bobby", "s1", 100), nil)
+	id1, _, err := s.InsertMail(ctx, mail("alice", "bobby", "s1", 100))
 	must(t, err)
-	id2, _, err := s.InsertMail(ctx, mail("carol", "bobby", "s2", 200), nil)
+	id2, _, err := s.InsertMail(ctx, mail("carol", "bobby", "s2", 200))
 	must(t, err)
 	if len(id1) != 10 || id1 == id2 {
 		t.Fatalf("ids %q %q", id1, id2)
@@ -111,12 +110,12 @@ func testMail(t *testing.T, s store.Store) {
 }
 
 func testIdempotentMail(t *testing.T, s store.Store) {
-	id, dup, err := s.InsertMail(ctx, mail("alice", "bobby", "same-sig", 1), nil)
+	id, dup, err := s.InsertMail(ctx, mail("alice", "bobby", "same-sig", 1))
 	must(t, err)
 	if dup {
 		t.Fatal("first insert reported dup")
 	}
-	again, dup, err := s.InsertMail(ctx, mail("alice", "bobby", "same-sig", 2), nil)
+	again, dup, err := s.InsertMail(ctx, mail("alice", "bobby", "same-sig", 2))
 	must(t, err)
 	if !dup || again != id {
 		t.Errorf("resubmission: id %q dup %v, want %q true", again, dup, id)
@@ -174,9 +173,9 @@ func testRotateAndDestroy(t *testing.T, s store.Store) {
 	for _, n := range []string{"alice", "bobby", "carol"} {
 		must(t, s.CreateUser(ctx, user(n)))
 	}
-	s.InsertMail(ctx, mail("alice", "bobby", "r1", 1), nil)
-	s.InsertMail(ctx, mail("bobby", "alice", "r2", 2), nil)
-	s.InsertMail(ctx, mail("bobby", "carol", "r3", 3), nil)
+	s.InsertMail(ctx, mail("alice", "bobby", "r1", 1))
+	s.InsertMail(ctx, mail("bobby", "alice", "r2", 2))
+	s.InsertMail(ctx, mail("bobby", "carol", "r3", 3))
 
 	must(t, s.RotateKeys(ctx, "alice", "kem2", "sig2"))
 	u, _ := s.GetUser(ctx, "alice")
@@ -210,49 +209,5 @@ func testRotateAndDestroy(t *testing.T, s store.Store) {
 	}
 	if err := s.CreateUser(ctx, user("bobby")); !errors.Is(err, store.ErrConflict) {
 		t.Error("destroyed name can be registered again")
-	}
-}
-
-func testRelays(t *testing.T, s store.Store) {
-	relay := &store.Relay{Domain: "b.example", Payload: `{"raw":"body"}`, SignedAt: 1000, NextTryAt: 1000}
-	id, _, err := s.InsertMail(ctx, mail("alice", "bobby@b.example", "rel", 1000), relay)
-	must(t, err)
-
-	due, err := s.DueRelays(ctx, 999, 10)
-	must(t, err)
-	if len(due) != 0 {
-		t.Error("relay due before its time")
-	}
-	due, err = s.DueRelays(ctx, 1000, 10)
-	must(t, err)
-	if len(due) != 1 || due[0].MailID != id || due[0].Payload != `{"raw":"body"}` ||
-		due[0].Domain != "b.example" || due[0].SignedAt != 1000 {
-		t.Fatalf("DueRelays: %+v", due)
-	}
-
-	must(t, s.RelayRetry(ctx, due[0].ID, 1100, "connection refused"))
-	if d, _ := s.DueRelays(ctx, 1050, 10); len(d) != 0 {
-		t.Error("retried relay due early")
-	}
-	d, _ := s.DueRelays(ctx, 1100, 10)
-	if len(d) != 1 || d[0].Attempts != 1 {
-		t.Fatalf("after retry: %+v", d)
-	}
-
-	must(t, s.RelayDead(ctx, d[0].ID, "gave up"))
-	if d, _ := s.DueRelays(ctx, 1<<40, 10); len(d) != 0 {
-		t.Error("dead relay still due")
-	}
-
-	// a second relay, delivered
-	s.InsertMail(ctx, mail("alice", "carol@c.example", "rel2", 5), &store.Relay{
-		Domain: "c.example", Payload: "{}", SignedAt: 5, NextTryAt: 5})
-	d, _ = s.DueRelays(ctx, 10, 10)
-	if len(d) != 1 {
-		t.Fatalf("second relay: %+v", d)
-	}
-	must(t, s.RelayDone(ctx, d[0].ID))
-	if d, _ := s.DueRelays(ctx, 1<<40, 10); len(d) != 0 {
-		t.Error("delivered relay still due")
 	}
 }

@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"unicode/utf8"
 )
@@ -37,10 +39,24 @@ func MailMessage(sender, recipient, fingerprint, encSubject, encBody,
 	return b.done()
 }
 
+// Level is the protocol level a server reports in GET /api/version.
+// Level 2 signs the bodies of header-authenticated requests
+// (HeaderBodyMessage); a server without that endpoint is level 1.
+const Level = 2
+
 // HeaderMessage is the signed string of a header-authenticated request:
 // METHOD:/path[?query]:username:timestamp
 func HeaderMessage(method, path, username, timestamp string) []byte {
 	return []byte(method + ":" + path + ":" + username + ":" + timestamp)
+}
+
+// HeaderBodyMessage is the signed string of a header-authenticated
+// request that carries a body (protocol 2): the HeaderMessage, then ":"
+// and the lowercase hex SHA-256 of the exact body bytes.
+func HeaderBodyMessage(method, path, username, timestamp string, body []byte) []byte {
+	sum := sha256.Sum256(body)
+	return append(append(HeaderMessage(method, path, username, timestamp), ':'),
+		hex.EncodeToString(sum[:])...)
 }
 
 type jsonObj struct{ buf []byte }

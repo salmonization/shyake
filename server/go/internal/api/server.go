@@ -27,7 +27,7 @@ type Server struct {
 	cfg     config.Config
 	db      store.Store
 	keys    *federation.Keys
-	outbox  *federation.Outbox
+	fed     *federation.Client
 	seen    *ttlset.Set // signatures already used
 	spent   *ttlset.Set // PoW tokens already used
 	limiter *limiter
@@ -37,12 +37,12 @@ type Server struct {
 }
 
 func New(cfg config.Config, db store.Store, keys *federation.Keys,
-	outbox *federation.Outbox, log *slog.Logger) *Server {
+	fed *federation.Client, log *slog.Logger) *Server {
 	return &Server{
-		cfg:    cfg,
-		db:     db,
-		keys:   keys,
-		outbox: outbox,
+		cfg:  cfg,
+		db:   db,
+		keys: keys,
+		fed:  fed,
 		// a signature is valid for 600 s (±300); a PoW token for up to
 		// three calendar days (see protocol.VerifyPoW)
 		seen:    ttlset.New(10*time.Minute, 250_000),
@@ -57,6 +57,7 @@ func New(cfg config.Config, db store.Store, keys *federation.Keys,
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /api/version", s.serverVersion)
 	mux.HandleFunc("GET /api/client/version", s.clientVersion)
 	mux.HandleFunc("POST /api/register", s.register)
 	mux.HandleFunc("GET /api/pubkey/{username}", s.pubkey)

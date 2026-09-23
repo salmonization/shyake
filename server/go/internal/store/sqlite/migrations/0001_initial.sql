@@ -1,7 +1,6 @@
 -- Same tables and columns as server/cf/migrations/0001_initial.sql,
 -- plus what the Go server needs on top: case-insensitive name
--- uniqueness, a signature hash for idempotent submission, and the
--- federation relay queue.
+-- uniqueness and a signature hash for idempotent submission.
 
 CREATE TABLE users (
     username   TEXT PRIMARY KEY,
@@ -40,18 +39,3 @@ CREATE TABLE blocks (
 );
 
 CREATE INDEX blocks_blocked ON blocks (blocked);
-
-CREATE TABLE relay_outbox (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    mail_id     TEXT NOT NULL,
-    domain      TEXT NOT NULL,
-    payload     TEXT NOT NULL,
-    signed_at   INTEGER NOT NULL,
-    attempts    INTEGER NOT NULL DEFAULT 0,
-    next_try_at INTEGER NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'pending', -- pending | dead
-    last_error  TEXT NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL
-);
-
-CREATE INDEX relay_outbox_due ON relay_outbox (status, next_try_at);

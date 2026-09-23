@@ -243,8 +243,7 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "Invalid Proof of Work")
 		return
 	}
-	ts, ok := s.inWindow(m.Timestamp)
-	if !ok {
+	if _, ok := s.inWindow(m.Timestamp); !ok {
 		fail(w, http.StatusForbidden, "Timestamp out of window")
 		return
 	}
@@ -252,7 +251,6 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 	_, senderSig, senderCached, err := s.keysOf(ctx, sender, false)
 	switch {
 	case errors.Is(err, federation.ErrUnreachable):
-		// 503 so a relaying instance tries again
 		fail(w, http.StatusServiceUnavailable, "Sender instance unreachable")
 		return
 	case errors.Is(err, store.ErrNotFound) || err == nil && senderSig == "":
@@ -321,11 +319,10 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := s.now().Unix()
-	var relay *store.Relay
-	if !recipient.IsLocal() {
-		relay = &store.Relay{Domain: recipient.Domain(), Payload: string(raw),
-			SignedAt: ts, NextTryAt: now}
+	// relay before storing the sender's copy: a failed relay leaves
+	// nothing behind, and the client keeps the mail as a draft
+	if !recipient.IsLocal() && !s.relay(w, r, recipient.Domain(), raw) {
+		return
 	}
 	id, _, err := s.db.InsertMail(ctx, store.Mail{
 		Sender:          sender.Stored(),
@@ -336,16 +333,35 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 		EncBody:         m.EncBody,
 		Size:            size,
 		Signature:       m.Signature,
-		Timestamp:       now,
-	}, relay)
+		Timestamp:       s.now().Unix(),
+	})
 	if err != nil {
 		s.internal(w, "mail: insert", err)
 		return
 	}
-	if relay != nil {
-		s.outbox.Kick()
-	}
 	writeJSON(w, http.StatusCreated, message{Message: "Mail sent", ID: id})
+}
+
+// relay forwards a submission to the recipient's instance and reports
+// whether it was accepted. A refusal reaches the client with the
+// remote's status and text; any other failure is a 502.
+func (s *Server) relay(w http.ResponseWriter, r *http.Request, domain string, raw []byte) bool {
+	status, text, err := s.fed.Relay(r.Context(), domain, raw)
+	switch {
+	case err == nil && status >= 200 && status < 300:
+		return true
+	case err == nil && status >= 400 && status < 500 &&
+		status != http.StatusRequestTimeout && status != http.StatusTooManyRequests:
+		if text == "" {
+			text = "Relay refused"
+		}
+		s.log.Info("relay refused", "route", r.Pattern, "status", status)
+		fail(w, status, text)
+	default:
+		s.log.Warn("relay failed", "route", r.Pattern, "status", status, "err", err)
+		fail(w, http.StatusBadGateway, "Recipient instance unreachable")
+	}
+	return false
 }
 
 func (s *Server) verify(sigPub string, msg []byte, signature string) bool {
@@ -441,14 +457,15 @@ func (s *Server) burnMail(w http.ResponseWriter, r *http.Request) {
 // -------------------------------------------------------------- blocks
 
 func (s *Server) blockTarget(w http.ResponseWriter, r *http.Request) (store.User, protocol.Address, string, bool) {
-	user, ok := s.headerAuth(w, r, "/api/block")
+	user, body, ok := s.bodyAuth(w, r, "/api/block")
 	if !ok {
 		return store.User{}, protocol.Address{}, "", false
 	}
 	var b struct {
 		Target string `json:"target"`
 	}
-	if !readJSON(w, r, smallBody, &b) {
+	if json.Unmarshal(body, &b) != nil {
+		fail(w, http.StatusBadRequest, "Invalid JSON")
 		return store.User{}, protocol.Address{}, "", false
 	}
 	if b.Target == "" {
@@ -512,7 +529,7 @@ func (s *Server) listBlocks(w http.ResponseWriter, r *http.Request) {
 // ------------------------------------------------------------- account
 
 func (s *Server) rotate(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.headerAuth(w, r, "/api/rotate")
+	user, body, ok := s.bodyAuth(w, r, "/api/rotate")
 	if !ok {
 		return
 	}
@@ -520,7 +537,8 @@ func (s *Server) rotate(w http.ResponseWriter, r *http.Request) {
 		KEM string `json:"new_kem_pubkey"`
 		Sig string `json:"new_sig_pubkey"`
 	}
-	if !readJSON(w, r, smallBody, &b) {
+	if json.Unmarshal(body, &b) != nil {
+		fail(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if b.KEM == "" || b.Sig == "" {

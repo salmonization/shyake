@@ -150,6 +150,9 @@ echo -e "  ${GREEN}PASS${NC}  Binary exists: $SHYAKE"
 wait_for_server
 echo -e "  ${GREEN}PASS${NC}  Server reachable at $INSTANCE"
 
+out=$(curl -s "$INSTANCE/api/version")
+assert_contains "server reports protocol level 2" '"protocol":2' "$out"
+
 # ------------------------------------------------------------------ #
 section "1. init"
 # ------------------------------------------------------------------ #
@@ -361,6 +364,8 @@ assert_contains "blocklist: target listed" "$USER_A" "$out"
 out_blocked=$(echo "blocked msg" | sh_run "$DIR_A" send -t "$USER_B" \
     -s "Should be blocked" 2>&1) || true
 assert_not_contains "send to blocker: rejected" "sent" "$out_blocked"
+assert_contains "send to blocker: reason shown" "blocked this sender" \
+    "$out_blocked"
 
 # Unblock
 out=$(sh_run "$DIR_B" unblock "$USER_A" 2>&1)

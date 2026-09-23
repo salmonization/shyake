@@ -197,3 +197,11 @@ func TestVerifyPoW(t *testing.T) {
 		}
 	}
 }
+
+func TestHeaderBodyMessage(t *testing.T) {
+	got := string(HeaderBodyMessage("POST", "/api/block", "bobby", "1700000000", []byte(`{"target":"alice"}`)))
+	want := "POST:/api/block:bobby:1700000000:a09842c7bd02453ac46c510bf066cabfd1e9b2220e2a95b87672adf4d6b1bcb7"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

@@ -4,19 +4,14 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/salmonization/shyake/server/go/internal/protocol"
-	"github.com/salmonization/shyake/server/go/internal/store"
-	"github.com/salmonization/shyake/server/go/internal/store/sqlite"
 )
 
 func TestPublicAddr(t *testing.T) {
@@ -101,108 +96,36 @@ func TestKeysLookup(t *testing.T) {
 	}
 }
 
-// outboxFixture queues one relay to a fake remote whose replies the
-// test scripts, and drives the outbox with a fake clock.
-type outboxFixture struct {
-	o       *Outbox
-	db      store.Store
-	clock   time.Time
-	replies []int
-	got     atomic.Int32
-	body    atomic.Value
-}
-
-func newOutboxFixture(t *testing.T, signedAt time.Time, replies ...int) *outboxFixture {
-	f := &outboxFixture{clock: signedAt, replies: replies}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := f.got.Add(1)
+func TestRelay(t *testing.T) {
+	var got atomic.Value
+	status := http.StatusCreated
+	reply := `{"message":"Mail sent","id":"x"}`
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		f.body.Store(string(b))
-		status := http.StatusCreated
-		if int(n) <= len(f.replies) {
-			status = f.replies[n-1]
-		}
+		got.Store(string(b))
 		w.WriteHeader(status)
+		io.WriteString(w, reply)
 	}))
-	t.Cleanup(srv.Close)
-
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "o.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	f.db = db
-	f.o = NewOutbox(db, NewClient(true, "test"), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	f.o.now = func() time.Time { return f.clock }
-
-	domain := strings.TrimPrefix(srv.URL, "http://")
-	_, _, err = db.InsertMail(context.Background(), store.Mail{Sender: "alice",
-		Recipient: "bobby@" + domain, Signature: "sig", Timestamp: signedAt.Unix()},
-		&store.Relay{Domain: domain, Payload: `{"exact":"bytes"}`,
-			SignedAt: signedAt.Unix(), NextTryAt: signedAt.Unix()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
-}
-
-func (f *outboxFixture) pending() int {
-	d, _ := f.db.DueRelays(context.Background(), 1<<40, 10)
-	return len(d)
-}
-
-func TestOutboxDelivers(t *testing.T) {
-	f := newOutboxFixture(t, time.Unix(10_000, 0))
-	f.o.drain(context.Background())
-	if f.got.Load() != 1 || f.pending() != 0 {
-		t.Fatalf("posts %d, pending %d", f.got.Load(), f.pending())
-	}
-	if f.body.Load() != `{"exact":"bytes"}` {
-		t.Errorf("payload altered in transit: %q", f.body.Load())
-	}
-}
-
-func TestOutboxRetriesTransientFailures(t *testing.T) {
-	f := newOutboxFixture(t, time.Unix(10_000, 0), 503, 429)
+	defer remote.Close()
+	c := NewClient(true, "test")
 	ctx := context.Background()
-	f.o.drain(ctx) // 503
-	f.o.drain(ctx) // not yet due
-	if f.got.Load() != 1 || f.pending() != 1 {
-		t.Fatalf("after 503: posts %d pending %d", f.got.Load(), f.pending())
-	}
-	f.clock = f.clock.Add(5 * time.Second)
-	f.o.drain(ctx) // 429
-	f.clock = f.clock.Add(15 * time.Second)
-	f.o.drain(ctx) // 201
-	if f.got.Load() != 3 || f.pending() != 0 {
-		t.Errorf("posts %d pending %d, want 3 and 0", f.got.Load(), f.pending())
-	}
-}
+	domain := strings.TrimPrefix(remote.URL, "http://")
 
-func TestOutboxRefusalIsFinal(t *testing.T) {
-	f := newOutboxFixture(t, time.Unix(10_000, 0), 403)
-	f.o.drain(context.Background())
-	f.clock = f.clock.Add(time.Minute)
-	f.o.drain(context.Background())
-	if f.got.Load() != 1 || f.pending() != 0 {
-		t.Errorf("posts %d pending %d: a 403 was retried", f.got.Load(), f.pending())
+	st, text, err := c.Relay(ctx, domain, []byte(`{"exact":"bytes"}`))
+	if err != nil || st != http.StatusCreated || text != "" {
+		t.Fatalf("delivered: %d %q %v", st, text, err)
 	}
-}
+	if got.Load() != `{"exact":"bytes"}` {
+		t.Errorf("payload changed on the way: %q", got.Load())
+	}
 
-// A relay the remote can no longer accept (timestamp out of window) is
-// dropped instead of retried forever.
-func TestOutboxStopsAtSignatureWindow(t *testing.T) {
-	signed := time.Unix(10_000, 0)
-	f := newOutboxFixture(t, signed, 502, 502, 502, 502, 502, 502, 502, 502, 502)
-	ctx := context.Background()
-	for f.pending() > 0 && f.clock.Before(signed.Add(10*time.Minute)) {
-		f.o.drain(ctx)
-		f.clock = f.clock.Add(5 * time.Second)
+	status, reply = http.StatusForbidden, "{\"error\":\"Recipient has blocked\\u0007 this sender\"}"
+	st, text, err = c.Relay(ctx, domain, []byte(`{}`))
+	if err != nil || st != http.StatusForbidden || text != "Recipient has blocked this sender" {
+		t.Errorf("refusal: %d %q %v", st, text, err)
 	}
-	if f.pending() != 0 {
-		t.Fatal("relay still pending after the window")
-	}
-	if n := f.got.Load(); n < 3 || n > 8 {
-		t.Errorf("%d attempts inside a 280 s budget", n)
+
+	if _, _, err := c.Relay(ctx, "127.0.0.1:1", []byte(`{}`)); err == nil {
+		t.Error("dead instance: no error")
 	}
 }

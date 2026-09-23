@@ -36,9 +36,19 @@ usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp);
 struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
 					 const char *endpoint,
 					 const char *username);
+struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
+					      const char *method,
+					      const char *endpoint,
+					      const char *username,
+					      const u8 *body, usize body_len);
 struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
 				       const char *username);
 char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient);
+void set_http_error(shyake_ctx *ctx, const char *what, long code,
+		    const char *body);
+int instance_protocol(shyake_ctx *ctx);
+void set_signed_body_error(shyake_ctx *ctx, const char *what, long code,
+			   const char *body);
 
 /* libshyake.c (file I/O & base64) */
 int save_file(const char *path, const u8 *data, usize len);

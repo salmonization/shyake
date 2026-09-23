@@ -54,7 +54,7 @@ func newEnv(t *testing.T, tweak ...func(*config.Config)) *env {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client := federation.NewClient(true, "test")
-	s := New(cfg, db, federation.NewKeys(client), federation.NewOutbox(db, client, log), log)
+	s := New(cfg, db, federation.NewKeys(client), client, log)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(func() { srv.Close(); db.Close() })
 	return &env{t: t, srv: srv, s: s}
@@ -125,10 +125,20 @@ func (e *env) register(u *user) int {
 
 func (u *user) headers(method, path string) http.Header {
 	ts := now()
+	return u.headersFor(ts, protocol.HeaderMessage(method, path, u.name, ts))
+}
+
+// bodyHeaders signs a request with a body (protocol 2).
+func (u *user) bodyHeaders(method, path string, body []byte) http.Header {
+	ts := now()
+	return u.headersFor(ts, protocol.HeaderBodyMessage(method, path, u.name, ts, body))
+}
+
+func (u *user) headersFor(ts string, msg []byte) http.Header {
 	return http.Header{
 		"X-Shyake-Username":  {u.name},
 		"X-Shyake-Timestamp": {ts},
-		"X-Shyake-Signature": {u.sign(protocol.HeaderMessage(method, path, u.name, ts))},
+		"X-Shyake-Signature": {u.sign(msg)},
 		"X-Shyake-Pow":       {pow(u.name)},
 	}
 }
@@ -137,6 +147,9 @@ func (e *env) authed(u *user, method, path string, body []byte) (int, map[string
 	signed := path
 	if i := strings.Index(path, "?"); i >= 0 && !strings.HasPrefix(path, "/api/mail?") {
 		signed = path[:i]
+	}
+	if body != nil {
+		return e.do(method, path, body, u.bodyHeaders(method, signed, body))
 	}
 	return e.do(method, path, body, u.headers(method, signed))
 }
@@ -345,5 +358,45 @@ func TestClientIP(t *testing.T) {
 		if got := s.clientIP(r).String(); got != c.want {
 			t.Errorf("remote %s xff %q: %s, want %s", c.remote, c.xff, got, c.want)
 		}
+	}
+}
+
+// Rotate and block sign their bodies: a body swapped under a captured
+// signature, or the pre-protocol-2 format, is refused.
+func TestBodySignature(t *testing.T) {
+	e := newEnv(t)
+	bobby := newUser("bobby")
+	e.register(bobby)
+	mallory := newUser("mallory")
+	rotate := func(u *user) []byte {
+		b, _ := json.Marshal(map[string]string{"new_kem_pubkey": u.kemB64, "new_sig_pubkey": u.sigB64})
+		return b
+	}
+
+	h := bobby.bodyHeaders("POST", "/api/rotate", rotate(bobby))
+	if c, _ := e.do("POST", "/api/rotate", rotate(mallory), h); c != 401 {
+		t.Errorf("rotate with swapped keys: %d, want 401", c)
+	}
+	if c, _ := e.do("POST", "/api/rotate", rotate(mallory), bobby.headers("POST", "/api/rotate")); c != 401 {
+		t.Errorf("rotate signed without the body: %d, want 401", c)
+	}
+	block := []byte(`{"target":"alice"}`)
+	if c, _ := e.do("POST", "/api/block", block, bobby.headers("POST", "/api/block")); c != 401 {
+		t.Errorf("block signed without the body: %d, want 401", c)
+	}
+	h = bobby.bodyHeaders("DELETE", "/api/block", block)
+	if c, _ := e.do("DELETE", "/api/block", []byte(`{"target":"carol"}`), h); c != 401 {
+		t.Errorf("unblock with a swapped target: %d, want 401", c)
+	}
+
+	if c, _ := e.authed(bobby, "POST", "/api/block", block); c != 201 {
+		t.Errorf("block: %d", c)
+	}
+	next := newUser("bobby")
+	if c, _ := e.authed(bobby, "POST", "/api/rotate", rotate(next)); c != 200 {
+		t.Errorf("rotate: %d", c)
+	}
+	if c, _ := e.authed(next, "GET", "/api/block", nil); c != 200 {
+		t.Errorf("new key after rotate: %d", c)
 	}
 }

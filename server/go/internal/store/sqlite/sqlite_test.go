@@ -45,7 +45,7 @@ func TestConcurrentWrites(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, _, err := db.InsertMail(ctx, store.Mail{Sender: "a", Recipient: "b",
-				Signature: string(rune('A'+i%26)) + string(rune(i)), Timestamp: int64(i)}, nil)
+				Signature: string(rune('A'+i%26)) + string(rune(i)), Timestamp: int64(i)})
 			errs <- err
 		}(i)
 	}

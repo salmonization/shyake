@@ -24,18 +24,20 @@ shyake_err shyake_block(shyake_ctx *ctx, const char *target, int unblock)
 	if (ctx->debug)
 		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
-	struct curl_slist *headers =
-		create_signed_headers(ctx, method, endpoint, username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return SHYAKE_ERR;
-	}
-	headers = curl_slist_append(headers, "Content-Type: application/json");
-
 	cJSON *body_json = cJSON_CreateObject();
 	cJSON_AddStringToObject(body_json, "target", target);
 	char *body_str = cJSON_PrintUnformatted(body_json);
 	cJSON_Delete(body_json);
+
+	struct curl_slist *headers = create_signed_headers_body(
+		ctx, method, endpoint, username, (const u8 *)body_str,
+		strlen(body_str));
+	if (!headers) {
+		free(body_str);
+		curl_easy_cleanup(curl);
+		return SHYAKE_ERR;
+	}
+	headers = curl_slist_append(headers, "Content-Type: application/json");
 
 	struct curl_response resp = { .data = malloc(1), .size = 0 };
 	resp.data[0] = '\0';
@@ -56,9 +58,14 @@ shyake_err shyake_block(shyake_ctx *ctx, const char *target, int unblock)
 		if (http_code == 200 || http_code == 201) {
 			ret = SHYAKE_OK;
 		} else {
+			set_signed_body_error(ctx,
+					      unblock ? "Unblock failed" :
+							"Block failed",
+					      http_code, resp.data);
 			ret = SHYAKE_ERR_HTTP;
 		}
 	} else {
+		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
 		ret = SHYAKE_ERR_NETWORK;
 	}
 
@@ -223,10 +230,19 @@ shyake_err shyake_rotate(shyake_ctx *ctx)
 	if (ctx->debug)
 		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
-	/* create_signed_headers uses the OLD private key currently on disk */
-	struct curl_slist *headers =
-		create_signed_headers(ctx, "POST", endpoint, username);
+	cJSON *body_json = cJSON_CreateObject();
+	cJSON_AddStringToObject(body_json, "new_kem_pubkey", kpk_b64);
+	cJSON_AddStringToObject(body_json, "new_sig_pubkey", spk_b64);
+	char *body_str = cJSON_PrintUnformatted(body_json);
+	cJSON_Delete(body_json);
+
+	/* signed with the OLD private key currently on disk; the digest
+	 * binds the new public keys to that signature */
+	struct curl_slist *headers = create_signed_headers_body(
+		ctx, "POST", endpoint, username, (const u8 *)body_str,
+		strlen(body_str));
 	if (!headers) {
+		free(body_str);
 		curl_easy_cleanup(curl);
 		free(new_kpk);
 		free(new_ksk);
@@ -239,12 +255,6 @@ shyake_err shyake_rotate(shyake_ctx *ctx)
 		return SHYAKE_ERR;
 	}
 	headers = curl_slist_append(headers, "Content-Type: application/json");
-
-	cJSON *body_json = cJSON_CreateObject();
-	cJSON_AddStringToObject(body_json, "new_kem_pubkey", kpk_b64);
-	cJSON_AddStringToObject(body_json, "new_sig_pubkey", spk_b64);
-	char *body_str = cJSON_PrintUnformatted(body_json);
-	cJSON_Delete(body_json);
 
 	struct curl_response resp = { .data = malloc(1), .size = 0 };
 	resp.data[0] = '\0';
@@ -281,9 +291,12 @@ shyake_err shyake_rotate(shyake_ctx *ctx)
 			save_sk_encrypted(path, new_pp, new_ssk,
 					  sig->length_secret_key);
 		} else {
+			set_signed_body_error(ctx, "Key rotation failed",
+					      http_code, resp.data);
 			ret = SHYAKE_ERR_HTTP;
 		}
 	} else {
+		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
 		ret = SHYAKE_ERR_NETWORK;
 	}
 

@@ -5,9 +5,9 @@
 #   cd client && make && cd ..
 #   bash tests/federation_test.sh
 #
-# Covers a relay in each direction, a relay queued while the remote
-# instance is down and delivered after it comes back, and a block that
-# the recipient's instance enforces on relayed mail.
+# Covers a relay in each direction, a relay to an instance that is down
+# (the client keeps a draft and sends it once the instance is back), and
+# a block that the recipient's instance enforces on relayed mail.
 #
 # Requires: go, curl, a built client (client/bin/shyake). Ports 8791 and
 # 8792 must be free.
@@ -100,36 +100,40 @@ sleep 1
 out=$("$CLI" -c "$WORK/alice" --plain check inbox 2>&1)
 check "alice receives the reply" "$out" "fed-2"
 
-section "3. relay queued while B is down"
+section "3. relay to an instance that is down"
 # A caches bobby's key for a minute: send once to fill the cache, so the
-# next send passes A's checks without asking B
+# next send passes A's checks and fails at the relay itself
 echo "warm" | "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-3a" >/dev/null 2>&1
 stop B
 out=$(echo "sent while B was down" |
     "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-3b" 2>&1)
-check "A accepts the mail while B is down" "$out" "Your mail was sent."
-sleep 8
+check "A reports the failed relay" "$out" "unreachable"
+check "the client keeps a draft" "$out" "Saved as draft"
+out=$("$CLI" -c "$WORK/alice" --plain check sent 2>&1)
+if echo "$out" | grep -qF "fed-3b"; then
+    bad "A kept a sent copy of a mail it did not deliver"
+else
+    ok "A keeps no sent copy of the failed relay"
+fi
+draft=$("$CLI" -c "$WORK/alice" --plain check drafts 2>/dev/null |
+    awk '/fed-3b/{print $1}')
 start B "$B"
-for _ in $(seq 40); do
-    grep -q 'relay delivered.*attempts=[2-9]' "$WORK/A.log" && break
-    sleep 1
-done
+out=$("$CLI" -c "$WORK/alice" send -d "$draft" 2>&1)
+check "the draft is sent once B is back" "$out" "Your mail was sent."
 out=$("$CLI" -c "$WORK/bobby" --plain check inbox 2>&1)
-check "the queued mail reaches B after it comes back" "$out" "fed-3b"
-check "A retried before delivering" "$(cat "$WORK/A.log")" "relay retry scheduled"
+check "the mail reaches B" "$out" "fed-3b"
 
 section "4. block enforced by the recipient's instance"
 out=$("$CLI" -c "$WORK/bobby" block "alice@$A" 2>&1)
 check "bobby blocks alice@A" "$out" "blocked"
-echo "blocked?" | "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-4" >/dev/null 2>&1
-sleep 2
+out=$(echo "blocked?" | "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-4" 2>&1)
+check "A passes B's refusal to the client" "$out" "blocked this sender"
 out=$("$CLI" -c "$WORK/bobby" --plain check inbox 2>&1)
 if echo "$out" | grep -qF "fed-4"; then
     bad "blocked mail was delivered"
 else
     ok "blocked mail stays out of bobby's inbox"
 fi
-check "A records the refusal and stops" "$(cat "$WORK/A.log")" "relay refused"
 
 echo
 echo "=========================================="

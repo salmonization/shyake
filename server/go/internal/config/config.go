@@ -16,6 +16,10 @@ import (
 )
 
 type Config struct {
+	// Version is the build's release tag, set by main (not from the
+	// environment); "dev" for a build without one.
+	Version string
+
 	InstanceDomain      string
 	Listen              string
 	Database            string // SQLite file path

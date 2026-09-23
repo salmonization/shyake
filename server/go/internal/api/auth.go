@@ -42,6 +42,23 @@ func (s *Server) fresh(signature, pow string) bool {
 // Checks run in the Worker's order, so failures map to the same status
 // codes: headers 401, PoW 403, timestamp 403, user 401, signature 401.
 func (s *Server) headerAuth(w http.ResponseWriter, r *http.Request, signedPath string) (store.User, bool) {
+	return s.auth(w, r, signedPath, nil, false)
+}
+
+// bodyAuth is headerAuth for a request with a body: the signature
+// covers the SHA-256 of the body too (protocol 2), so the body cannot
+// be swapped under a captured signature. It returns the body.
+func (s *Server) bodyAuth(w http.ResponseWriter, r *http.Request, signedPath string) (store.User, []byte, bool) {
+	body, ok := readBody(w, r, smallBody)
+	if !ok {
+		return store.User{}, nil, false
+	}
+	user, ok := s.auth(w, r, signedPath, body, true)
+	return user, body, ok
+}
+
+func (s *Server) auth(w http.ResponseWriter, r *http.Request, signedPath string,
+	body []byte, signsBody bool) (store.User, bool) {
 	username := r.Header.Get("X-Shyake-Username")
 	ts := r.Header.Get("X-Shyake-Timestamp")
 	sig := r.Header.Get("X-Shyake-Signature")
@@ -72,8 +89,12 @@ func (s *Server) headerAuth(w http.ResponseWriter, r *http.Request, signedPath s
 		return store.User{}, false
 	}
 
+	msg := protocol.HeaderMessage(r.Method, signedPath, username, ts)
+	if signsBody {
+		msg = protocol.HeaderBodyMessage(r.Method, signedPath, username, ts, body)
+	}
 	pk, err := protocol.ParsePublicKey(user.SigPubkey)
-	if err != nil || !pk.Verify(protocol.HeaderMessage(r.Method, signedPath, username, ts), sig) {
+	if err != nil || !pk.Verify(msg, sig) {
 		fail(w, http.StatusUnauthorized, "Invalid signature")
 		return store.User{}, false
 	}

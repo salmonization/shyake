@@ -10,7 +10,21 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/salmonization/shyake/server/go/internal/protocol"
 )
+
+// GET /api/version names this server's release and protocol level
+// (SPEC §5.4). Clients read the level to know which request formats the
+// instance accepts.
+func (s *Server) serverVersion(w http.ResponseWriter, r *http.Request) {
+	v := s.cfg.Version
+	if v == "" {
+		v = "dev"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version": v, "implementation": "go", "protocol": protocol.Level})
+}
 
 // GET /api/client/version relays the newest stable and preview tags,
 // with per-asset SHA-256 digests, from the GitHub Releases API (SPEC §12).
@@ -98,8 +112,10 @@ func (v *versionCache) fetch(ctx context.Context) ([]byte, error) {
 	return json.Marshal(summarize(releases))
 }
 
-// summarize picks the newest non-draft release of each channel. GitHub
-// lists releases newest first.
+// summarize picks the newest non-draft release of each channel that
+// carries client builds. A release with only server builds is skipped:
+// clients would find no asset for their platform in it. GitHub lists
+// releases newest first.
 func summarize(releases []ghRelease) map[string]any {
 	digests := func(r ghRelease) map[string]string {
 		out := map[string]string{}
@@ -112,7 +128,7 @@ func summarize(releases []ghRelease) map[string]any {
 	}
 	payload := map[string]any{}
 	for _, r := range releases {
-		if r.Draft {
+		if r.Draft || !hasClientAsset(r) {
 			continue
 		}
 		if !r.Prerelease && payload["release"] == nil {
@@ -128,6 +144,18 @@ func summarize(releases []ghRelease) map[string]any {
 		}
 	}
 	return payload
+}
+
+// hasClientAsset reports whether r carries a client build, named
+// shyake-<os>-<arch>.tar.gz; server builds are shyake-server-*.
+func hasClientAsset(r ghRelease) bool {
+	for _, a := range r.Assets {
+		if strings.HasPrefix(a.Name, "shyake-") && !strings.HasPrefix(a.Name, "shyake-server-") &&
+			strings.HasSuffix(a.Name, ".tar.gz") {
+			return true
+		}
+	}
+	return false
 }
 
 type httpError struct{ status int }
