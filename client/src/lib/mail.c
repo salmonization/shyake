@@ -225,6 +225,11 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 				ret = SHYAKE_ERR_KEY_MISMATCH;
 			} else if (http_code == 410) {
 				ret = SHYAKE_ERR_GONE;
+			} else if (http_code == 403 &&
+				   http_error_is(resp.data,
+						 "Recipient has blocked "
+						 "this sender")) {
+				ret = SHYAKE_ERR_BLOCKED;
 			} else {
 				set_http_error(ctx, "Send failed", http_code,
 					       resp.data);

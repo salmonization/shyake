@@ -392,7 +392,7 @@ Go 服务端还可能返回：
 
 中继失败时，发件人的实例不存储任何内容：
 
-- 远程实例拒收（`408`、`429` 以外的 `4xx`）：发件人的实例原样返回该状态码和远程实例的 `error` 文本，例如 `403` 和 `Recipient has blocked this sender`。
+- 远程实例拒收（`408`、`429` 以外的 `4xx`）：发件人的实例原样返回该状态码和远程实例的 `error` 文本，例如 `403` 和 `Recipient has blocked this sender`。两个服务端在屏蔽时都使用这段固定文本，客户端据此识别屏蔽（`SHYAKE_ERR_BLOCKED`，§8）。
 - 其他失败（无法连接、超时、`408`、`429`、`5xx`）：发件人的实例返回 `502` 和 `Recipient instance unreachable`。
 
 服务端不排队，也不重试中继。排队也撑不了多久：收件人实例会在发件人签名时间戳 300 秒后拒绝这份载荷（§3.4），而只有客户端能重新签名。发送失败时，客户端把邮件保存为本地草稿（§3.8），用户稍后重发即可，重发时会签一份新的载荷。
@@ -459,6 +459,7 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_FORBIDDEN` | HTTP 403 |
 | `SHYAKE_ERR_CRYPTO` | 密码学操作失败 |
 | `SHYAKE_ERR_NO_INSTANCE` | 未配置实例 URL |
+| `SHYAKE_ERR_BLOCKED` | HTTP 403：收件人屏蔽了发件人 |
 
 API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、本地保存的邮件（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、账户（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、指纹（`shyake_fingerprint`）、自加密原语（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`），以及独立文件加密（`shyake_enc_file`、`shyake_dec_file`）。
 

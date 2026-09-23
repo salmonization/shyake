@@ -127,7 +127,7 @@ section "4. block enforced by the recipient's instance"
 out=$("$CLI" -c "$WORK/bobby" block "alice@$A" 2>&1)
 check "bobby blocks alice@A" "$out" "blocked"
 out=$(echo "blocked?" | "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-4" 2>&1)
-check "A passes B's refusal to the client" "$out" "blocked this sender"
+check "A passes B's refusal to the client" "$out" "You are blocked by bobby@$B"
 out=$("$CLI" -c "$WORK/bobby" --plain check inbox 2>&1)
 if echo "$out" | grep -qF "fed-4"; then
     bad "blocked mail was delivered"

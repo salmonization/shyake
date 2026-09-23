@@ -42,6 +42,7 @@ typedef enum {
 	SHYAKE_ERR_FORBIDDEN = -7, /* HTTP 403 */
 	SHYAKE_ERR_CRYPTO = -8, /* crypto operation failed */
 	SHYAKE_ERR_NO_INSTANCE = -9, /* instance URL not configured */
+	SHYAKE_ERR_BLOCKED = -10, /* HTTP 403: recipient blocks the sender */
 } shyake_err;
 
 /*
@@ -66,6 +67,7 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username);
  * Returns SHYAKE_OK on success.
  * Returns SHYAKE_ERR_KEY_MISMATCH if recipient's key changed.
  * Returns SHYAKE_ERR_GONE if recipient no longer exists.
+ * Returns SHYAKE_ERR_BLOCKED if recipient has blocked the sender.
  */
 shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 		       const char *subject, const uint8_t *body,

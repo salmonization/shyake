@@ -364,7 +364,7 @@ assert_contains "blocklist: target listed" "$USER_A" "$out"
 out_blocked=$(echo "blocked msg" | sh_run "$DIR_A" send -t "$USER_B" \
     -s "Should be blocked" 2>&1) || true
 assert_not_contains "send to blocker: rejected" "sent" "$out_blocked"
-assert_contains "send to blocker: reason shown" "blocked this sender" \
+assert_contains "send to blocker: reason shown" "You are blocked by" \
     "$out_blocked"
 
 # Unblock

@@ -158,6 +158,16 @@ char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient)
 	return NULL;
 }
 
+/* whether a server reply carries exactly this error text */
+int http_error_is(const char *body, const char *text)
+{
+	cJSON *json = cJSON_Parse(body);
+	cJSON *e = json ? cJSON_GetObjectItem(json, "error") : NULL;
+	int match = cJSON_IsString(e) && strcmp(e->valuestring, text) == 0;
+	cJSON_Delete(json);
+	return match;
+}
+
 /* record "<what> (HTTP <code>): <server's error text>" */
 void set_http_error(shyake_ctx *ctx, const char *what, long code,
 		    const char *body)

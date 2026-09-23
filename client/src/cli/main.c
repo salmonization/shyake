@@ -59,7 +59,7 @@ static void print_drafts_error(const char *fallback)
 /* keep the text of a send that failed, so it is not lost */
 static void rescue_draft(shyake_ctx *ctx, const char *config_dir,
 			 const char *recipient, const char *subject,
-			 const u8 *body, usize body_len)
+			 const u8 *body, usize body_len, int retry)
 {
 	char *new_id = NULL;
 	if (cli_save_draft(ctx, config_dir, recipient, subject, body, body_len,
@@ -67,9 +67,12 @@ static void rescue_draft(shyake_ctx *ctx, const char *config_dir,
 		print_drafts_error("Failed to save the mail as a draft.");
 		return;
 	}
-	if (new_id) {
+	if (new_id && retry) {
 		printf("Saved as draft %s. Retry with: shyake send -d %s\n",
 		       new_id, new_id);
+		free(new_id);
+	} else if (new_id) {
+		printf("Saved as draft %s.\n", new_id);
 		free(new_id);
 	} else {
 		printf("Saved as a draft.\n");
@@ -721,6 +724,11 @@ int main(int argc, char *argv[])
 				} else if (ret == SHYAKE_ERR_GONE) {
 					fprintf(stderr,
 						"\n\nFATAL: Recipient no longer exists.\n");
+				} else if (ret == SHYAKE_ERR_BLOCKED) {
+					fprintf(stderr,
+						"\nError: Send failed. You are "
+						"blocked by %s.\n",
+						recipient);
 				} else if (ret == SHYAKE_ERR_NETWORK) {
 					fprintf(stderr, "\n");
 					print_lib_error(ctx,
@@ -877,6 +885,10 @@ int main(int argc, char *argv[])
 		} else if (ret == SHYAKE_ERR_GONE) {
 			fprintf(stderr,
 				"\n\nFATAL: Recipient no longer exists.\n");
+		} else if (ret == SHYAKE_ERR_BLOCKED) {
+			fprintf(stderr,
+				"\nError: Send failed. You are blocked by %s.\n",
+				recipient);
 		} else if (ret == SHYAKE_ERR_NETWORK) {
 			fprintf(stderr, "\n");
 			print_lib_error(ctx, "Network failure.");
@@ -888,10 +900,11 @@ int main(int argc, char *argv[])
 			print_lib_error(ctx, "Send failed.");
 		}
 
-		/* a failed send must not eat what the user wrote */
+		/* a failed send must not eat what the user wrote; a
+		 * retry to a recipient who blocks you is pointless */
 		if (ret != SHYAKE_OK)
 			rescue_draft(ctx, config_dir, recipient, subject, body,
-				     body_len);
+				     body_len, ret != SHYAKE_ERR_BLOCKED);
 
 		shyake_free_ctx(ctx);
 		free_app_config(app_cfg);

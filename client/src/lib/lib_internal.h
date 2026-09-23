@@ -44,6 +44,7 @@ struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
 struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
 				       const char *username);
 char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient);
+int http_error_is(const char *body, const char *text);
 void set_http_error(shyake_ctx *ctx, const char *what, long code,
 		    const char *body);
 int instance_protocol(shyake_ctx *ctx);

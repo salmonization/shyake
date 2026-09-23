@@ -536,7 +536,9 @@ If the relay fails, the sender's instance stores nothing:
 - The remote instance refuses the mail (a `4xx` answer other than
   `408` and `429`): the sender's instance answers with the same
   status and the remote's `error` text. An example is `403` with
-  `Recipient has blocked this sender`.
+  `Recipient has blocked this sender`. Both servers use exactly this
+  text for a block, and the client identifies a block by it
+  (`SHYAKE_ERR_BLOCKED`, §8).
 - Any other failure (no connection, a timeout, `408`, `429`, `5xx`):
   the sender's instance answers `502` with `Recipient instance
   unreachable`.
@@ -645,6 +647,7 @@ call on the same context. Error codes are a typed enum
 | `SHYAKE_ERR_FORBIDDEN` | HTTP 403 |
 | `SHYAKE_ERR_CRYPTO` | Cryptographic operation failed |
 | `SHYAKE_ERR_NO_INSTANCE` | Instance URL not configured |
+| `SHYAKE_ERR_BLOCKED` | HTTP 403: the recipient blocks the sender |
 
 API groups: context lifecycle, key generation, PoW minting,
 registration, mail (`shyake_send`, `shyake_check`, `shyake_fetch`,

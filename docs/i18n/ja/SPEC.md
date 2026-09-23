@@ -392,7 +392,7 @@ Go サーバーはさらに次を返すことがある：
 
 リレーが失敗した場合、送信者のインスタンスは何も保存しない：
 
-- リモートインスタンスが拒否したとき（`408`、`429` 以外の `4xx`）：送信者のインスタンスは同じステータスとリモートの `error` テキストをそのまま返す。たとえば `403` と `Recipient has blocked this sender` である。
+- リモートインスタンスが拒否したとき（`408`、`429` 以外の `4xx`）：送信者のインスタンスは同じステータスとリモートの `error` テキストをそのまま返す。たとえば `403` と `Recipient has blocked this sender` である。どちらのサーバーもブロック時には必ずこのテキストを使い、クライアントはこれでブロックを識別する（`SHYAKE_ERR_BLOCKED`、§8）。
 - それ以外の失敗（接続できない、タイムアウト、`408`、`429`、`5xx`）：送信者のインスタンスは `502` と `Recipient instance unreachable` を返す。
 
 サーバーはリレーをキューに入れず、再試行もしない。キューがあっても長くはもたない。受信者のインスタンスは送信者が署名したタイムスタンプの 300 秒後にペイロードを拒否し（§3.4）、署名し直せるのはクライアントだけだからである。送信に失敗すると、クライアントはメールをローカルの下書きとして残し（§3.8）、ユーザーは後で送り直せる。送り直すときは新しいペイロードに署名する。
@@ -459,6 +459,7 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_FORBIDDEN` | HTTP 403 |
 | `SHYAKE_ERR_CRYPTO` | 暗号操作の失敗 |
 | `SHYAKE_ERR_NO_INSTANCE` | インスタンス URL が未設定 |
+| `SHYAKE_ERR_BLOCKED` | HTTP 403：受信者が送信者をブロックしている |
 
 API グループ：コンテキストのライフサイクル、鍵生成、PoW 生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`）。
 
