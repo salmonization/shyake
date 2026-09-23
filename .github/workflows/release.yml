@@ -7,9 +7,38 @@ on:
 permissions:
   contents: write
 
+# One version line for the whole repository. A component is built only
+# when its version equals the release tag: client/Makefile VERSION for
+# the client, server/VERSION for the Go server. A component that did not
+# change keeps its older version and is not rebuilt.
 jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      client: ${{ steps.plan.outputs.client }}
+      server: ${{ steps.plan.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: plan
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          client=$(sed -n 's/^VERSION ?= *//p' client/Makefile)
+          server=$(tr -d '[:space:]' < server/VERSION)
+          echo "tag $TAG, client $client, server $server"
+          [ "$client" = "$TAG" ] && echo client=true >>"$GITHUB_OUTPUT"
+          [ "$server" = "$TAG" ] && echo server=true >>"$GITHUB_OUTPUT"
+          if [ "$client" != "$TAG" ] && [ "$server" != "$TAG" ]; then
+            echo "::error::neither client/Makefile nor server/VERSION is $TAG"
+            exit 1
+          fi
+
   build:
     name: ${{ matrix.artifact }}
+    needs: plan
+    if: needs.plan.outputs.client == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -59,3 +88,55 @@ jobs:
         run: |
           gh release upload '${{ github.event.release.tag_name }}' \
               '${{ matrix.artifact }}.tar.gz' --clobber
+
+  server:
+    name: shyake-server-linux-${{ matrix.arch }}
+    needs: plan
+    if: needs.plan.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go/go.mod
+          cache-dependency-path: server/go/go.sum
+
+      - name: Test
+        if: matrix.arch == 'amd64'
+        working-directory: server/go
+        run: go test ./...
+
+      # static, no cgo: runs on any Linux of that architecture
+      - name: Build
+        working-directory: server/go
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -trimpath \
+              -ldflags "-s -w -X main.version=${{ github.event.release.tag_name }}" \
+              -o shyake-server ./cmd/shyake-server
+
+      - name: Package
+        run: |
+          NAME='shyake-server-linux-${{ matrix.arch }}'
+          STAGE="$(mktemp -d)/$NAME"
+          mkdir -p "$STAGE"
+          cp server/go/shyake-server LICENSE "$STAGE/"
+          cp server/go/deploy/shyake-server.service \
+              server/go/deploy/shyake.env.example "$STAGE/"
+          tar -C "$(dirname "$STAGE")" -czf "$NAME.tar.gz" "$NAME"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload '${{ github.event.release.tag_name }}' \
+              'shyake-server-linux-${{ matrix.arch }}.tar.gz' --clobber

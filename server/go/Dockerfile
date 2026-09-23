@@ -1,7 +1,8 @@
 # shyake-server in a container: a static binary on distroless, running
 # as a non-root user, with its database on the /data volume.
 #
-#   docker build -t shyake-server server/go
+#   docker build --build-arg VERSION=$(cat server/VERSION) \
+#       -t shyake-server server/go
 #   docker run -d -p 127.0.0.1:8787:8787 -v shyake:/data \
 #       -e SHYAKE_INSTANCE_DOMAIN=mail.example.org shyake-server
 
