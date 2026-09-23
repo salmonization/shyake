@@ -303,6 +303,8 @@ typedef uintptr_t uptr;
   suite).
 - Commit messages follow Conventional Commits (`feat:`, `fix:`,
   `chore:`), imperative and lowercase.
+- The only trailer is `Co-Authored-By`. Never add session URLs or
+  other trailers to commit messages.
 - Keep solutions simple and direct.
 
 ## Documentation
