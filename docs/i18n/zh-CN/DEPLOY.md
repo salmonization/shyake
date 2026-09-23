@@ -80,13 +80,18 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
 
 如果你的实例是在 `wrangler.toml` 改为生成式之前部署的，`./deploy.sh --update` 会先把你的配置另存为 `wrangler.toml.bak`，切换到新版本后再恢复回来。
 
-**GitHub token（建议配置）。** `shyake update` 会向你的实例查询最新版本，实例再去调用 GitHub API。不带 token 时，GitHub 对每个 IP 每小时只允许 60 次调用，而 Cloudflare Workers 共用出口 IP，额度很容易被其他 Worker 用光。给 Worker 配一个自己的 token：
+### GitHub token（建议配置）
 
-```sh
-npx wrangler secret put GITHUB_TOKEN
-```
+`shyake update` 会向你的实例查询最新版本，实例再去调用 GitHub API。不带 token 时，GitHub 对每个 IP 每小时只允许 60 次调用。Cloudflare Workers 共用出口 IP，额度很容易被其他 Worker 用光，这时 `shyake update` 就会失败。配上 token 后，你的实例有自己独立的额度。
 
-一个不带任何权限的 fine-grained token 就够了。即使 GitHub 仍然失败，实例也会返回上一次成功获取的结果。
+1. 在 GitHub 上打开 **Settings > Developer settings > Personal access tokens > Fine-grained tokens**，点击 **Generate new token**。
+2. 在 **Repository access** 中选择 **Public repositories**，不要添加任何权限。
+3. 设置过期时间，生成 token 并复制。
+4. 把 token 交给实例：
+   - Worker：在 `server/cf` 中运行 `npx wrangler secret put GITHUB_TOKEN`，粘贴 token，立即生效。
+   - Go 服务端：在 `/etc/shyake/shyake.env` 中加入 `SHYAKE_GITHUB_TOKEN=<token>`，然后运行 `sudo systemctl restart shyake-server`。
+
+GitHub 拒绝请求时，实例会返回上一次成功获取的结果，并在日志里记录 GitHub 返回的状态：Worker 用 `npx wrangler tail` 查看，Go 服务端用 `journalctl -u shyake-server` 查看。看到 `401` 说明 token 已过期，重新创建一个并重复第 4 步即可。
 
 ### 自托管
 
@@ -140,7 +145,7 @@ SHYAKE_INSTANCE_DOMAIN=your.domain.example
 SHYAKE_LISTEN=127.0.0.1:8787
 ```
 
-实例域名会嵌入到你实例上的每一个地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回你这里。该文件列出了其余所有设置及其默认值，完整说明见 [SPEC.md §11.2](SPEC.md)。
+实例域名会嵌入到你实例上的每一个地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回你这里。该文件列出了其余所有设置及其默认值，完整说明见 [SPEC.md §11.2](SPEC.md)。另外请设置 `SHYAKE_GITHUB_TOKEN`（见 [GitHub token](#github-token建议配置)）。
 
 然后启动服务：
 

@@ -80,13 +80,18 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB。786432（768 KiB）を超えないこ�
 
 `wrangler.toml` が生成式になる前にデプロイしたインスタンスの場合、`./deploy.sh --update` が設定を `wrangler.toml.bak` として退避し、新しいバージョンに切り替えた後に復元します。
 
-**GitHub トークン（推奨）。** `shyake update` はインスタンスに最新のリリースを問い合わせ、インスタンスは GitHub API を呼び出します。トークンがない場合、GitHub が許可する呼び出しは IP アドレスごとに 1 時間 60 回までで、Cloudflare Workers は IP アドレスを共有しているため、他の Worker にその上限を使い切られることがあります。Worker 専用のトークンを設定してください：
+### GitHub トークン（推奨）
 
-```sh
-npx wrangler secret put GITHUB_TOKEN
-```
+`shyake update` はインスタンスに最新のリリースを問い合わせ、インスタンスは GitHub API を呼び出します。トークンがない場合、GitHub が許可する呼び出しは IP アドレスごとに 1 時間 60 回までです。Cloudflare Workers は IP アドレスを共有しているため、他の Worker にその上限を使い切られることがあり、そのとき `shyake update` は失敗します。トークンを設定すると、インスタンスに専用の上限が割り当てられます。
 
-権限を一切付けない fine-grained トークンで十分です。それでも GitHub が失敗した場合、インスタンスは最後に取得できた結果を返します。
+1. GitHub で **Settings > Developer settings > Personal access tokens > Fine-grained tokens** を開き、**Generate new token** を選択します。
+2. **Repository access** で **Public repositories** を選択します。権限は何も追加しないでください。
+3. 有効期限を設定し、トークンを生成してコピーします。
+4. トークンをインスタンスに渡します：
+   - Worker：`server/cf` で `npx wrangler secret put GITHUB_TOKEN` を実行し、トークンを貼り付けます。すぐに反映されます。
+   - Go サーバー：`/etc/shyake/shyake.env` に `SHYAKE_GITHUB_TOKEN=<token>` を追加し、`sudo systemctl restart shyake-server` を実行します。
+
+GitHub が拒否した場合、インスタンスは最後に取得できた結果を返し、GitHub が返したステータスをログに記録します。Worker は `npx wrangler tail`、Go サーバーは `journalctl -u shyake-server` で確認できます。`401` はトークンの期限切れを意味します。新しいトークンを作成し、手順 4 を繰り返してください。
 
 ### セルフホスティング
 
@@ -140,7 +145,7 @@ SHYAKE_INSTANCE_DOMAIN=your.domain.example
 SHYAKE_LISTEN=127.0.0.1:8787
 ```
 
-インスタンスのドメインはそのインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスはこれを使ってフェデレーションメールを送り返します。このファイルには他のすべての設定がデフォルト値とともに記載されています。詳細は [SPEC.md §11.2](SPEC.md) を参照してください。
+インスタンスのドメインはそのインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスはこれを使ってフェデレーションメールを送り返します。このファイルには他のすべての設定がデフォルト値とともに記載されています。詳細は [SPEC.md §11.2](SPEC.md) を参照してください。あわせて `SHYAKE_GITHUB_TOKEN` も設定してください（[GitHub トークン](#github-トークン推奨)を参照）。
 
 次にサービスを起動します：
 

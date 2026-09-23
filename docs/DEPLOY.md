@@ -107,18 +107,30 @@ If you deployed an instance before `wrangler.toml` became generated,
 `./deploy.sh --update` moves your settings aside as
 `wrangler.toml.bak` and restores them after the checkout.
 
-**GitHub token (recommended).** `shyake update` asks your instance
-for the newest release, and the instance asks the GitHub API. Without
-a token, GitHub allows 60 calls an hour per IP address. Cloudflare
-Workers share IP addresses, so other Workers can use up that limit.
-Give the Worker a token of its own:
+### GitHub token (recommended)
 
-```sh
-npx wrangler secret put GITHUB_TOKEN
-```
+`shyake update` asks your instance for the newest release, and your
+instance asks the GitHub API. Without a token, GitHub allows 60 calls
+an hour per IP address. Cloudflare Workers share IP addresses, so
+other Workers can use up that limit, and `shyake update` then fails.
+A token gives your instance a limit of its own.
 
-A fine-grained token with no permissions is enough. If GitHub still
-fails, the instance serves the last answer it got.
+1. On GitHub, go to **Settings > Developer settings > Personal access
+   tokens > Fine-grained tokens** and select **Generate new token**.
+2. Under **Repository access**, select **Public repositories**. Do not
+   add any permissions.
+3. Set an expiration date, generate the token, and copy it.
+4. Give it to your instance:
+   - Worker: in `server/cf`, run `npx wrangler secret put GITHUB_TOKEN`
+     and paste the token. It applies at once.
+   - Go server: add `SHYAKE_GITHUB_TOKEN=<token>` to
+     `/etc/shyake/shyake.env`, then run
+     `sudo systemctl restart shyake-server`.
+
+When GitHub refuses, the instance serves the last answer it got, and
+its log shows GitHub's status: `npx wrangler tail` for a Worker,
+`journalctl -u shyake-server` for the Go server. A `401` means that
+the token expired. Create a new one and repeat step 4.
 
 ### Self-hosting
 
@@ -192,7 +204,8 @@ SHYAKE_LISTEN=127.0.0.1:8787
 Your instance domain appears in every address on your instance
 (`user@your.domain.example`). Other instances use it to route
 federated mail back to you. The file lists every other setting with
-its default. [SPEC.md §11.2](SPEC.md) describes them all.
+its default. [SPEC.md §11.2](SPEC.md) describes them all. Also set
+`SHYAKE_GITHUB_TOKEN` ([GitHub token](#github-token-recommended)).
 
 Then start the service:
 

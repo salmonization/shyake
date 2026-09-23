@@ -72,8 +72,11 @@ app.get('/api/version', c =>
  * KV; the last good answer is kept without expiry and served when
  * GitHub fails, as the Go server does */
 app.get('/api/client/version', async c => {
+  /* the key suffix is the format of the stored answer, not a release:
+   * bump it when the answer's shape changes, so a new deploy never
+   * reads an old shape. LAST_KEY never expires, so it must follow. */
   const CACHE_KEY = 'client_version_v3';
-  const LAST_KEY = 'client_version_last';
+  const LAST_KEY = 'client_version_last_v3';
   const CACHE_TTL = 3600;
 
   const kvGet = async (key: string): Promise<string | null> => {
