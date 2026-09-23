@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Shyake end-to-end functional test suite
-# Requires: wrangler dev running on 127.0.0.1:8787, shyake binary built
+# Requires: a server on 127.0.0.1:8787 (the Worker under wrangler dev, or
+# the Go server), shyake binary built. SHYAKE_TEST_INSTANCE overrides the
+# server URL.
 
 # No `set -e`: this is a test harness with its own PASS/FAIL accounting.
 # Under -e a failing case kills the run before its assert can report it,
@@ -13,7 +15,7 @@ set -uo pipefail
 # Configuration
 # ------------------------------------------------------------------ #
 SHYAKE="${SHYAKE_BIN:-$(dirname "$0")/../client/bin/shyake}"
-INSTANCE="http://127.0.0.1:8787"
+INSTANCE="${SHYAKE_TEST_INSTANCE:-http://127.0.0.1:8787}"
 TMPDIR_ROOT="$(mktemp -d /tmp/shyake_test.XXXXXX)"
 PASS=0
 FAIL=0
@@ -101,7 +103,8 @@ wait_for_server() {
         retries=$((retries - 1))
         if [ $retries -eq 0 ]; then
             echo -e "${RED}ERROR: Server at $INSTANCE is not responding.${NC}"
-            echo "Start the server with: cd server/cf && npx wrangler dev"
+            echo "Start a server: cd server/cf && npx wrangler dev"
+            echo "            or: cd server/go && SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 go run ./cmd/shyake-server"
             exit 1
         fi
         sleep 1
@@ -146,6 +149,9 @@ echo -e "  ${GREEN}PASS${NC}  Binary exists: $SHYAKE"
 
 wait_for_server
 echo -e "  ${GREEN}PASS${NC}  Server reachable at $INSTANCE"
+
+out=$(curl -s "$INSTANCE/api/version")
+assert_contains "server reports protocol level 2" '"protocol":2' "$out"
 
 # ------------------------------------------------------------------ #
 section "1. init"
@@ -358,6 +364,8 @@ assert_contains "blocklist: target listed" "$USER_A" "$out"
 out_blocked=$(echo "blocked msg" | sh_run "$DIR_A" send -t "$USER_B" \
     -s "Should be blocked" 2>&1) || true
 assert_not_contains "send to blocker: rejected" "sent" "$out_blocked"
+assert_contains "send to blocker: reason shown" "blocked this sender" \
+    "$out_blocked"
 
 # Unblock
 out=$(sh_run "$DIR_B" unblock "$USER_A" 2>&1)

@@ -212,6 +212,8 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 
 		CURLcode res = curl_easy_perform(curl);
 		if (res != CURLE_OK) {
+			set_error(ctx, "Network error: %s",
+				  curl_easy_strerror(res));
 			ret = SHYAKE_ERR_NETWORK;
 		} else {
 			long http_code = 0;
@@ -224,6 +226,8 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 			} else if (http_code == 410) {
 				ret = SHYAKE_ERR_GONE;
 			} else {
+				set_http_error(ctx, "Send failed", http_code,
+					       resp.data);
 				ret = SHYAKE_ERR_HTTP;
 			}
 		}

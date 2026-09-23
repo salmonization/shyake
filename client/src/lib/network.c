@@ -22,9 +22,19 @@ usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp)
 	return realsize;
 }
 
-struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
-					 const char *endpoint,
-					 const char *username)
+/*
+ * Signed string of a header-authenticated request:
+ *
+ *   METHOD:endpoint:username:timestamp               no request body
+ *   METHOD:endpoint:username:timestamp:sha256hex     with a body
+ *
+ * The digest binds the exact body bytes (protocol 2, SPEC 3.3).
+ */
+struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
+					      const char *method,
+					      const char *endpoint,
+					      const char *username,
+					      const u8 *body, usize body_len)
 {
 	// sign request with given method and mint PoW
 	time_t now = time(NULL);
@@ -38,9 +48,18 @@ struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
 	if (!ssk)
 		return NULL;
 
-	char message[512];
-	snprintf(message, sizeof(message), "%s:%s:%s:%s", method, endpoint,
-		 username, timestamp);
+	char digest[2 * SHA256_DIGEST_LENGTH + 2] = "";
+	if (body) {
+		u8 md[SHA256_DIGEST_LENGTH];
+		SHA256(body, body_len, md);
+		digest[0] = ':';
+		for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+			snprintf(digest + 1 + 2 * i, 3, "%02x", md[i]);
+	}
+
+	char message[640];
+	snprintf(message, sizeof(message), "%s:%s:%s:%s%s", method, endpoint,
+		 username, timestamp, digest);
 
 	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
 	if (!sig) {
@@ -75,6 +94,14 @@ struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
 	free(pow);
 	OQS_SIG_free(sig);
 	return headers;
+}
+
+struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
+					 const char *endpoint,
+					 const char *username)
+{
+	return create_signed_headers_body(ctx, method, endpoint, username, NULL,
+					  0);
 }
 
 struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
@@ -129,4 +156,71 @@ char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient)
 
 	free(resp.data);
 	return NULL;
+}
+
+/* record "<what> (HTTP <code>): <server's error text>" */
+void set_http_error(shyake_ctx *ctx, const char *what, long code,
+		    const char *body)
+{
+	char msg[256] = "";
+	cJSON *json = cJSON_Parse(body);
+	cJSON *e = json ? cJSON_GetObjectItem(json, "error") : NULL;
+	if (cJSON_IsString(e)) {
+		snprintf(msg, sizeof(msg), "%s", e->valuestring);
+		for (char *p = msg; *p; p++)
+			if ((u8)*p < 0x20 || *p == 0x7f)
+				*p = '?';
+	}
+	cJSON_Delete(json);
+	if (msg[0])
+		set_error(ctx, "%s (HTTP %ld): %s", what, code, msg);
+	else
+		set_error(ctx, "%s (HTTP %ld).", what, code);
+}
+
+/* protocol level of the instance: 1 if it has no /api/version, 0 if
+ * it cannot be reached */
+int instance_protocol(shyake_ctx *ctx)
+{
+	char url[512];
+	snprintf(url, sizeof(url), "%s/api/version", ctx->instance_url);
+	CURL *curl = curl_easy_init();
+	if (!curl)
+		return 0;
+	struct curl_response resp = { .data = malloc(1), .size = 0 };
+	resp.data[0] = '\0';
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+
+	int level = 0;
+	if (curl_easy_perform(curl) == CURLE_OK) {
+		long http_code = 0;
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+		level = 1;
+		cJSON *json = http_code == 200 ? cJSON_Parse(resp.data) : NULL;
+		cJSON *p = json ? cJSON_GetObjectItem(json, "protocol") : NULL;
+		if (cJSON_IsNumber(p) && p->valueint > 1)
+			level = p->valueint;
+		cJSON_Delete(json);
+	}
+	free(resp.data);
+	curl_easy_cleanup(curl);
+	return level;
+}
+
+/* failure detail of a body-signed request; a server older than
+ * protocol 2 rejects the signature, so say that instead of 401 */
+void set_signed_body_error(shyake_ctx *ctx, const char *what, long code,
+			   const char *body)
+{
+	if (code == 401 && instance_protocol(ctx) == 1) {
+		set_error(ctx,
+			  "%s: this instance does not accept signed "
+			  "request bodies. Its server must be v0.3.0 or "
+			  "later.",
+			  what);
+		return;
+	}
+	set_http_error(ctx, what, code, body);
 }

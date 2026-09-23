@@ -1,3 +1,5 @@
+import type {ContentfulStatusCode} from 'hono/utils/http-status';
+
 export function isValidUsername(username: string): boolean {
   const regex = /^(?=.*[a-zA-Z])[a-zA-Z0-9_]{4,16}$/;
   return regex.test(username);
@@ -96,4 +98,55 @@ export function addressDomain(addr: string, instanceDomain: string): string {
       : instanceDomain.toLowerCase();
   }
   return addr.slice(at + 1).toLowerCase();
+}
+
+/* Forward a mail submission to the recipient's instance, byte for
+ * byte: the remote re-verifies the sender's signature over it.
+ * Returns null when the remote accepts it, else the status and text
+ * for our client. There is no queue: the client keeps a draft. */
+export async function relayMail(
+  domain: string,
+  rawBody: string,
+): Promise<{status: ContentfulStatusCode; error: string} | null> {
+  let resp: Response;
+  try {
+    resp = await fetch(`https://${domain}/api/mail`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: rawBody,
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (e) {
+    return {status: 502, error: 'Recipient instance unreachable'};
+  }
+  if (resp.ok) {
+    return null;
+  }
+  const s = resp.status;
+  if (s < 400 || s >= 500 || s === 408 || s === 429) {
+    return {status: 502, error: 'Recipient instance unreachable'};
+  }
+  /* a refusal: pass on the remote's text, printable and bounded */
+  let text = '';
+  try {
+    const j: any = await resp.json();
+    if (typeof j?.error === 'string') {
+      text = [...j.error.replace(/\p{C}/gu, '')].slice(0, 200).join('');
+    }
+  } catch (e) {}
+  return {status: s as ContentfulStatusCode, error: text || 'Relay refused'};
+}
+
+/* Read the body of a protocol-2 request: its exact bytes are hashed
+ * into the signed string. Returns null when it is over 64 KiB. */
+export async function readSignedBody(
+  req: Request,
+): Promise<{digest: string; text: string} | null> {
+  const raw = await req.arrayBuffer();
+  if (raw.byteLength > 65536) {
+    return null;
+  }
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', raw));
+  const digest = [...d].map(b => b.toString(16).padStart(2, '0')).join('');
+  return {digest, text: new TextDecoder().decode(raw)};
 }

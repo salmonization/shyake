@@ -10,15 +10,16 @@ This document helps you develop for Shyake.
   * [Install](#install)
   * [Testing](#testing)
 - [Server](#server)
-  * [Local development](#local-development)
+  * [Worker](#worker)
+  * [Go server](#go-server)
 
 ## Client
 
 ### Dependencies
 
-`liboqs` is statically linked on all platforms so the binary carries
-no runtime dependency on it. `libcurl` and `libcrypto` remain
-dynamically linked on all platforms.
+The build links `liboqs` statically on all platforms, so the binary
+carries no runtime dependency on it. It links `libcurl` and
+`libcrypto` dynamically on all platforms.
 
 Dependencies (build-time only):
 
@@ -56,11 +57,11 @@ pkg install clang cmake make curl-dev openssl-dev
 
 **Building liboqs**
 
-When compiling `liboqs` from source (e.g., on GNU/Linux or Termux), you must
-perform a minimal build. Building `liboqs` with all algorithms enabled will
-drastically bloat the binary size (~20MB).
+When you compile `liboqs` from source (for example, on GNU/Linux or
+Termux), you must build a minimal version. A full build, with all
+algorithms enabled, adds about 20MB to the binary.
 
-To build `liboqs` with only the algorithms required by Shyake (ML-KEM-768 
+To build `liboqs` with only the algorithms Shyake needs (ML-KEM-768
 and ML-DSA-65), run:
 
 ```sh
@@ -78,7 +79,7 @@ make -j$(nproc)
 sudo make install
 ```
 
-When compiling in **Termux**, you must specify the installation prefix
+When you compile in **Termux**, you must set the installation prefix
 (`$PREFIX`) and omit `sudo`:
 
 ```sh
@@ -117,24 +118,39 @@ cp bin/shyake /usr/local/bin/
 
 ### Testing
 
-Run the end-to-end test suite against a local dev server:
+Run the end-to-end test suite against a local server. Either server
+works, and a change to the protocol must pass against both:
 
 ```sh
-# Terminal 1
+# Terminal 1: the Worker
 cd server/cf && npx wrangler dev --local
+# or the Go server
+cd server/go && SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 go run ./cmd/shyake-server
 
 # Terminal 2
 cd client && make
 bash tests/e2e_test.sh
 ```
 
+`SHYAKE_TEST_INSTANCE` points the suite at another URL.
+
+The federation test starts two Go servers itself and runs the client
+between them. It covers relays in both directions, a relay to an
+instance that is down (the client keeps a draft and sends it later),
+and a block on relayed mail:
+
+```sh
+cd client && make && cd ..
+bash tests/federation_test.sh
+```
+
 ### Non-interactive passphrase
 
 `SHYAKE_PASSPHRASE` skips the interactive prompt wherever a command
-needs to unlock the secret key (and `init` uses it as the initial
-passphrase). Handy for scripting tests, not meant for end users —
-inline values land in shell history, exported ones are visible to
-child processes.
+needs to unlock the secret key. `init` also uses it as the initial
+passphrase. Use this variable for scripting tests, not for end
+users. Inline values land in shell history. Exported values stay
+visible to child processes.
 
 ```sh
 export SHYAKE_PASSPHRASE=$(openssl rand -base64 12)
@@ -144,7 +160,7 @@ shyake check inbox
 
 ## Server
 
-### Local development
+### Worker
 
 ```sh
 cd server/cf
@@ -154,6 +170,79 @@ npx wrangler dev --local
 
 The worker listens on `http://localhost:8787` by default.
 
-`wrangler.toml` is generated from `wrangler.template.toml` and is
-git-ignored. Deploying to Cloudflare is the same script without
-`--local`; see [DEPLOY.md](DEPLOY.md).
+`deploy.sh` generates `wrangler.toml` from `wrangler.template.toml`.
+Git does not track `wrangler.toml`. To deploy to Cloudflare, run the
+same script without `--local`. See [DEPLOY.md](DEPLOY.md).
+
+### Go server
+
+Requires Go 1.26 or newer. The server has no cgo dependency.
+
+```sh
+cd server/go
+go test ./...                    # unit tests
+go vet ./...
+gofmt -l .                       # must print nothing
+SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 SHYAKE_DATABASE=/tmp/dev.db \
+    go run ./cmd/shyake-server
+```
+
+Package layout, from the wire inward:
+
+| Package | Purpose |
+|---|---|
+| `internal/protocol` | Addresses, PoW, signatures, signed messages. No I/O. |
+| `internal/api` | HTTP handlers, authentication, rate limits |
+| `internal/federation` | Outbound client, remote key cache, relays |
+| `internal/store` | Storage interface and its backend test suite |
+| `internal/store/sqlite` | The SQLite backend and its migrations |
+| `internal/config` | `SHYAKE_*` environment settings |
+
+**Signature test vectors.** `internal/protocol/testdata/liboqs_vectors.json`
+holds signatures that liboqs made over messages that the client's
+own cJSON built. The Go tests check that circl accepts them and that
+the server rebuilds each signed message byte for byte. Regenerate
+the file after a change to the signed messages:
+
+```sh
+cd server/go/internal/protocol/testdata
+cc -std=c11 -o /tmp/gen gen_vectors.c \
+   ../../../../../client/src/lib/vendor/cJSON/cJSON.c \
+   -I../../../../../client/src/lib/vendor/cJSON \
+   /usr/local/lib/liboqs.a -lcrypto
+/tmp/gen > liboqs_vectors.json
+```
+
+**A new storage backend** implements `store.Store` and passes
+`storetest.Run`, the same suite the SQLite backend runs. PostgreSQL
+is planned this way. Keep SQL inside the backend package: the
+interface speaks users, mail, and blocks.
+
+**Federation on one machine.** Instances contact each other over
+HTTPS, and the server refuses private addresses. For local tests,
+`SHYAKE_FEDERATION_INSECURE=true` allows plain HTTP and loopback
+addresses. Never set it on a public instance.
+
+## Releasing
+
+The repository has one version line: the release tags ([SPEC.md
+§12.1](SPEC.md)). Each component records the release in which it
+last changed:
+
+- the client: `VERSION` in `client/Makefile`.
+- both servers: `server/VERSION`.
+
+To release:
+
+1. Set the version of each changed component to the new tag. Leave
+   an unchanged component at its old version.
+2. Publish a GitHub release with that tag.
+
+The release workflow builds the client when `client/Makefile` has the
+tag, and the Go server when `server/VERSION` has it. If neither has
+the tag, the workflow fails.
+
+A server change that affects clients must reach the servers first.
+Bump the protocol level (`protocol.Level` in the Go server,
+`PROTOCOL_LEVEL` in the Worker) when servers start to accept a new
+request format. Clients read it from `GET /api/version`.

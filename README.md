@@ -8,9 +8,10 @@ Shyake is an **end-to-end encrypted mail system** powered by
 **post-quantum cryptography**, designed as a decentralized
 communication method to resist censorship and surveillance.
 
-The server runs on Cloudflare Workers, so everyone can host their own
-instance at no cost. You can also self-host the server on your own
-hardware instead of the Cloudflare Global Network.
+The server runs on Cloudflare Workers, so everyone can host an
+instance at no cost. To self-host on your own hardware instead, run
+the Go server: one binary with one SQLite file. Both servers speak
+the same protocol and federate with each other.
 
 ### Documents
 
@@ -33,7 +34,7 @@ extract it, and copy it to a directory in your `$PATH`:
 sudo cp ./shyake /usr/local/bin/
 ```
 
-Test to see if everything goes well:
+Test the install:
 
 ```sh
 shyake version
@@ -54,8 +55,8 @@ shyake init
 shyake register -u salmon -i https://shyake.eee.coffee
 ```
 
-`init` asks you to set a passphrase protecting your secret keys
-(leave it empty for no passphrase). Commands that use your keys will
+`init` asks you to set a passphrase that protects your secret keys.
+Leave it empty for no passphrase. Commands that use your keys then
 prompt for this passphrase.
 
 The config directory defaults to `~/.config/shyake/`.
@@ -66,8 +67,7 @@ You can create multiple profiles by specifying a directory at init:
 shyake init -c path/to/your/dir
 ```
 
-In that case, you always need to add the `-c` option when using this
-profile.
+When you use this profile, you must always add the `-c` option.
 
 Use the `whoami` command to check your profile.
 
@@ -75,8 +75,8 @@ Use the `whoami` command to check your profile.
 shyake whoami
 ```
 
-Run `shyake man` for a list of all commands, and `shyake man <command>`
-for detailed usage of each command.
+Run `shyake man` for a list of all commands. Run `shyake man
+<command>` for detailed usage of one command.
 
 **Check command**:
 
@@ -87,9 +87,9 @@ shyake check inbox
 shyake check sent
 ```
 
-You can use `--csv` and `--json` to format output for machine parsing. You
-can also use `--no-header` to disable the column header, or `--count` to
-print the count only.
+You can use `--csv` and `--json` to format output for machine
+parsing. You can also use `--no-header` to disable the column
+header. Use `--count` to print the count only.
 
 To check the header of a piece of mail:
 
@@ -119,17 +119,18 @@ shyake check drafts 3
 shyake send -s "This is the subject" -t flat_white < body.txt
 ```
 
-First line of the input file will be the subject if `-s` is missing.
+If `-s` is missing, the first line of the input file becomes the
+subject.
 
 ```sh
 shyake send -t flat_white < content.txt
 ```
 
-Please note that the subject must not exceed 128 bytes in length.
+The subject must not exceed 128 bytes.
 
-If a send fails, for any reason, what you wrote is saved as a draft
-instead of being lost. The message tells you the draft id; retry it
-with `shyake send -d <id>`.
+If a send fails, for any reason, the client saves what you wrote as
+a draft instead of losing it. The message shows the draft id. Retry
+it with `shyake send -d <id>`.
 
 Use `username@instance` as the recipient to reach a user on an
 external instance.
@@ -138,7 +139,7 @@ external instance.
 shyake send -s "Hello" -t flat_white@shyake.example.com < body.txt
 ```
 
-You can also use heredoc, but please be careful of your shell history.
+You can also use heredoc. Be careful of your shell history.
 
 ```sh
 shyake send -s "This is the subject" -t flat_white <<EOF
@@ -146,8 +147,8 @@ Hello, this is the mail body.
 EOF
 ```
 
-Shyake transmits text only. Binary data must be base64-encoded before
-sending.
+Shyake transmits text only. You must base64-encode binary data
+before you send it.
 
 ```sh
 # send a poor image
@@ -159,10 +160,11 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **Compose command**:
 
-`compose` writes mail drafts, and doubles as a personal diary. It
-opens your editor (default: `ed`) on a simple template and stores
-the result as a draft under `~/.config/shyake/drafts/`, encrypted to
-your own key with ML-KEM-768 + ChaCha20-Poly1305.
+`compose` writes mail drafts. It also works as a personal diary. It
+opens your editor (default: `ed`) on a simple template. It stores
+the result as a draft under `~/.config/shyake/drafts/`. The client
+encrypts the draft to your own key with ML-KEM-768 +
+ChaCha20-Poly1305.
 
 ```sh
 shyake compose
@@ -175,12 +177,12 @@ Subject: Coffee tomorrow?
 The mail body goes here.
 ```
 
-Recipient, subject, and body are all encrypted at rest. Saving a
-draft needs no passphrase (only your public key is used); listing or
-reading drafts requires unlocking your secret key.
+The client encrypts recipient, subject, and body at rest. Saving a
+draft needs no passphrase, because it uses only your public key.
+Listing or reading drafts needs your secret key unlocked.
 
-The `To:` field may be left empty. `check drafts` shows such a
-draft as `(null)`:
+You may leave the `To:` field empty. `check drafts` then shows such
+a draft as `(null)`:
 
 ```sh
 shyake compose
@@ -190,42 +192,41 @@ shyake compose 3          # continue writing entry 3
 ```
 
 To send a draft, use `send --draft`. The recipient and subject come
-from the draft (`-t`/`-s` override them), and the draft is deleted
-after a successful send:
+from the draft. Use `-t` or `-s` to override them. The client
+deletes the draft after it sends successfully:
 
 ```sh
 shyake send --draft 3
 shyake send --draft 3 -t flat_white
 ```
 
-The editor defaults to `ed`. Set the `EDITOR` key in the config
-file, or the `$VISUAL`/`$EDITOR` environment variables, to use
-another editor; `vim` and `nvim` are invoked with `-n -i NONE` so no
-plaintext leaks into swap files. Drafts are plain local files; to delete one, just
-remove `~/.config/shyake/drafts/<id>.json`.
+The editor defaults to `ed`. To use another editor, set the `EDITOR`
+key in the config file, or set the `$VISUAL` or `$EDITOR`
+environment variable. The client invokes `vim` and `nvim` with `-n
+-i NONE`, so no plaintext leaks into swap files. Drafts are plain
+local files. To delete one, remove
+`~/.config/shyake/drafts/<id>.json`.
 
 > The classic `ed` editor (and the early `ex`/`vi`) shipped with a
-> `crypt(1)`-based encryption feature, meant to provide basic
-> privacy and protection of sensitive data on multi-user
-> time-sharing systems (where `root` could read any file). It was
-> commonly used for diaries and private letters, password
-> management, as well as unpublished code and design drafts. Nearly every modern Unix and
-> Unix-like system has since dropped the feature (except NetBSD's
-> `ed`), as
-> its encryption scheme is long broken. Shyake `compose` is an
-> homage to `ed -x`.
+> `crypt(1)`-based encryption feature. This gave basic privacy for
+> sensitive data on multi-user, time-sharing systems, where `root`
+> could read any file. People commonly used it for diaries, private
+> letters, password management, and unpublished code or design
+> drafts. Nearly every modern Unix and Unix-like system has since
+> dropped the feature, except NetBSD's `ed`, because its encryption
+> scheme is long broken. Shyake `compose` is an homage to `ed -x`.
 
 **Fetch command**:
 
-This will fetch a piece of mail and decrypt it.
+This fetches a piece of mail and decrypts it.
 
 ```sh
 shyake fetch fQBjZnvJ56
 ```
 
-If you want to export a piece of mail as plain text, with the header
-included (not to be confused with the `save` command below, which
-stores the encrypted mail):
+To export a piece of mail as plain text, with its header included,
+run this command. Do not confuse it with the `save` command below,
+which stores the encrypted mail:
 
 ```sh
 shyake fetch fQBjZnvJ56 --no-color > exported-mail.txt
@@ -252,15 +253,15 @@ shyake fetch fQBjZnvJ56 -r | base64 -d | tar xzf - -C ./output
 **Save and read commands**:
 
 `save` fetches the encrypted mail from the server and stores it to
-`~/.config/shyake/saved/<id>.json`. The mail is NOT decrypted at this
-stage.
+`~/.config/shyake/saved/<id>.json`. The client does NOT decrypt the
+mail at this stage.
 
 ```sh
 shyake save fQBjZnvJ56
 ```
 
-`read` decrypts and displays a saved mail. Output is identical to
-`fetch`, and `-r`/`--raw` is supported as well.
+`read` decrypts and displays a saved mail. Output matches `fetch`,
+and `read` also supports `-r`/`--raw`.
 
 ```sh
 shyake read fQBjZnvJ56
@@ -289,10 +290,11 @@ To check fingerprints of your communicators:
 shyake fingerprint flat_white
 ```
 
-You can update the fingerprints of your communicators if they have rotated
-their key pairs. **Warning: Before running the update command, always verify
-the new fingerprint through a secondary, trusted out-of-band channel (e.g.,
-in person or via a different platform) to prevent identity impersonation.**
+If a communicator rotates their key pair, you can update the
+fingerprint you have for them. **Warning: before you run the update
+command, always verify the new fingerprint. Use a second, trusted,
+out-of-band channel, such as in person or a different platform. This
+prevents identity impersonation.**
 
 ```sh
 shyake fingerprint flat_white --update
@@ -300,7 +302,7 @@ shyake fingerprint flat_white --update
 
 **Burn command**:
 
-This will delete a piece of mail.
+This deletes a piece of mail.
 
 ```sh
 shyake burn fQBjZnvJ56
@@ -326,11 +328,12 @@ shyake blocklist
 **Update command**:
 
 `shyake update` shows the installed and available versions. The
-version lookup goes through your own instance (which relays the
-GitHub Releases API); `shyake.eee.coffee` is only a built-in
-fallback used when no instance is configured. Use
-`stable` or `preview` to install the latest release from that channel
-(preview is only offered when newer than stable).
+version lookup goes through your own instance, which relays the
+GitHub Releases API. `shyake.eee.coffee` is only a built-in
+fallback. The client uses it only when no instance is configured.
+Use `stable` or `preview` to install the latest release from that
+channel. The system offers the preview channel only when it is
+newer than stable.
 
 ```sh
 shyake update
@@ -340,7 +343,7 @@ shyake update preview
 
 **Rotate command**:
 
-This will rotate your key pairs and clear all mail to and from you.
+This rotates your key pairs and clears all mail to and from you.
 
 ```sh
 shyake rotate
@@ -348,10 +351,10 @@ shyake rotate
 
 **Destroy command**:
 
-This will delete your local configuration and key pairs, also destruct
-your account on the instance. All mail to and from you will be cleared.
-Your username will be permanently locked and cannot be registered again
-on this instance.
+This deletes your local configuration and key pairs. It also
+destroys your account on the instance. It clears all mail to and
+from you. Your username stays permanently locked. You cannot
+register it again on this instance.
 
 ```sh
 shyake destroy
@@ -359,8 +362,8 @@ shyake destroy
 
 ### Advanced Usage
 
-You can use `--no-color` to turn off the colored output. The standard
-`NO_COLOR` environment variable is also respected.
+You can use `--no-color` to turn off colored output. Shyake also
+respects the standard `NO_COLOR` environment variable.
 
 ```sh
 shyake check inbox --no-color
@@ -368,12 +371,12 @@ shyake check fQBjZnvJ56 --no-color
 shyake fetch fQBjZnvJ56 --no-color
 ```
 
-Use `--plain` to disable the pager, color, and truncation for `check` and
-`fetch` command.
+Use `--plain` to disable the pager, color, and truncation for the
+`check` and `fetch` commands.
 
-You can edit the configuration file (located at `~/.config/shyake/config` or
-the directories of your other profiles) to optimize your setup. For instance,
-by changing the column layout for `check` command.
+You can edit the configuration file, at `~/.config/shyake/config` or
+in the directories of your other profiles, to fit your setup. For
+example, you can change the column layout for the `check` command.
 
 ```sh
 # Date & Time format (strftime format)
@@ -404,8 +407,8 @@ DEFAULT_ACTION=0
 ```
 
 Use `enc` and `dec` to encrypt or decrypt a standalone file with
-ML-KEM-768 + ChaCha20-Poly1305. These commands are intended for
-debugging/testing purposes.
+ML-KEM-768 + ChaCha20-Poly1305. Use these commands for debugging and
+testing only.
 
 ```sh
 # encrypt with your own public key (output defaults to <file>.enc)

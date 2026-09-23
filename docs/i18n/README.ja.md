@@ -113,7 +113,7 @@ shyake send -s "This is the subject" -t flat_white < body.txt
 shyake send -t flat_white < content.txt
 ```
 
-件名の長さは 128 バイトを超えてはならないことに注意してください。
+件名の長さは 128 バイトを超えてはなりません。
 
 外部インスタンスのユーザーに送るには、宛先に
 `username@instance` を使用します。

@@ -326,8 +326,14 @@ wrangler d1 migrations apply "$DB_NAME" --remote
 ok "schema up to date"
 
 say "Deploying the Worker"
-wrangler deploy
-ok "deployed"
+# the release tag this checkout is at, reported by GET /api/version
+SERVER_VERSION=$(tr -d '[:space:]' <"$SCRIPT_DIR/../VERSION" 2>/dev/null)
+case "$SERVER_VERSION" in
+v[0-9]*) ;;
+*) die "../VERSION is missing or malformed" ;;
+esac
+wrangler deploy --define "SERVER_VERSION:\"$SERVER_VERSION\""
+ok "deployed $SERVER_VERSION"
 
 # ---------------------------------------------------------------- #
 # verify
