@@ -581,10 +581,10 @@ Shyake uses **Trust On First Use (TOFU)** for public key management:
   `recipient_kem_fingerprint`. If the fingerprint no longer matches
   the stored key, the server independently rejects the send with
   HTTP 409.
-- **Key rotation detected**: the client stops and prints:
+- **Key rotation detected**: the client stops with a fatal error:
 
 ```
-Error: Send failed. The public key of <username> has changed.
+FATAL: The public key of <username> has changed.
 Run 'shyake fingerprint <username>' to check the new key.
 ```
 
@@ -633,9 +633,10 @@ error code. Callers get the reason with `shyake_last_error(ctx)`. The
 reason is one or more full sentences that say why the call failed,
 not what failed, for example `You are blocked by bob.` The client
 adds its own action in front of it. The CLI prints
-`Error: <Action> failed. <reason>`, for example
-`Error: Send failed. You are blocked by bob.` Each call clears the
-reason. It stays valid until the next call on the same context.
+`<Action> failed. <reason>`, for example
+`Send failed. You are blocked by bob.` A changed recipient key is
+the one exception: the CLI prints it as `FATAL: <reason>` (§7).
+Each call clears the reason. It stays valid until the next call on the same context.
 Error codes are a typed enum
 (`shyake_err`), with `SHYAKE_OK = 0` for backward compatibility:
 

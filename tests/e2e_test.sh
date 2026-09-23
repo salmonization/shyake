@@ -496,7 +496,7 @@ out_mismatch=$(echo "after rotate" | sh_run "$DIR_D" send -t "$USER_E" \
 rc_mismatch=$?
 assert_exit "409 path: send exits non-zero after key rotation" 1 "$rc_mismatch"
 assert_contains "409 path: key-changed message" \
-    "Error: Send failed. The public key of $USER_E has changed." \
+    "FATAL: The public key of $USER_E has changed." \
     "$out_mismatch"
 assert_contains "409 path: fingerprint hint" \
     "Run 'shyake fingerprint $USER_E'" "$out_mismatch"
@@ -805,12 +805,12 @@ out=$(sh_run "$DIR_A" send --draft 9999 2>&1)
 rc=$?
 assert_exit "send --draft unknown id fails" 1 "$rc"
 assert_contains "send --draft: not-found message" \
-    "Error: Draft read failed. There is no draft 9999." "$out"
+    "Draft read failed. Draft 9999 not found." "$out"
 
 # 19j'. unknown recipient names the cause, not the network
 out=$(echo "hello?" | sh_run "$DIR_A" send -t "nobody${TS}" -s "x" 2>&1)
 assert_contains "send to unknown user: cause shown" \
-    "Error: Send failed. There is no user nobody${TS}." "$out"
+    "Send failed. User nobody${TS} not found." "$out"
 
 # 19k. passphrase-protected account: compose needs no passphrase,
 #      reading drafts does

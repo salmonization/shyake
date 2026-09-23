@@ -82,7 +82,7 @@ profile "$WORK/bobby" "$B" bobby
 section "1. relay from A to B"
 out=$(echo "hello across instances" |
     "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-1" 2>&1)
-check "alice sends to bobby@B" "$out" "Your mail was sent."
+check "alice sends to bobby@B" "$out" "Mail sent."
 sleep 1
 out=$("$CLI" -c "$WORK/bobby" --plain check inbox 2>&1)
 check "bobby's inbox on B lists the mail" "$out" "fed-1"
@@ -95,7 +95,7 @@ check "alice's sent box on A keeps a copy" "$out" "fed-1"
 
 section "2. reply from B to A"
 out=$(echo "reply" | "$CLI" -c "$WORK/bobby" send -t "alice@$A" -s "fed-2" 2>&1)
-check "bobby replies" "$out" "Your mail was sent."
+check "bobby replies" "$out" "Mail sent."
 sleep 1
 out=$("$CLI" -c "$WORK/alice" --plain check inbox 2>&1)
 check "alice receives the reply" "$out" "fed-2"
@@ -107,7 +107,7 @@ echo "warm" | "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-3a" >/dev/null 
 stop B
 out=$(echo "sent while B was down" |
     "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-3b" 2>&1)
-check "A reports the failed relay" "$out" "Error: Send failed. Cannot reach $B."
+check "A reports the failed relay" "$out" "Send failed. Cannot reach $B."
 check "the client keeps a draft" "$out" "Saved as draft"
 out=$("$CLI" -c "$WORK/alice" --plain check sent 2>&1)
 if echo "$out" | grep -qF "fed-3b"; then
@@ -119,7 +119,7 @@ draft=$("$CLI" -c "$WORK/alice" --plain check drafts 2>/dev/null |
     awk '/fed-3b/{print $1}')
 start B "$B"
 out=$("$CLI" -c "$WORK/alice" send -d "$draft" 2>&1)
-check "the draft is sent once B is back" "$out" "Your mail was sent."
+check "the draft is sent once B is back" "$out" "Mail sent."
 out=$("$CLI" -c "$WORK/bobby" --plain check inbox 2>&1)
 check "the mail reaches B" "$out" "fed-3b"
 

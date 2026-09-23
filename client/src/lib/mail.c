@@ -826,7 +826,7 @@ parse_saved_json(shyake_ctx *ctx, const char *mail_id, int decrypt_body)
 
 	FILE *f = fopen(path, "r");
 	if (!f) {
-		set_error(ctx, "There is no saved mail %s.", mail_id);
+		set_error(ctx, "Saved mail %s not found.", mail_id);
 		return NULL;
 	}
 	fseek(f, 0, SEEK_END);

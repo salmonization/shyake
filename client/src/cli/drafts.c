@@ -270,7 +270,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 
 	char *raw = read_text_file(path);
 	if (!raw) {
-		drafts_set_error("There is no draft %s.", draft_id);
+		drafts_set_error("Draft %s not found.", draft_id);
 		return NULL;
 	}
 

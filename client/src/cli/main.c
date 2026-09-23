@@ -36,13 +36,13 @@ static char *build_version_url(const char *instance)
 	return url;
 }
 
-/* print "Error: <action> <reason>"; the reason may be empty */
+/* print "<action> <reason>"; the reason may be empty */
 static void print_failure(const char *action, const char *reason)
 {
 	if (reason && reason[0])
-		fprintf(stderr, "Error: %s %s\n", action, reason);
+		fprintf(stderr, "%s %s\n", action, reason);
 	else
-		fprintf(stderr, "Error: %s\n", action);
+		fprintf(stderr, "%s\n", action);
 }
 
 /* action failed in the library, e.g. "Send failed." */
@@ -57,15 +57,17 @@ static void print_drafts_error(const char *action)
 	print_failure(action, cli_drafts_last_error());
 }
 
-/* a send failed: the reason, plus how to act on a key change */
+/* a send failed; a changed key is fatal and says how to check it */
 static void print_send_error(shyake_ctx *ctx, shyake_err ret,
 			     const char *recipient)
 {
-	print_lib_error(ctx, "Send failed.");
-	if (ret == SHYAKE_ERR_KEY_MISMATCH)
-		fprintf(stderr,
-			"Run 'shyake fingerprint %s' to check the new key.\n",
-			recipient);
+	if (ret != SHYAKE_ERR_KEY_MISMATCH) {
+		print_lib_error(ctx, "Send failed.");
+		return;
+	}
+	fprintf(stderr,
+		"FATAL: %s\nRun 'shyake fingerprint %s' to check the new key.\n",
+		shyake_last_error(ctx), recipient);
 }
 
 /* keep the text of a send that failed, so it is not lost */
@@ -571,8 +573,9 @@ int main(int argc, char *argv[])
 		}
 
 		if (!username) {
-			fprintf(stderr, "Error: -u <username> is required "
-					"for register.\n");
+			fprintf(stderr, "A username is required.\n"
+					"Usage: shyake register -u <username> "
+					"-i <url>\n");
 			free_app_config(app_cfg);
 			free(config_dir);
 			return EXIT_FAILURE;
@@ -606,7 +609,7 @@ int main(int argc, char *argv[])
 		shyake_err ret = shyake_register(ctx, username);
 		if (ret == SHYAKE_OK) {
 			fprintf(stderr, "done.\n");
-			printf("Successfully registered.\n");
+			printf("Registered.\n");
 			update_config_user_and_instance(config_dir, username,
 							inst);
 		} else if (ret == SHYAKE_ERR_NO_INSTANCE) {
@@ -699,15 +702,14 @@ int main(int argc, char *argv[])
 
 			shyake_err ret = SHYAKE_ERR;
 			if (!recipient) {
-				fprintf(stderr,
-					"Error: Draft has no recipient. "
-					"Use -t <username>.\n");
+				fprintf(stderr, "The draft has no recipient. "
+						"Use -t <username>.\n");
 			} else if (!subject) {
-				fprintf(stderr, "Error: Draft has no subject. "
+				fprintf(stderr, "The draft has no subject. "
 						"Use -s <subject>.\n");
 			} else if (strlen(subject) > 128) {
 				fprintf(stderr,
-					"Error: Subject cannot exceed 128 bytes.\n");
+					"The subject cannot exceed 128 bytes.\n");
 			} else {
 				fprintf(stderr, "Sending draft %s to %s... ",
 					draft_id, recipient);
@@ -717,7 +719,7 @@ int main(int argc, char *argv[])
 						  strlen(d->body));
 				if (ret == SHYAKE_OK) {
 					fprintf(stderr, "done.\n");
-					printf("Your mail was sent.\n");
+					printf("Mail sent.\n");
 					if (cli_delete_draft(config_dir,
 							     draft_id) ==
 					    SHYAKE_OK)
@@ -737,8 +739,9 @@ int main(int argc, char *argv[])
 		}
 
 		if (!recipient) {
-			fprintf(stderr, "Error: -t <recipient> is required "
-					"for send.\n");
+			fprintf(stderr, "A recipient is required.\n"
+					"Usage: shyake send -t <username> "
+					"[-s <subject>] [<file>]\n");
 			free_app_config(app_cfg);
 			free(config_dir);
 			return EXIT_FAILURE;
@@ -749,7 +752,7 @@ int main(int argc, char *argv[])
 			in_file = fopen(argv[optind], "rb");
 			if (!in_file) {
 				fprintf(stderr,
-					"Error: Send failed. Cannot open %s.\n",
+					"Send failed. Cannot open %s.\n",
 					argv[optind]);
 				free_app_config(app_cfg);
 				free(config_dir);
@@ -763,8 +766,7 @@ int main(int argc, char *argv[])
 			fclose(in_file);
 
 		if (!body) {
-			fprintf(stderr,
-				"Error: Send failed. Cannot read the body.\n");
+			fprintf(stderr, "Send failed. Cannot read the body.\n");
 			free_app_config(app_cfg);
 			free(config_dir);
 			return EXIT_FAILURE;
@@ -792,7 +794,7 @@ int main(int argc, char *argv[])
 		}
 
 		if (!subject || strlen(subject) == 0) {
-			fprintf(stderr, "Error: Subject cannot be empty.\n");
+			fprintf(stderr, "The subject cannot be empty.\n");
 			if (extracted_subject)
 				free(extracted_subject);
 			free(body);
@@ -802,7 +804,7 @@ int main(int argc, char *argv[])
 		}
 		if (strlen(subject) > 128) {
 			fprintf(stderr,
-				"Error: Subject cannot exceed 128 bytes.\n");
+				"The subject cannot exceed 128 bytes.\n");
 			if (extracted_subject)
 				free(extracted_subject);
 			free(body);
@@ -819,7 +821,7 @@ int main(int argc, char *argv[])
 		}
 		if (is_blank) {
 			fprintf(stderr,
-				"Error: Subject cannot be entirely whitespace.\n");
+				"The subject cannot be only whitespace.\n");
 			if (extracted_subject)
 				free(extracted_subject);
 			free(body);
@@ -862,7 +864,7 @@ int main(int argc, char *argv[])
 			shyake_send(ctx, recipient, subject, body, body_len);
 		if (ret == SHYAKE_OK) {
 			fprintf(stderr, "done.\n");
-			printf("Your mail was sent.\n");
+			printf("Mail sent.\n");
 		} else {
 			fprintf(stderr, "\n");
 			print_send_error(ctx, ret, recipient);
@@ -943,7 +945,7 @@ int main(int argc, char *argv[])
 		int fd = mkstemp(tmp_path);
 		if (fd < 0) {
 			fprintf(stderr,
-				"Error: Edit failed. Cannot create a temporary "
+				"Edit failed. Cannot create a temporary "
 				"file.\n");
 			free(initial);
 			shyake_free_ctx(ctx);
@@ -1003,7 +1005,7 @@ int main(int argc, char *argv[])
 
 		char *to, *subject, *body;
 		if (parse_compose_buffer(buf, &to, &subject, &body) != 0) {
-			fprintf(stderr, "Error: Missing '---' separator. "
+			fprintf(stderr, "Missing '---' separator. "
 					"Draft aborted.\n");
 			free(buf);
 			shyake_free_ctx(ctx);
@@ -1031,8 +1033,9 @@ int main(int argc, char *argv[])
 		}
 
 		if (subject && strlen(subject) > 128)
-			fprintf(stderr, "Warning: Subject exceeds 128 bytes; "
-					"sending will fail.\n");
+			fprintf(stderr,
+				"WARNING: The subject exceeds 128 bytes. "
+				"Sending will fail.\n");
 
 		char *new_id = NULL;
 		shyake_err ret = cli_save_draft(ctx, config_dir, to, subject,
@@ -1389,8 +1392,8 @@ int main(int argc, char *argv[])
 		}
 
 		if (!mail_id) {
-			fprintf(stderr,
-				"Error: Mail ID is required for fetch.\n");
+			fprintf(stderr, "A mail ID is required.\n"
+					"Usage: shyake fetch <id>\n");
 			free_app_config(app_cfg);
 			free(config_dir);
 			return EXIT_FAILURE;
@@ -1610,7 +1613,7 @@ int main(int argc, char *argv[])
 		shyake_err ret = shyake_rotate(ctx);
 		if (ret == SHYAKE_OK) {
 			fprintf(stderr, "done.\n");
-			printf("Keys successfully rotated.\n");
+			printf("Keys rotated.\n");
 		} else {
 			fprintf(stderr, "\n");
 			print_lib_error(ctx, "Rotation failed.");
@@ -1664,7 +1667,7 @@ int main(int argc, char *argv[])
 		if (fp) {
 			if (!is_self && do_update) {
 				/* --update: only confirm, no art */
-				printf("Successfully updated known_hosts for %s.\n",
+				printf("Updated known_hosts for %s.\n",
 				       target_user);
 			} else {
 				cli_render_fingerprint(is_self ? user :
@@ -1687,13 +1690,13 @@ int main(int argc, char *argv[])
 		const char *inst = app_cfg->instance;
 		const char *user = app_cfg->username;
 
-		printf("WARNING: This will delete your local configurations "
-		       "and key pairs, also\n");
-		printf("destruct your account on the instance. All mail to and"
-		       " from you will be\n");
-		printf("cleared. Your username will be permanently locked and"
-		       " unregisterable on\n");
-		printf("this instance. Type your username to confirm: ");
+		printf("WARNING: This destroys your account on the instance "
+		       "and deletes your\n");
+		printf("local configuration and keys. All mail to and from you "
+		       "is deleted.\n");
+		printf("Your username stays locked on this instance and cannot "
+		       "be registered\n");
+		printf("again. Type your username to confirm: ");
 		fflush(stdout);
 
 		char buf[256];

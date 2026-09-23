@@ -404,7 +404,7 @@ void cli_render_fingerprint(const char *label, const shyake_fp_result *r,
 		if (r->match)
 			printf("\nStatus: MATCH\n");
 		else
-			printf("\nStatus: MISMATCH (Warning: Key has changed)\n\n"
+			printf("\nStatus: MISMATCH (WARNING: Key has changed)\n\n"
 			       "Please verify the new fingerprint in a secondary, "
 			       "trusted out-of-band channel\n"
 			       "before running the update command "

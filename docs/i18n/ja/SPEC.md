@@ -414,10 +414,10 @@ Shyake は公開鍵管理に **Trust On First Use（TOFU）** を採用してい
 - **初回接触**：クライアントは `GET /api/pubkey/<recipient>` を問い合わせ、KEM フィンガープリントを計算し、`~/.config/shyake/known_hosts` に黙って追記する。
 - **以降の接触**：送信のたびに、取得した鍵を `known_hosts` のエントリと比較する。不一致の場合、何も送信される前にローカルで `KEY_MISMATCH` により中止する。
 - **サーバー側のダブルチェック**：ペイロードに `recipient_kem_fingerprint` が埋め込まれており、保存済みの鍵と一致しなくなった場合、サーバーは独立に HTTP 409 で拒否する。
-- **鍵ローテーションの検出**：クライアントは送信を止め、次のように表示する：
+- **鍵ローテーションの検出**：クライアントは致命的エラーとして停止する：
 
 ```
-Error: Send failed. The public key of <username> has changed.
+FATAL: The public key of <username> has changed.
 Run 'shyake fingerprint <username>' to check the new key.
 ```
 
@@ -445,7 +445,7 @@ void shyake_set_new_passphrase(shyake_ctx *ctx, const char *pp);
 const char* shyake_last_error(shyake_ctx *ctx);
 ```
 
-内部構造体の定義は `src/lib/lib_internal.h` にあり、呼び出し側には公開されない。ライブラリは stdout/stderr へ一切出力しない。失敗時には失敗の理由を記録し（`shyake_last_error(ctx)` で取得できる）、セマンティックなエラーコードを返す。理由は 1 つ以上の完全な文であり、何が失敗したかではなく、なぜ失敗したかだけを述べる。例は `You are blocked by bob.` である。操作名はクライアントが前に付ける。CLI は `Error: <Action> failed. <reason>` の形で表示し、例は `Error: Send failed. You are blocked by bob.` である。呼び出しのたびに理由はクリアされ、同一コンテキストでの次の呼び出しまで有効である。エラーコードは型付き列挙型（`shyake_err`）として返され、後方互換のため `SHYAKE_OK = 0` である：
+内部構造体の定義は `src/lib/lib_internal.h` にあり、呼び出し側には公開されない。ライブラリは stdout/stderr へ一切出力しない。失敗時には失敗の理由を記録し（`shyake_last_error(ctx)` で取得できる）、セマンティックなエラーコードを返す。理由は 1 つ以上の完全な文であり、何が失敗したかではなく、なぜ失敗したかだけを述べる。例は `You are blocked by bob.` である。操作名はクライアントが前に付ける。CLI は `<Action> failed. <reason>` の形で表示し、例は `Send failed. You are blocked by bob.` である。唯一の例外は受信者の公開鍵の変更で、CLI は `FATAL: <reason>` と表示する（§7）。呼び出しのたびに理由はクリアされ、同一コンテキストでの次の呼び出しまで有効である。エラーコードは型付き列挙型（`shyake_err`）として返され、後方互換のため `SHYAKE_OK = 0` である：
 
 | コード | 意味 |
 |---|---|

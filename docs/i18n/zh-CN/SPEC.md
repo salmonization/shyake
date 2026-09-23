@@ -414,10 +414,10 @@ Shyake 使用**首次使用信任**（TOFU）进行公钥管理：
 - **首次联系**：客户端查询 `GET /api/pubkey/<recipient>`，计算 KEM 指纹，并静默地将其追加到 `~/.config/shyake/known_hosts`。
 - **后续联系**：每次发送前，将获取到的密钥与 `known_hosts` 中的条目比对；不匹配时在本地以 `KEY_MISMATCH` 中止，任何数据都不会被传输。
 - **服务端二次校验**：载荷中嵌入 `recipient_kem_fingerprint`；如果它与存储的密钥不再匹配，服务器独立地以 HTTP 409 拒绝。
-- **检测到密钥轮换**：客户端停止发送并打印：
+- **检测到密钥轮换**：客户端以致命错误停止：
 
 ```
-Error: Send failed. The public key of <username> has changed.
+FATAL: The public key of <username> has changed.
 Run 'shyake fingerprint <username>' to check the new key.
 ```
 
@@ -445,7 +445,7 @@ void shyake_set_new_passphrase(shyake_ctx *ctx, const char *pp);
 const char* shyake_last_error(shyake_ctx *ctx);
 ```
 
-内部结构体定义位于 `src/lib/lib_internal.h`，不对调用者暴露。库从不向 stdout/stderr 写入任何内容：失败时它会记录失败原因（通过 `shyake_last_error(ctx)` 获取），并返回语义化错误码。原因是一到多句完整的句子，只说明为什么失败，不说明哪个操作失败，例如 `You are blocked by bob.`。操作名由客户端加在前面：CLI 打印 `Error: <Action> failed. <reason>`，例如 `Error: Send failed. You are blocked by bob.`。每次调用都会先清空原因，原因在同一上下文的下一次调用前有效。错误码以类型化枚举（`shyake_err`）返回，其中 `SHYAKE_OK = 0` 以保持向后兼容：
+内部结构体定义位于 `src/lib/lib_internal.h`，不对调用者暴露。库从不向 stdout/stderr 写入任何内容：失败时它会记录失败原因（通过 `shyake_last_error(ctx)` 获取），并返回语义化错误码。原因是一到多句完整的句子，只说明为什么失败，不说明哪个操作失败，例如 `You are blocked by bob.`。操作名由客户端加在前面：CLI 打印 `<Action> failed. <reason>`，例如 `Send failed. You are blocked by bob.`。唯一的例外是收件人公钥变化，CLI 会打印 `FATAL: <reason>`（§7）。每次调用都会先清空原因，原因在同一上下文的下一次调用前有效。错误码以类型化枚举（`shyake_err`）返回，其中 `SHYAKE_OK = 0` 以保持向后兼容：
 
 | 错误码 | 含义 |
 |---|---|

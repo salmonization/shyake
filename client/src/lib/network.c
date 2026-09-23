@@ -164,7 +164,7 @@ char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient,
 		}
 		cJSON_Delete(json);
 	} else if (http_code == 404) {
-		set_error(ctx, "There is no user %s.", recipient);
+		set_error(ctx, "User %s not found.", recipient);
 		*err = SHYAKE_ERR_NOT_FOUND;
 	} else if (http_code == 502) {
 		const char *at = strchr(recipient, '@');
@@ -212,7 +212,7 @@ static const struct {
 	{ "Username already taken", "The username is taken." },
 	{ "Username is reserved", "The username is reserved." },
 	{ "Invalid username format", "The username is not valid." },
-	{ "Mail not found", "There is no such mail." },
+	{ "Mail not found", "Mail not found." },
 	{ "Payload too large", "The mail is too large." },
 	{ "Recipient instance unreachable",
 	  "Cannot reach the recipient's instance." },
@@ -223,7 +223,7 @@ static const struct {
 
 /*
  * Record why the server refused a request, as a sentence that
- * completes "Error: <action> failed.". Known texts get a plain reason;
+ * completes "<Action> failed.". Known texts get a plain reason;
  * others pass through, made printable.
  */
 void set_server_error(shyake_ctx *ctx, long code, const char *body)

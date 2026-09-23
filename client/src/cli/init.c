@@ -79,7 +79,7 @@ int cmd_init(const char *config_dir)
 		allocated = get_config_dir();
 		if (!allocated) {
 			fprintf(stderr,
-				"Error: Init failed. Cannot find the config directory.\n");
+				"Init failed. Cannot find the config directory.\n");
 			return 1;
 		}
 		config_dir = allocated;
@@ -88,8 +88,7 @@ int cmd_init(const char *config_dir)
 	struct stat st = { 0 };
 	if (stat(config_dir, &st) == -1) {
 		if (mkdir_p(config_dir) == -1) {
-			fprintf(stderr,
-				"Error: Init failed. Cannot create %s (%s).\n",
+			fprintf(stderr, "Init failed. Cannot create %s (%s).\n",
 				config_dir, strerror(errno));
 			free(allocated);
 			return 1;
@@ -106,8 +105,7 @@ int cmd_init(const char *config_dir)
 			fclose(f);
 			printf("Created default config at %s\n", config_file);
 		} else {
-			fprintf(stderr,
-				"Error: Init failed. Cannot create %s.\n",
+			fprintf(stderr, "Init failed. Cannot create %s.\n",
 				config_file);
 		}
 	} else {
@@ -122,7 +120,7 @@ int cmd_init(const char *config_dir)
 	shyake_ctx *ctx = shyake_init_ctx(&cfg);
 	if (!ctx) {
 		fprintf(stderr,
-			"Error: Init failed. Cannot create the library context.\n");
+			"Init failed. Cannot create the library context.\n");
 		free(allocated);
 		return 1;
 	}
@@ -170,9 +168,9 @@ int cmd_init(const char *config_dir)
 	}
 
 	if (shyake_generate_keys(ctx) == 0) {
-		printf("Keys generated successfully.\n");
+		printf("Keys generated.\n");
 	} else {
-		fprintf(stderr, "Error: Init failed. Cannot generate keys.\n");
+		fprintf(stderr, "Init failed. Cannot generate keys.\n");
 	}
 
 	shyake_free_ctx(ctx);
