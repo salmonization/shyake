@@ -78,7 +78,15 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB；不要超过 786432（768 KiB）
 
 重新运行脚本不会覆盖这些设置，它只会补上仍未填写的资源 id。
 
-如果你的实例是在 `wrangler.toml` 改为生成式之前部署的，`./deploy.sh --update` 会先把你的配置另存为 `wrangler.toml.bak`，拉取代码后再恢复回来。
+如果你的实例是在 `wrangler.toml` 改为生成式之前部署的，`./deploy.sh --update` 会先把你的配置另存为 `wrangler.toml.bak`，切换到新版本后再恢复回来。
+
+**GitHub token（建议配置）。** `shyake update` 会向你的实例查询最新版本，实例再去调用 GitHub API。不带 token 时，GitHub 对每个 IP 每小时只允许 60 次调用，而 Cloudflare Workers 共用出口 IP，额度很容易被其他 Worker 用光。给 Worker 配一个自己的 token：
+
+```sh
+npx wrangler secret put GITHUB_TOKEN
+```
+
+一个不带任何权限的 fine-grained token 就够了。即使 GitHub 仍然失败，实例也会返回上一次成功获取的结果。
 
 ### 自托管
 

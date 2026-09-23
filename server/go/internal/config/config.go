@@ -32,6 +32,10 @@ type Config struct {
 	RateBurst           int
 	FederationInsecure  bool
 	LogFormat           string // text | json
+	// GitHubToken authenticates the release lookup behind
+	// GET /api/client/version. Optional: without it, GitHub limits
+	// the lookups per server IP address.
+	GitHubToken string
 }
 
 // DefaultReserved matches the Worker's default RESERVED_USERNAMES.
@@ -71,6 +75,7 @@ func Load(getenv func(string) string) (Config, error) {
 		FederationEnabled:   boolean("FEDERATION_ENABLED", true),
 		FederationInsecure:  boolean("FEDERATION_INSECURE", false),
 		LogFormat:           get("LOG_FORMAT", "text"),
+		GitHubToken:         get("GITHUB_TOKEN", ""),
 	}
 
 	if c.InstanceDomain == "" {

@@ -336,7 +336,7 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 }
 ```
 
-任一渠道都可能缺失。只含服务端构建（`shyake-server-*`）的版本会被跳过。结果缓存一小时：Worker 缓存在 KV 中，Go 服务端缓存在内存中。参见 §12。
+任一渠道都可能缺失。只含服务端构建（`shyake-server-*`）的版本会被跳过。结果缓存一小时：Worker 缓存在 KV 中，Go 服务端缓存在内存中。GitHub 请求失败时，服务端返回上一次成功的结果；只有从未成功过时才返回 `502`。参见 §12。
 
 #### 5.2 认证端点
 
@@ -564,6 +564,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `RESERVED_USERNAMES` | `admin,system,...` | 保留用户名（CSV） |
 | `FEDERATION_ENABLED` | `true` | 接受并中继联邦网络邮件 |
 | `MAX_MAIL_SIZE` | `196608` | `POST /api/mail` 最大载荷字节数 |
+| `GITHUB_TOKEN` | — | 可选的 secret（`wrangler secret put`）：查询版本时使用的 GitHub token（§5.1） |
 
 必需的绑定：
 
@@ -591,6 +592,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `SHYAKE_RATE_LIMIT` | `5` | 每个客户端地址每秒请求数 |
 | `SHYAKE_RATE_BURST` | `30` | 每个客户端地址的突发额度 |
 | `SHYAKE_LOG_FORMAT` | `text` | `text` 或 `json` |
+| `SHYAKE_GITHUB_TOKEN` | — | 可选：查询版本时使用的 GitHub token（§5.1） |
 | `SHYAKE_FEDERATION_INSECURE` | `false` | 仅用于测试：允许通过明文 HTTP 与私有地址进行联邦 |
 
 Go 服务端在启动时自动执行数据库迁移。

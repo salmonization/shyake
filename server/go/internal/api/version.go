@@ -39,6 +39,7 @@ const (
 type versionCache struct {
 	client *http.Client
 	url    string
+	token  string // optional GitHub token
 	group  singleflight.Group
 
 	mu   sync.Mutex
@@ -46,8 +47,9 @@ type versionCache struct {
 	at   time.Time
 }
 
-func newVersionCache() *versionCache {
-	return &versionCache{client: &http.Client{Timeout: 15 * time.Second}, url: releasesURL}
+func newVersionCache(token string) *versionCache {
+	return &versionCache{client: &http.Client{Timeout: 15 * time.Second}, url: releasesURL,
+		token: token}
 }
 
 func (s *Server) clientVersion(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +99,9 @@ func (v *versionCache) fetch(ctx context.Context) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", "shyake-server/1.0")
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if v.token != "" {
+		req.Header.Set("Authorization", "Bearer "+v.token)
+	}
 	resp, err := v.client.Do(req)
 	if err != nil {
 		return nil, err

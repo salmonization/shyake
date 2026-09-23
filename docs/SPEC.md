@@ -454,7 +454,9 @@ SHA-256 digest of each asset of that release:
 
 Either channel may be absent. A release with only server builds
 (`shyake-server-*`) is skipped. The server caches the result for one
-hour: the Worker in KV, the Go server in memory. See §12.
+hour: the Worker in KV, the Go server in memory. When GitHub fails,
+the server serves the last good answer. It answers `502` only if it
+has none yet. See §12.
 
 #### 5.2 Authenticated Endpoints
 
@@ -777,6 +779,7 @@ Use `enc` and `dec` for debugging and testing.
 | `RESERVED_USERNAMES` | `admin,system,...` | Reserved names (CSV) |
 | `FEDERATION_ENABLED` | `true` | Accept and relay federated mail |
 | `MAX_MAIL_SIZE` | `196608` | Max payload bytes, `POST /api/mail` |
+| `GITHUB_TOKEN` | — | Optional secret (`wrangler secret put`): GitHub token for the release lookup (§5.1) |
 
 Required bindings:
 
@@ -806,6 +809,7 @@ holds the operator's own domain and resource ids.
 | `SHYAKE_RATE_LIMIT` | `5` | Requests per second per client address |
 | `SHYAKE_RATE_BURST` | `30` | Burst allowance per client address |
 | `SHYAKE_LOG_FORMAT` | `text` | `text` or `json` |
+| `SHYAKE_GITHUB_TOKEN` | — | Optional GitHub token for the release lookup (§5.1) |
 | `SHYAKE_FEDERATION_INSECURE` | `false` | Tests only: federate over plain HTTP and to private addresses |
 
 The Go server applies its database migrations when it starts.

@@ -2,7 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // A server-only release is not offered to clients.
@@ -30,5 +34,36 @@ func TestServerVersion(t *testing.T) {
 	if c != 200 || out["implementation"] != "go" || out["protocol"] != float64(2) ||
 		out["version"] != "dev" {
 		t.Errorf("%d %v", c, out)
+	}
+}
+
+// The token is sent when set, and a GitHub failure after one good
+// answer serves that answer instead of an error.
+func TestClientVersionTokenAndStale(t *testing.T) {
+	status := http.StatusOK
+	var auth string
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			io.WriteString(w, `[{"tag_name":"v0.3.0","assets":[{"name":"shyake-linux-x86_64.tar.gz","digest":"sha256:bb"}]}]`)
+		}
+	}))
+	defer gh.Close()
+
+	e := newEnv(t)
+	e.s.version = newVersionCache("tok")
+	e.s.version.url = gh.URL
+	if c, out := e.do("GET", "/api/client/version", nil, nil); c != 200 || out["release"] != "v0.3.0" {
+		t.Fatalf("first answer: %d %v", c, out)
+	}
+	if auth != "Bearer tok" {
+		t.Errorf("Authorization = %q", auth)
+	}
+
+	status = http.StatusForbidden
+	e.s.version.at = time.Time{} // expire the cached answer
+	if c, out := e.do("GET", "/api/client/version", nil, nil); c != 200 || out["release"] != "v0.3.0" {
+		t.Errorf("GitHub refused: %d %v, want the last good answer", c, out)
 	}
 }

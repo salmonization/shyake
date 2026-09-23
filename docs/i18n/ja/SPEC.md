@@ -336,7 +336,7 @@ compose のエディタが扱う平文一時ファイルは `mkstemp`（モー�
 }
 ```
 
-どちらのチャネルも欠けることがある。サーバーのビルド（`shyake-server-*`）しか含まないリリースは飛ばす。結果は 1 時間キャッシュされる。Worker は KV に、Go サーバーはメモリに保持する。§12 を参照。
+どちらのチャネルも欠けることがある。サーバーのビルド（`shyake-server-*`）しか含まないリリースは飛ばす。結果は 1 時間キャッシュされる。Worker は KV に、Go サーバーはメモリに保持する。GitHub が失敗したときは、最後に取得できた結果を返す。一度も取得できていない場合に限り `502` を返す。§12 を参照。
 
 #### 5.2 認証エンドポイント
 
@@ -564,6 +564,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `RESERVED_USERNAMES` | `admin,system,...` | 予約済みの名前（CSV） |
 | `FEDERATION_ENABLED` | `true` | フェデレーションメールの受信とリレー |
 | `MAX_MAIL_SIZE` | `196608` | `POST /api/mail` の最大ペイロードバイト数 |
+| `GITHUB_TOKEN` | — | 任意の secret（`wrangler secret put`）：リリース照会に使う GitHub トークン（§5.1） |
 
 必須のバインディング：
 
@@ -591,6 +592,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `SHYAKE_RATE_LIMIT` | `5` | クライアントアドレスごとの毎秒リクエスト数 |
 | `SHYAKE_RATE_BURST` | `30` | クライアントアドレスごとのバースト許容量 |
 | `SHYAKE_LOG_FORMAT` | `text` | `text` または `json` |
+| `SHYAKE_GITHUB_TOKEN` | — | 任意：リリース照会に使う GitHub トークン（§5.1） |
 | `SHYAKE_FEDERATION_INSECURE` | `false` | テスト専用：平文 HTTP とプライベートアドレスでのフェデレーションを許可する |
 
 Go サーバーは起動時にデータベースのマイグレーションを適用する。

@@ -48,7 +48,7 @@ func New(cfg config.Config, db store.Store, keys *federation.Keys,
 		seen:    ttlset.New(10*time.Minute, 250_000),
 		spent:   ttlset.New(72*time.Hour, 250_000),
 		limiter: newLimiter(rate.Limit(cfg.RateLimit), cfg.RateBurst),
-		version: newVersionCache(),
+		version: newVersionCache(cfg.GitHubToken),
 		log:     log,
 		now:     time.Now,
 	}

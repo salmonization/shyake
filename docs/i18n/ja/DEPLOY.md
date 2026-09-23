@@ -78,7 +78,15 @@ MAX_MAIL_SIZE        = 196608 # 192 KiB。786432（768 KiB）を超えないこ�
 
 スクリプトを再実行してもこれらの設定は上書きされません。まだ設定されていないリソース id を補うだけです。
 
-`wrangler.toml` が生成式になる前にデプロイしたインスタンスの場合、`./deploy.sh --update` が設定を `wrangler.toml.bak` として退避し、取得後に復元します。
+`wrangler.toml` が生成式になる前にデプロイしたインスタンスの場合、`./deploy.sh --update` が設定を `wrangler.toml.bak` として退避し、新しいバージョンに切り替えた後に復元します。
+
+**GitHub トークン（推奨）。** `shyake update` はインスタンスに最新のリリースを問い合わせ、インスタンスは GitHub API を呼び出します。トークンがない場合、GitHub が許可する呼び出しは IP アドレスごとに 1 時間 60 回までで、Cloudflare Workers は IP アドレスを共有しているため、他の Worker にその上限を使い切られることがあります。Worker 専用のトークンを設定してください：
+
+```sh
+npx wrangler secret put GITHUB_TOKEN
+```
+
+権限を一切付けない fine-grained トークンで十分です。それでも GitHub が失敗した場合、インスタンスは最後に取得できた結果を返します。
 
 ### セルフホスティング
 

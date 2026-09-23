@@ -105,7 +105,20 @@ fills in resource ids that are still unset.
 
 If you deployed an instance before `wrangler.toml` became generated,
 `./deploy.sh --update` moves your settings aside as
-`wrangler.toml.bak` and restores them after pulling.
+`wrangler.toml.bak` and restores them after the checkout.
+
+**GitHub token (recommended).** `shyake update` asks your instance
+for the newest release, and the instance asks the GitHub API. Without
+a token, GitHub allows 60 calls an hour per IP address. Cloudflare
+Workers share IP addresses, so other Workers can use up that limit.
+Give the Worker a token of its own:
+
+```sh
+npx wrangler secret put GITHUB_TOKEN
+```
+
+A fine-grained token with no permissions is enough. If GitHub still
+fails, the instance serves the last answer it got.
 
 ### Self-hosting
 

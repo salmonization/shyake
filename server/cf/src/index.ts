@@ -34,6 +34,9 @@ export interface Env {
   RESERVED_USERNAMES: string;
   FEDERATION_ENABLED: string;
   MAX_MAIL_SIZE: string;
+  /* optional: authenticates the GitHub release lookup, which is
+   * otherwise limited per IP address, and Worker IPs are shared */
+  GITHUB_TOKEN?: string;
 }
 
 /* release tag from server/VERSION, set by deploy.sh through
@@ -65,27 +68,54 @@ app.get('/api/version', c =>
   ),
 );
 
-/* proxy GitHub Releases API with 1-hour KV cache */
+/* proxy GitHub Releases API: a fresh answer is cached for one hour in
+ * KV; the last good answer is kept without expiry and served when
+ * GitHub fails, as the Go server does */
 app.get('/api/client/version', async c => {
   const CACHE_KEY = 'client_version_v3';
+  const LAST_KEY = 'client_version_last';
   const CACHE_TTL = 3600;
 
-  try {
-    if (c.env.VERSION_CACHE) {
-      const cached = await c.env.VERSION_CACHE.get(CACHE_KEY);
-      if (cached) {
-        return c.json(JSON.parse(cached), 200);
-      }
+  const kvGet = async (key: string): Promise<string | null> => {
+    try {
+      return c.env.VERSION_CACHE ? await c.env.VERSION_CACHE.get(key) : null;
+    } catch (_) {
+      return null;
     }
-  } catch (_) {}
+  };
+  const lastOrFail = async (why: string) => {
+    const last = await kvGet(LAST_KEY);
+    console.error(
+      `client version: GitHub ${why}; ${last ? 'serving stale' : 'no stale answer'}`,
+    );
+    return last
+      ? c.json(JSON.parse(last), 200)
+      : c.json({error: 'Failed to fetch releases'}, 502);
+  };
+
+  const cached = await kvGet(CACHE_KEY);
+  if (cached) {
+    return c.json(JSON.parse(cached), 200);
+  }
 
   try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'shyake-server/1.0',
+      Accept: 'application/vnd.github+json',
+    };
+    if (c.env.GITHUB_TOKEN) {
+      headers.Authorization = `Bearer ${c.env.GITHUB_TOKEN}`;
+    }
     const resp = await fetch(
       'https://api.github.com/repos/salmonization/shyake' + '/releases',
-      {headers: {'User-Agent': 'shyake-server/1.0'}},
+      {headers},
     );
     if (!resp.ok) {
-      return c.json({error: 'Failed to fetch releases'}, 502);
+      const left = resp.headers.get('x-ratelimit-remaining') ?? '?';
+      const text = (await resp.text()).slice(0, 160);
+      return await lastOrFail(
+        `answered HTTP ${resp.status}, ${left} calls left: ${text}`,
+      );
     }
     const releases: any[] = await resp.json();
 
@@ -139,15 +169,17 @@ app.get('/api/client/version', async c => {
 
     try {
       if (c.env.VERSION_CACHE) {
-        await c.env.VERSION_CACHE.put(CACHE_KEY, JSON.stringify(payload), {
+        const body = JSON.stringify(payload);
+        await c.env.VERSION_CACHE.put(CACHE_KEY, body, {
           expirationTtl: CACHE_TTL,
         });
+        await c.env.VERSION_CACHE.put(LAST_KEY, body);
       }
     } catch (_) {}
 
     return c.json(payload, 200);
   } catch (e: any) {
-    return c.json({error: e.message}, 500);
+    return await lastOrFail(`failed: ${e.message}`);
   }
 });
 
