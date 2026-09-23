@@ -47,7 +47,7 @@ cd shyake/server/cf
 | オプション | 効果 |
 |---|---|
 | `--domain <d>` | インスタンスのドメインを対話なしで指定する |
-| `--update` | 最新のコードを取得してから再デプロイする |
+| `--update` | 最新の正式リリースに切り替えてから再デプロイする |
 | `--no-kv` | KV バージョンキャッシュを省略する |
 | `--config-only` | `wrangler.toml` を生成して終了する |
 | `--local` | ローカルの開発用サーバーを準備する（[DEV.md](DEV.md) を参照） |
@@ -59,7 +59,7 @@ cd shyake/server/cf
 ./deploy.sh --update
 ```
 
-最新のコードを取得し、新しいマイグレーションを適用して再デプロイします。既存のリソースは再利用され、設定もそのまま保たれます。また、`GET /api/version` が返すバージョンを `server/VERSION` から設定します。
+すべてのリリースタグを取得して最新の正式リリース（`vX.Y.Z`）に切り替え、プレリリースや未リリースのコードは飛ばします。その後、新しいマイグレーションを適用して再デプロイします。切り替え後に Git が "detached HEAD" と表示しますが、これは想定どおりです。既存のリソースは再利用され、設定もそのまま保たれます。また、`GET /api/version` が返すバージョンを `server/VERSION` から設定します。
 
 **v0.3.0 へのアップグレード。** v0.3.0 から、クライアントは block、unblock、rotate のリクエストボディに署名します（プロトコルレベル 2、[SPEC.md §3.3](SPEC.md)）。v0.3.0 のクライアントは古いサーバーでこの 3 つの操作を行えず、古いクライアントも v0.3.0 のサーバーでは行えません。先にサーバーをアップグレードし、その後クライアントを `shyake update` で更新してください。Go サーバーも同様です。
 
@@ -176,11 +176,12 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### アップグレード
 
-新しいリリースのアーカイブ、または新しいビルドから新しいバイナリをインストールします：
+新しいリリースのアーカイブ、または新しいビルドから新しいバイナリをインストールします。ビルドする場合は、先に最新の正式リリース（`vX.Y.Z`、プレリリースは除く）に切り替えます：
 
 ```sh
 cd shyake
-git pull
+git fetch --tags
+git checkout "$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
 cd server/go
 CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server

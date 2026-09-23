@@ -242,6 +242,10 @@ The release workflow builds the client when `client/Makefile` has the
 tag, and the Go server when `server/VERSION` has it. If neither has
 the tag, the workflow fails.
 
+Worker instances follow the tags, not `main`: `deploy.sh --update`
+checks out the newest `vX.Y.Z` tag. A merge to `main` reaches them
+only when you tag it. A pre-release tag (`vX.Y.Z-rc.1`) never does.
+
 A server change that affects clients must reach the servers first.
 Bump the protocol level (`protocol.Level` in the Go server,
 `PROTOCOL_LEVEL` in the Worker) when servers start to accept a new

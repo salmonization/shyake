@@ -5,7 +5,7 @@
 # connection, no dashboard clicking.
 #
 #   ./deploy.sh                    first deploy, or redeploy
-#   ./deploy.sh --update           pull the latest code, then redeploy
+#   ./deploy.sh --update           switch to the newest release, then redeploy
 #   ./deploy.sh --domain d.example non-interactive domain
 #   ./deploy.sh --local            configure for `wrangler dev --local`
 #
@@ -24,6 +24,8 @@ KV_BINDING=VERSION_CACHE
 
 DOMAIN=""
 DO_UPDATE=0
+# the arguments minus --update, for the re-run after an update
+RERUN_ARGS=()
 DO_LOCAL=0
 WANT_KV=1
 CONFIG_ONLY=0
@@ -59,10 +61,12 @@ while [ $# -gt 0 ]; do
 	--domain)
 		[ $# -ge 2 ] || die "--domain needs a value"
 		DOMAIN=$2
+		RERUN_ARGS+=("$1" "$2")
 		shift 2
 		;;
 	--domain=*)
 		DOMAIN=${1#--domain=}
+		RERUN_ARGS+=("$1")
 		shift
 		;;
 	--update)
@@ -71,14 +75,17 @@ while [ $# -gt 0 ]; do
 		;;
 	--local)
 		DO_LOCAL=1
+		RERUN_ARGS+=("$1")
 		shift
 		;;
 	--no-kv)
 		WANT_KV=0
+		RERUN_ARGS+=("$1")
 		shift
 		;;
 	--config-only)
 		CONFIG_ONLY=1
+		RERUN_ARGS+=("$1")
 		shift
 		;;
 	-h | --help) usage 0 ;;
@@ -117,7 +124,7 @@ json_pick() {
 }
 
 # ---------------------------------------------------------------- #
-# update: pull first, so the rest of the run uses the new code
+# update: check out the newest release, then run its own deploy.sh
 
 if [ "$DO_UPDATE" -eq 1 ]; then
 	say "Updating source"
@@ -134,13 +141,31 @@ if [ "$DO_UPDATE" -eq 1 ]; then
 			"your settings were saved to wrangler.toml.bak"
 	fi
 
-	git -C "$REPO_ROOT" pull --ff-only ||
-		die "git pull failed; resolve it and re-run"
+	# releases are vX.Y.Z tags; a pre-release (vX.Y.Z-...) is skipped,
+	# and so is anything merged but not yet released
+	git -C "$REPO_ROOT" fetch --quiet --tags --force ||
+		die "git fetch failed; check your network and re-run"
+	TARGET=$(git -C "$REPO_ROOT" tag -l --sort=-v:refname 'v*' |
+		grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+	[ -n "$TARGET" ] || die "no release tag found"
+
+	CURRENT=$(git -C "$REPO_ROOT" describe --tags --exact-match 2>/dev/null || true)
+	if [ "$CURRENT" = "$TARGET" ]; then
+		ok "already on $TARGET"
+	else
+		git -C "$REPO_ROOT" -c advice.detachedHead=false \
+			checkout --quiet "$TARGET" ||
+			die "cannot check out $TARGET; commit or stash your local changes and re-run"
+		ok "checked out $TARGET"
+	fi
 
 	if [ -f "$CONFIG.bak" ] && [ ! -f "$CONFIG" ]; then
 		mv "$CONFIG.bak" "$CONFIG"
 		ok "restored your wrangler.toml"
 	fi
+
+	# the release may change this script: finish with its version
+	exec bash "$SCRIPT_DIR/deploy.sh" ${RERUN_ARGS[@]+"${RERUN_ARGS[@]}"}
 fi
 
 say "Installing dependencies"

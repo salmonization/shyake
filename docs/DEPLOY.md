@@ -58,7 +58,7 @@ Options:
 | Option | Effect |
 |---|---|
 | `--domain <d>` | set the instance domain non-interactively |
-| `--update` | pull the latest code first, then redeploy |
+| `--update` | switch to the newest release first, then redeploy |
 | `--no-kv` | skip the KV version cache |
 | `--config-only` | write `wrangler.toml` and stop |
 | `--local` | set up a local development server ([DEV.md](DEV.md)) |
@@ -70,9 +70,11 @@ cd shyake/server/cf
 ./deploy.sh --update
 ```
 
-This pulls the latest code, reapplies any new migrations, and
-redeploys. The script reuses existing resources and keeps your
-settings. It also sets the version that `GET /api/version` reports,
+This fetches the release tags and checks out the newest release
+(`vX.Y.Z`). It skips pre-releases and code that is not released yet.
+Then it reapplies any new migrations and redeploys. Git reports a
+"detached HEAD" after the checkout. This is expected. The script
+reuses existing resources and keeps your settings. It also sets the version that `GET /api/version` reports,
 from `server/VERSION`.
 
 **Upgrading to v0.3.0.** From v0.3.0, clients sign the body of
@@ -237,11 +239,14 @@ set `SHYAKE_TRUSTED_PROXIES` to the bridge network, as above.
 
 #### Upgrading
 
-Install the new binary, from a newer release archive or a new build:
+Install the new binary, from a newer release archive or a new build.
+To build, check out the newest release (`vX.Y.Z`, pre-releases
+skipped) first:
 
 ```sh
 cd shyake
-git pull
+git fetch --tags
+git checkout "$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
 cd server/go
 CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server

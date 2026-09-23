@@ -216,4 +216,6 @@ cc -std=c11 -o /tmp/gen gen_vectors.c \
 
 `client/Makefile` 的版本等于标签时，发布流程构建客户端；`server/VERSION` 等于标签时，构建 Go 服务端。两者都不等于标签时，流程直接失败。
 
+Worker 实例跟随的是标签而不是 `main`：`deploy.sh --update` 会切换到最新的 `vX.Y.Z` 标签。合进 `main` 的改动要等打了标签才会到达这些实例；预发布标签（`vX.Y.Z-rc.1`）则永远不会。
+
 影响客户端的服务端改动必须先部署到服务端。服务端开始接受新的请求格式时，要提升协议级别（Go 服务端的 `protocol.Level`、Worker 的 `PROTOCOL_LEVEL`）。客户端通过 `GET /api/version` 读取它。

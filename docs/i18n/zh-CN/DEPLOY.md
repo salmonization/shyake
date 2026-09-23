@@ -47,7 +47,7 @@ cd shyake/server/cf
 | 选项 | 作用 |
 |---|---|
 | `--domain <d>` | 非交互式地指定实例域名 |
-| `--update` | 先拉取最新代码，再重新部署 |
+| `--update` | 先切换到最新的正式版，再重新部署 |
 | `--no-kv` | 跳过 KV 版本缓存 |
 | `--config-only` | 只生成 `wrangler.toml` 然后退出 |
 | `--local` | 配置本地开发服务器（见 [DEV.md](DEV.md)） |
@@ -59,7 +59,7 @@ cd shyake/server/cf
 ./deploy.sh --update
 ```
 
-它会拉取最新代码、应用新增的迁移并重新部署。已有资源会被复用，你的配置也会保留。它还会根据 `server/VERSION` 设置 `GET /api/version` 报告的版本号。
+它会拉取所有发布 tag，切换到最新的正式版（`vX.Y.Z`），跳过预发布版本和尚未发布的代码，然后应用新增的迁移并重新部署。切换后 Git 会提示处于 "detached HEAD" 状态，这是正常的。已有资源会被复用，你的配置也会保留。它还会根据 `server/VERSION` 设置 `GET /api/version` 报告的版本号。
 
 **升级到 v0.3.0。** 从 v0.3.0 起，客户端会对 block、unblock 和 rotate 请求的请求体签名（协议级别 2，见 [SPEC.md §3.3](SPEC.md)）。v0.3.0 客户端无法在旧服务端上执行这三个操作，旧客户端也无法在 v0.3.0 服务端上执行。请先升级服务端，客户端再用 `shyake update` 更新。Go 服务端同样适用。
 
@@ -176,11 +176,12 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### 升级
 
-从更新的发布版压缩包或重新构建中安装新的二进制文件：
+从更新的发布版压缩包或重新构建中安装新的二进制文件。自行构建时，先切换到最新的正式版（`vX.Y.Z`，跳过预发布版本）：
 
 ```sh
 cd shyake
-git pull
+git fetch --tags
+git checkout "$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
 cd server/go
 CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server
