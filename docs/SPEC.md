@@ -3,8 +3,8 @@
 Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 <table>
-<tr><td>Version</td><td>0.2</td></tr>
-<tr><td>Last updated</td><td>2026-09-22</td></tr>
+<tr><td>Version</td><td>0.3</td></tr>
+<tr><td>Last updated</td><td>2026-09-23</td></tr>
 </table>
 
 ---
@@ -159,6 +159,21 @@ and timestamp. For example:
 GET:/api/mail?type=inbox:salmon:1749513600
 ```
 
+A request with a body (`POST /api/rotate`, `POST /api/block`,
+`DELETE /api/block`) adds a colon and the lowercase hex SHA-256 of
+the exact body bytes:
+
+```
+POST:/api/block:salmon:1749513600:<sha256 hex of the body>
+```
+
+This binds the body to the signature. Without it, a party that can
+read the request in transit (for example a TLS-terminating proxy)
+can keep the signature and replace the body: new keys for rotate, or
+another target for block. Servers at protocol level 2 (§5.1) accept
+only this form on these three routes. They answer `401` to the older
+form without the digest.
+
 **Body-based** (`POST /api/register` and `POST /api/mail`): the
 signature and PoW token travel as JSON fields of the request body.
 The signed message is the compact JSON serialization of the payload
@@ -206,8 +221,8 @@ requests whose timestamp deviates from server time by more than
 The Go server also remembers each signature it accepts. It rejects a
 request that repeats one with HTTP 403. On `POST /api/mail`, a
 repeated signature is not an error: the server answers `201` with the
-id of the stored mail and does not store it again. A client retry or
-a relay retry is therefore safe.
+id of the stored mail and does not store it again. A client retry is
+therefore safe.
 
 #### 3.5 Proof of Work
 
@@ -332,7 +347,6 @@ are common to both. The Go server adds:
 
 - a `sig_hash` column on `mail`: the SHA-256 of `signature`, unique.
   It makes a resubmitted mail recognizable (§3.4).
-- a `relay_outbox` table: the queue of outbound relays (§6.2).
 
 #### `users`
 
@@ -405,6 +419,7 @@ response bodies. The base URL is the instance domain.
 |---|---|---|
 | `GET` | `/health` | Liveness check, queries the database |
 | `GET` | `/api/pubkey/:username` | Return `kem_pubkey`, `sig_pubkey` |
+| `GET` | `/api/version` | Server release and protocol level |
 | `GET` | `/api/client/version` | Latest client release tags |
 
 `/api/pubkey/:username` supports the `user@domain` syntax. If the
@@ -412,9 +427,21 @@ domain differs from the local instance, the server proxies the
 request to the remote instance. This requires federation to be
 enabled.
 
+`/api/version` identifies the server:
+
+```json
+{"version": "v0.3.0", "implementation": "go", "protocol": 2}
+```
+
+`version` is the release in `server/VERSION` (§12.1), or `dev` for a
+build without one. `implementation` is `cf` or `go`. `protocol` is
+the protocol level. Level 2 signs request bodies (§3.3). A server
+without this endpoint is level 1. Clients use the level, not the
+version, to decide what an instance accepts.
+
 `/api/client/version` proxies the GitHub Releases API. It returns
-the newest tag of each channel and the SHA-256 digest of each asset
-of that release:
+the newest tag of each channel that has client builds, and the
+SHA-256 digest of each asset of that release:
 
 ```json
 {
@@ -425,7 +452,8 @@ of that release:
 }
 ```
 
-Either channel may be absent. The server caches the result for one
+Either channel may be absent. A release with only server builds
+(`shyake-server-*`) is skipped. The server caches the result for one
 hour: the Worker in KV, the Go server in memory. See §12.
 
 #### 5.2 Authenticated Endpoints
@@ -462,9 +490,12 @@ The Go server can also answer:
 - `403` on `POST /api/mail` when neither party belongs to the
   instance. The server does not relay between two other instances.
 - `503` on `POST /api/mail` when the sender's instance does not
-  answer the key lookup. A relaying instance retries after this.
+  answer the key lookup.
 - `502` on `POST /api/mail` when the recipient's instance does not
-  answer. The Worker answers `404` in this case.
+  answer the key lookup. The Worker answers `404` in this case.
+
+Both servers answer `502`, or the remote instance's own refusal, when
+a relay fails (§6.2).
 
 #### 5.3 Size Limit
 
@@ -494,37 +525,35 @@ When `recipient` belongs to a remote instance:
 
 1. The client posts the signed, encrypted payload to the **sender's
    own instance** (`POST /api/mail`).
-2. The sender's instance stores the mail in its database.
-3. The sender's instance forwards the original raw payload to
-   `https://<recipientDomain>/api/mail`.
+2. The sender's instance verifies it, then forwards the original raw
+   payload to `https://<recipientDomain>/api/mail`. It waits for the
+   answer, for at most 15 s.
+3. If the remote instance accepts the mail (`2xx`), the sender's
+   instance stores its own copy for the sent box and answers `201`.
 
-The two servers forward in different ways:
+If the relay fails, the sender's instance stores nothing:
 
-- The **Worker** makes one attempt, in the same request lifecycle
-  (`executionCtx.waitUntil`). It does not check the answer. If the
-  attempt fails, the mail does not reach the recipient.
-- The **Go server** writes the mail and a relay entry in one
-  transaction, then delivers the entry from a background queue. It
-  retries after a network error or a `408`, `429`, or `5xx` answer,
-  with backoff (5 s, 15 s, 30 s, then every 60 s). Any other `4xx`
-  answer is final. A queued relay survives a server restart.
+- The remote instance refuses the mail (a `4xx` answer other than
+  `408` and `429`): the sender's instance answers with the same
+  status and the remote's `error` text. An example is `403` with
+  `Recipient has blocked this sender`.
+- Any other failure (no connection, a timeout, `408`, `429`, `5xx`):
+  the sender's instance answers `502` with `Recipient instance
+  unreachable`.
 
-Retries stop when the sender's signed timestamp is 280 s old. The
-recipient's instance rejects the payload 300 s after that timestamp
-(§3.4), and the sender's instance cannot sign it again. If the
-remote instance stays down longer, the mail does not reach it.
-
-In both cases the client gets `201` as soon as the sender's instance
-stores the mail. The client does not learn whether the relay
-succeeds.
+The servers do not queue or retry relays. A queue cannot help for
+long: the recipient's instance rejects the payload 300 s after the
+sender's signed timestamp (§3.4), and only the client can sign again.
+On a failed send, the client keeps the mail as a local draft (§3.8)
+and the user sends it again later. This signs a new payload.
 
 The recipient's instance independently verifies the sender's
 signature by fetching the sender's public key from the sender's
 instance (`GET /api/pubkey/<sender>`).
 
-Both the sender's and recipient's databases store the mail. This
-makes sure the sender's sent box stays available, regardless of
-remote instance availability.
+Both the sender's and recipient's databases store the mail. The
+sender's sent box therefore stays available when the remote instance
+is not.
 
 #### 6.3 Federation Toggle
 
@@ -802,3 +831,27 @@ it is newer than stable.
 3. Extract the archive and replace the running binary in place. The
    client resolves the binary path via `/proc/self/exe`,
    `_NSGetExecutablePath`, or `which shyake`.
+
+#### 12.1 Versions
+
+The repository has one version line: the release tags. Each component
+records the release in which it last changed:
+
+- the client: `VERSION` in `client/Makefile`.
+- the servers: `server/VERSION`. The Worker and the Go server share
+  it, because they must answer every request the same way.
+
+A release builds only the components whose version equals its tag.
+A release that changes only the client does not rebuild the server,
+and the server keeps its older version. A release that changes the
+server sets `server/VERSION` to the new tag.
+
+Release assets:
+
+| Asset | Contents |
+|---|---|
+| `shyake-<os>-<arch>.tar.gz` | The client |
+| `shyake-server-linux-<arch>.tar.gz` | The Go server (`amd64`, `arm64`), its systemd unit, and an env example |
+
+A release that contains only server assets is never offered to
+clients (§5.1).

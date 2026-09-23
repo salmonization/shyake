@@ -72,7 +72,15 @@ cd shyake/server/cf
 
 This pulls the latest code, reapplies any new migrations, and
 redeploys. The script reuses existing resources and keeps your
-settings.
+settings. It also sets the version that `GET /api/version` reports,
+from `server/VERSION`.
+
+**Upgrading to v0.3.0.** From v0.3.0, clients sign the body of
+block, unblock, and rotate requests (protocol level 2, [SPEC.md
+§3.3](SPEC.md)). A v0.3.0 client cannot block, unblock, or rotate on
+an older server. An older client cannot do these on a v0.3.0 server.
+Upgrade the server first. Clients then update with `shyake update`.
+This applies to the Go server too.
 
 #### Changing settings
 
@@ -113,19 +121,43 @@ Prerequisites:
 
 Steps:
 
-1. **Build the binary**:
+1. **Get the binary**. Download a release build, or build it from
+source.
+
+To download: a release that changes the server has the assets
+`shyake-server-linux-amd64.tar.gz` and
+`shyake-server-linux-arm64.tar.gz` on the [releases
+page](https://github.com/salmonization/shyake/releases). A release
+that changes only the client does not have them. Use the newest
+release that has them.
+
+```sh
+tar -xzf shyake-server-linux-amd64.tar.gz
+cd shyake-server-linux-amd64
+```
+
+The archive contains the binary, `shyake-server.service`, and
+`shyake.env.example`.
+
+To build from source:
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
 cd shyake/server/go
-CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
 ```
 
-The result is a static binary. You can copy it to any Linux machine
+The `-ldflags` option sets the version that `shyake-server -version`
+and `GET /api/version` report. Without it, the version is `dev`.
+
+Both ways give a static binary. You can copy it to any Linux machine
 with the same CPU architecture.
 
 2. **Install it with systemd**. Create a system user for the
-service, then install the files from `server/go/deploy/`:
+service, then install the files. In a source checkout they are in
+`server/go/deploy/`. From a release archive, remove `deploy/` from
+the commands below.
 
 ```sh
 sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
@@ -190,7 +222,8 @@ one rate limit.
 #### Running it with Docker
 
 ```sh
-docker build -t shyake-server server/go
+docker build --build-arg VERSION=$(cat server/VERSION) \
+    -t shyake-server server/go
 docker run -d --name shyake --restart unless-stopped \
     -p 127.0.0.1:8787:8787 -v shyake:/data \
     -e SHYAKE_INSTANCE_DOMAIN=your.domain.example \
@@ -204,18 +237,22 @@ set `SHYAKE_TRUSTED_PROXIES` to the bridge network, as above.
 
 #### Upgrading
 
+Install the new binary, from a newer release archive or a new build:
+
 ```sh
 cd shyake
 git pull
 cd server/go
-CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
 sudo install -m 755 shyake-server /usr/local/bin/
 sudo systemctl restart shyake-server
+curl http://127.0.0.1:8787/api/version
 ```
 
-The server applies new database migrations when it starts. On
-restart it finishes the relays already in progress, and it resumes
-the queued ones when it starts again.
+The server applies new database migrations when it starts. A send
+that is in progress during the restart fails, and the client keeps
+it as a draft. See also **Upgrading to v0.3.0** above.
 
 #### Data location and backups
 

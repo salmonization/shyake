@@ -62,8 +62,9 @@ cd shyake/server/cf
 ./deploy.sh --update
 ```
 
-它会拉取最新代码、应用新增的迁移并重新部署。已有资源会被复用，你的配置
-也会保留。
+它会拉取最新代码、应用新增的迁移并重新部署。已有资源会被复用，你的配置也会保留。它还会根据 `server/VERSION` 设置 `GET /api/version` 报告的版本号。
+
+**升级到 v0.3.0。** 从 v0.3.0 起，客户端会对 block、unblock 和 rotate 请求的请求体签名（协议级别 2，见 [SPEC.md §3.3](SPEC.md)）。v0.3.0 客户端无法在旧服务端上执行这三个操作，旧客户端也无法在 v0.3.0 服务端上执行。请先升级服务端，客户端再用 `shyake update` 更新。Go 服务端同样适用。
 
 #### 修改配置
 
@@ -98,17 +99,31 @@ Go 服务端运行在你自己的机器上。它是单个静态二进制文件 `
 
 步骤：
 
-1. **构建二进制文件**：
+1. **获取二进制文件**。可以下载发布版，也可以从源码构建。
+
+下载：改动了服务端的发布会在 [Releases 页面](https://github.com/salmonization/shyake/releases)附带 `shyake-server-linux-amd64.tar.gz` 和 `shyake-server-linux-arm64.tar.gz`；只改动客户端的发布没有这两个文件。请使用带有它们的最新发布。
+
+```sh
+tar -xzf shyake-server-linux-amd64.tar.gz
+cd shyake-server-linux-amd64
+```
+
+压缩包里有二进制文件、`shyake-server.service` 和 `shyake.env.example`。
+
+从源码构建：
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
 cd shyake/server/go
-CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
 ```
 
-得到的是静态二进制文件，可以复制到任何 CPU 架构相同的 Linux 机器上运行。
+`-ldflags` 设置 `shyake-server -version` 和 `GET /api/version` 报告的版本号；不加时版本号为 `dev`。
 
-2. **用 systemd 安装**。先为服务创建一个系统用户，再安装 `server/go/deploy/` 中的文件：
+两种方式得到的都是静态二进制文件，可以复制到任何 CPU 架构相同的 Linux 机器上运行。
+
+2. **用 systemd 安装**。先为服务创建一个系统用户，再安装文件。源码中这些文件位于 `server/go/deploy/`；如果用的是发布版压缩包，把下面命令里的 `deploy/` 去掉即可：
 
 ```sh
 sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
@@ -155,7 +170,8 @@ your.domain.example {
 #### 用 Docker 运行
 
 ```sh
-docker build -t shyake-server server/go
+docker build --build-arg VERSION=$(cat server/VERSION) \
+    -t shyake-server server/go
 docker run -d --name shyake --restart unless-stopped \
     -p 127.0.0.1:8787:8787 -v shyake:/data \
     -e SHYAKE_INSTANCE_DOMAIN=your.domain.example \
@@ -167,16 +183,20 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### 升级
 
+从更新的发布版压缩包或重新构建中安装新的二进制文件：
+
 ```sh
 cd shyake
 git pull
 cd server/go
-CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
 sudo install -m 755 shyake-server /usr/local/bin/
 sudo systemctl restart shyake-server
+curl http://127.0.0.1:8787/api/version
 ```
 
-服务端启动时会自动执行新的数据库迁移。重启时，正在进行的中继会先完成；排队中的中继会在再次启动后继续。
+服务端启动时会自动执行新的数据库迁移。重启期间正在进行的发送会失败，客户端会把它保存为草稿。另请参阅上文的**升级到 v0.3.0**。
 
 #### 数据位置与备份
 

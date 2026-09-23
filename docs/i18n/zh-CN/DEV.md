@@ -133,7 +133,7 @@ bash tests/e2e_test.sh
 
 `SHYAKE_TEST_INSTANCE` 可以让测试套件指向其他 URL。
 
-联邦网络测试会自行启动两个 Go 服务端，并在它们之间运行客户端。它覆盖双向中继、等待远程实例恢复后才完成的中继，以及对中继邮件的屏蔽：
+联邦网络测试会自行启动两个 Go 服务端，并在它们之间运行客户端。它覆盖双向中继、发往已停机实例的中继（客户端保存草稿，实例恢复后再发送），以及对中继邮件的屏蔽：
 
 ```sh
 cd client && make && cd ..
@@ -183,7 +183,7 @@ SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 SHYAKE_DATABASE=/tmp/dev.db \
 |---|---|
 | `internal/protocol` | 地址、PoW、签名、被签名的消息。不做 I/O。 |
 | `internal/api` | HTTP 处理器、认证、速率限制 |
-| `internal/federation` | 出站客户端、远程公钥缓存、中继队列 |
+| `internal/federation` | 出站客户端、远程公钥缓存、中继 |
 | `internal/store` | 存储接口及其后端测试套件 |
 | `internal/store/sqlite` | SQLite 后端及其迁移 |
 | `internal/config` | `SHYAKE_*` 环境变量设置 |
@@ -199,6 +199,22 @@ cc -std=c11 -o /tmp/gen gen_vectors.c \
 /tmp/gen > liboqs_vectors.json
 ```
 
-**新的存储后端**需要实现 `store.Store`，并通过 `storetest.Run`——SQLite 后端运行的是同一套测试。PostgreSQL 就按这种方式规划。SQL 只应出现在后端的包内：接口只描述用户、邮件、屏蔽和中继。
+**新的存储后端**需要实现 `store.Store`，并通过 `storetest.Run`——SQLite 后端运行的是同一套测试。PostgreSQL 就按这种方式规划。SQL 只应出现在后端的包内：接口只描述用户、邮件和屏蔽。
 
 **在一台机器上测试联邦网络。** 实例之间通过 HTTPS 通信，服务端也会拒绝私有地址。本地测试时，`SHYAKE_FEDERATION_INSECURE=true` 允许使用明文 HTTP 和回环地址。切勿在公开实例上设置它。
+
+## 发布
+
+整个仓库只有一条版本线，即发布标签（[SPEC.md §12.1](SPEC.md)）。每个组件记录自己最后一次改动时所在的版本：
+
+- 客户端：`client/Makefile` 中的 `VERSION`。
+- 两个服务端：`server/VERSION`。
+
+发布步骤：
+
+1. 把每个改动过的组件的版本号设为新标签，没改动的组件保持原版本号。
+2. 用这个标签在 GitHub 上发布 release。
+
+`client/Makefile` 的版本等于标签时，发布流程构建客户端；`server/VERSION` 等于标签时，构建 Go 服务端。两者都不等于标签时，流程直接失败。
+
+影响客户端的服务端改动必须先部署到服务端。服务端开始接受新的请求格式时，要提升协议级别（Go 服务端的 `protocol.Level`、Worker 的 `PROTOCOL_LEVEL`）。客户端通过 `GET /api/version` 读取它。

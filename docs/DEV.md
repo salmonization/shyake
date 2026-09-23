@@ -135,9 +135,9 @@ bash tests/e2e_test.sh
 `SHYAKE_TEST_INSTANCE` points the suite at another URL.
 
 The federation test starts two Go servers itself and runs the client
-between them. It covers relays in both directions, a relay that
-waits for a remote instance to come back, and a block on relayed
-mail:
+between them. It covers relays in both directions, a relay to an
+instance that is down (the client keeps a draft and sends it later),
+and a block on relayed mail:
 
 ```sh
 cd client && make && cd ..
@@ -193,7 +193,7 @@ Package layout, from the wire inward:
 |---|---|
 | `internal/protocol` | Addresses, PoW, signatures, signed messages. No I/O. |
 | `internal/api` | HTTP handlers, authentication, rate limits |
-| `internal/federation` | Outbound client, remote key cache, relay queue |
+| `internal/federation` | Outbound client, remote key cache, relays |
 | `internal/store` | Storage interface and its backend test suite |
 | `internal/store/sqlite` | The SQLite backend and its migrations |
 | `internal/config` | `SHYAKE_*` environment settings |
@@ -216,9 +216,33 @@ cc -std=c11 -o /tmp/gen gen_vectors.c \
 **A new storage backend** implements `store.Store` and passes
 `storetest.Run`, the same suite the SQLite backend runs. PostgreSQL
 is planned this way. Keep SQL inside the backend package: the
-interface speaks users, mail, blocks, and relays.
+interface speaks users, mail, and blocks.
 
 **Federation on one machine.** Instances contact each other over
 HTTPS, and the server refuses private addresses. For local tests,
 `SHYAKE_FEDERATION_INSECURE=true` allows plain HTTP and loopback
 addresses. Never set it on a public instance.
+
+## Releasing
+
+The repository has one version line: the release tags ([SPEC.md
+§12.1](SPEC.md)). Each component records the release in which it
+last changed:
+
+- the client: `VERSION` in `client/Makefile`.
+- both servers: `server/VERSION`.
+
+To release:
+
+1. Set the version of each changed component to the new tag. Leave
+   an unchanged component at its old version.
+2. Publish a GitHub release with that tag.
+
+The release workflow builds the client when `client/Makefile` has the
+tag, and the Go server when `server/VERSION` has it. If neither has
+the tag, the workflow fails.
+
+A server change that affects clients must reach the servers first.
+Bump the protocol level (`protocol.Level` in the Go server,
+`PROTOCOL_LEVEL` in the Worker) when servers start to accept a new
+request format. Clients read it from `GET /api/version`.

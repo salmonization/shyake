@@ -7,8 +7,8 @@
 Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 <table>
-<tr><td>版本</td><td>0.2</td></tr>
-<tr><td>最后更新</td><td>2026-09-22</td></tr>
+<tr><td>版本</td><td>0.3</td></tr>
+<tr><td>最后更新</td><td>2026-09-23</td></tr>
 </table>
 
 ---
@@ -141,6 +141,14 @@ X-Shyake-Pow:       <Hashcash token>
 GET:/api/mail?type=inbox:salmon:1749513600
 ```
 
+带请求体的请求（`POST /api/rotate`、`POST /api/block`、`DELETE /api/block`）在末尾再加一个冒号和请求体原始字节的 SHA-256（小写十六进制）：
+
+```
+POST:/api/block:salmon:1749513600:<请求体的 sha256 十六进制>
+```
+
+这样请求体就和签名绑定在一起。否则，能看到传输中请求内容的一方（例如终结 TLS 的代理）可以保留签名、替换请求体：给 rotate 换上自己的公钥，或给 block 换一个目标。协议级别为 2 的服务器（§5.1）在这三个接口上只接受这种格式，对不带摘要的旧格式返回 `401`。
+
 **基于请求体**（`POST /api/register` 和 `POST /api/mail`）：签名和 PoW 令牌作为请求体的 JSON 字段传输。被签名的消息是以下载荷子集的紧凑 JSON 序列化（字段顺序与客户端产生的一致）：
 
 `POST /api/register`：
@@ -177,7 +185,7 @@ GET:/api/mail?type=inbox:salmon:1749513600
 
 每条被签名的消息中都包含时间戳。服务器拒绝时间戳与服务器时间偏差超过 **300 秒**（5 分钟）的请求。
 
-Go 服务端还会记住每个已接受的签名，重复使用同一签名的请求会被以 HTTP 403 拒绝。`POST /api/mail` 是例外：重复的签名不算错误，服务器返回 `201` 和已存储邮件的 id，不会重复存储。因此客户端重试和中继重试都是安全的。
+Go 服务端还会记住每个已接受的签名，重复使用同一签名的请求会被以 HTTP 403 拒绝。`POST /api/mail` 是例外：重复的签名不算错误，服务器返回 `201` 和已存储邮件的 id，不会重复存储。因此客户端重试是安全的。
 
 #### 3.5 工作量证明（PoW）
 
@@ -262,7 +270,6 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 两个服务端都使用 SQLite：Worker 使用 Cloudflare D1（`server/cf/migrations/`），Go 服务端使用本地文件（`server/go/internal/store/sqlite/migrations/`）。下面的表为两者共有。Go 服务端另外增加了：
 
 - `mail` 表的 `sig_hash` 列：`signature` 的 SHA-256，唯一。用于识别重复提交的邮件（§3.4）。
-- `relay_outbox` 表：出站中继的队列（§6.2）。
 
 #### `users`
 
@@ -320,11 +327,20 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 |---|---|---|
 | `GET` | `/health` | 存活检查；查询数据库 |
 | `GET` | `/api/pubkey/:username` | 返回 `kem_pubkey`、`sig_pubkey` |
+| `GET` | `/api/version` | 服务端版本和协议级别 |
 | `GET` | `/api/client/version` | 最新客户端发布标签 |
 
 `/api/pubkey/:username` 支持 `user@domain` 语法；如果域名与本地实例不同，服务器会将请求代理到远程实例（需要启用联邦网络）。
 
-`/api/client/version` 代理 GitHub Releases API，返回每个渠道的最新标签，以及该版本每个发布产物的 SHA-256 摘要：
+`/api/version` 说明服务端的身份：
+
+```json
+{"version": "v0.3.0", "implementation": "go", "protocol": 2}
+```
+
+`version` 是 `server/VERSION` 中的版本（§12.1），没有注入版本的构建为 `dev`。`implementation` 为 `cf` 或 `go`。`protocol` 是协议级别：级别 2 会对请求体签名（§3.3）；没有这个端点的服务器视为级别 1。客户端依据协议级别而不是版本号来判断实例接受哪些请求格式。
+
+`/api/client/version` 代理 GitHub Releases API，返回每个渠道中带有客户端构建的最新标签，以及该版本每个发布产物的 SHA-256 摘要：
 
 ```json
 {
@@ -335,7 +351,7 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 }
 ```
 
-任一渠道都可能缺失。结果缓存一小时：Worker 缓存在 KV 中，Go 服务端缓存在内存中。参见 §12。
+任一渠道都可能缺失。只含服务端构建（`shyake-server-*`）的版本会被跳过。结果缓存一小时：Worker 缓存在 KV 中，Go 服务端缓存在内存中。参见 §12。
 
 #### 5.2 认证端点
 
@@ -360,9 +376,11 @@ Go 服务端还可能返回：
 
 - `429`：任意端点，客户端地址超过速率限制时。
 - `403`：请求重复使用了签名或 PoW 令牌时（§3.4、§3.5）。
-- `403`：`POST /api/mail` 的收发双方都不属于本实例时。服务器不在两个第三方实例之间中继。
-- `503`：`POST /api/mail` 查询发件人公钥时发件人实例无响应。中继方实例收到后会重试。
-- `502`：`POST /api/mail` 时收件人实例无响应。Worker 在这种情况下返回 `404`。
+- `403`：`POST /api/mail` 的收发双方都不属于本实例时。服务器不在另外两个实例之间中继。
+- `503`：`POST /api/mail` 查询发件人公钥时发件人实例无响应。
+- `502`：`POST /api/mail` 查询收件人公钥时收件人实例无响应。Worker 在这种情况下返回 `404`。
+
+中继失败时，两个服务端都返回 `502` 或远程实例自己的拒绝结果（§6.2）。
 
 #### 5.3 大小限制
 
@@ -384,21 +402,19 @@ Go 服务端还可能返回：
 当 `recipient` 属于远程实例时：
 
 1. 客户端将签名并加密的载荷提交到**发件人自己的实例**（`POST /api/mail`）。
-2. 发件人的实例将邮件存储在其数据库中。
-3. 发件人的实例将原始载荷转发到 `https://<recipientDomain>/api/mail`。
+2. 发件人的实例完成验证后，将原始载荷转发到 `https://<recipientDomain>/api/mail`，并等待响应，最多 15 秒。
+3. 远程实例接受邮件（`2xx`）后，发件人的实例才为已发送邮件箱存储自己的副本，并返回 `201`。
 
-两个服务端的转发方式不同：
+中继失败时，发件人的实例不存储任何内容：
 
-- **Worker** 在同一请求生命周期内（通过 `executionCtx.waitUntil`）只尝试一次，且不检查响应。如果这次尝试失败，邮件就不会到达收件人。
-- **Go 服务端**在同一事务中写入邮件和一条中继记录，再由后台队列投递。遇到网络错误或 `408`、`429`、`5xx` 响应时按退避间隔重试（5 秒、15 秒、30 秒，之后每 60 秒）；其他 `4xx` 响应视为最终结果。排队中的中继在服务器重启后仍会继续。
+- 远程实例拒收（`408`、`429` 以外的 `4xx`）：发件人的实例原样返回该状态码和远程实例的 `error` 文本，例如 `403` 和 `Recipient has blocked this sender`。
+- 其他失败（无法连接、超时、`408`、`429`、`5xx`）：发件人的实例返回 `502` 和 `Recipient instance unreachable`。
 
-当发件人签名的时间戳已过去 280 秒时，重试停止。收件人实例会在该时间戳 300 秒后拒绝这份载荷（§3.4），而发件人实例无法重新签名。如果远程实例宕机的时间比这更长，邮件就无法送达。
-
-两种情况下，只要发件人的实例存储了邮件，客户端就会收到 `201`，客户端无法得知中继是否成功。
+服务端不排队，也不重试中继。排队也撑不了多久：收件人实例会在发件人签名时间戳 300 秒后拒绝这份载荷（§3.4），而只有客户端能重新签名。发送失败时，客户端把邮件保存为本地草稿（§3.8），用户稍后重发即可，重发时会签一份新的载荷。
 
 收件人的实例独立验证发件人的签名，方法是从发件人的实例获取其公钥（`GET /api/pubkey/<sender>`）。
 
-发件人和收件人的数据库都存储该邮件。这保证了发件人一侧的原子性（已发送邮件箱的可用性），无论远程实例是否可用。
+发件人和收件人的数据库都存储该邮件，因此即使远程实例不可用，发件人的已发送邮件箱也照常可用。
 
 #### 6.3 联邦网络开关
 
@@ -607,17 +623,30 @@ Go 服务端在启动时自动执行数据库迁移。
 
 ### 12. 发布渠道与自更新
 
-发布通过 GitHub 分两个渠道进行：**stable**（正式发布）和
-**preview**（预发布）。服务端端点 `GET /api/client/version` 代理 GitHub Releases API，选取每个渠道的最新标签，并将结果缓存一小时（§5.1）。
+发布通过 GitHub 分两个渠道进行：**stable**（正式发布）和 **preview**（预发布）。服务端端点 `GET /api/client/version` 代理 GitHub Releases API，选取每个渠道的最新标签，并将结果缓存一小时（§5.1）。
 
-`shyake update` 从**用户自己的实例**（profile 配置中的
-`INSTANCE`）获取该端点，因此每个实例都用自己的缓存中继 GitHub API；`shyake.eee.coffee` 只是内置的回退目标，仅在未配置实例时使用。标签使用 semver 排序比较（`vX.Y.Z`；同一基础版本下正式发布高于预发布）。仅当 preview
-渠道比 stable 更新时才会提供。
+`shyake update` 从**用户自己的实例**（profile 配置中的 `INSTANCE`）获取该端点，因此每个实例都用自己的缓存中继 GitHub API；`shyake.eee.coffee` 只是内置的回退目标，仅在未配置实例时使用。标签使用 semver 排序比较（`vX.Y.Z`；同一基础版本下正式发布高于预发布）。仅当 preview 渠道比 stable 更新时才会提供。
 
 `shyake update stable|preview` 执行自更新：
 
 1. 从 GitHub Releases 下载与操作系统/架构匹配的发布产物（`shyake-<os>-<arch>.tar.gz`）。
 2. 将压缩包的 SHA-256 与 `/api/client/version` 响应中该产物的摘要比较（§5.1）。不匹配，或响应中没有该产物的摘要时，中止更新。
-3. 解压压缩包并原地替换正在运行的二进制文件（通过
-   `/proc/self/exe`、`_NSGetExecutablePath` 或 `which shyake`
-   解析路径）。
+3. 解压压缩包并原地替换正在运行的二进制文件（通过 `/proc/self/exe`、`_NSGetExecutablePath` 或 `which shyake` 解析路径）。
+
+#### 12.1 版本号
+
+整个仓库只有一条版本线，即发布标签。每个组件记录自己最后一次改动时所在的版本：
+
+- 客户端：`client/Makefile` 中的 `VERSION`。
+- 服务端：`server/VERSION`。Worker 和 Go 服务端共用这个版本号，因为两者必须对每个请求给出同样的回答。
+
+一次发布只构建版本号等于该标签的组件。只改动客户端的发布不会重新构建服务端，服务端保持原来的版本号；改动了服务端的发布会把 `server/VERSION` 设为新标签。
+
+发布产物：
+
+| 产物 | 内容 |
+|---|---|
+| `shyake-<os>-<arch>.tar.gz` | 客户端 |
+| `shyake-server-linux-<arch>.tar.gz` | Go 服务端（`amd64`、`arm64`）、systemd unit 和配置样例 |
+
+只含服务端产物的发布不会推送给客户端（§5.1）。

@@ -60,7 +60,11 @@ make test       # build and run tests/test_crypto.c
 make clean      # remove obj/, bin/, lib/
 ```
 
-The release version is set by `VERSION` in `client/Makefile`.
+The client's release version is `VERSION` in `client/Makefile`; the
+servers' is `server/VERSION`. Set a component's version to the new
+tag only when that component changed: the release workflow builds a
+component only when its version equals the tag (docs/DEV.md,
+Releasing).
 
 ### Server
 
@@ -176,6 +180,11 @@ Architecture notes:
   (`client/src/lib/network.c`), with `docs/SPEC.md`, and between the
   two servers: the Worker and the Go server must answer the same
   request the same way.
+- Header-signed requests with a body sign its SHA-256 too (protocol
+  level 2, SPEC.md §3.3). A change that makes servers accept a new
+  request format bumps the protocol level in both servers.
+- Servers relay mail synchronously and never queue it; the client
+  keeps a draft when a send fails.
 - In the Go server, `internal/protocol` holds the wire rules and does
   no I/O. The signed-message rebuild there must stay byte-exact with
   the client's cJSON; `testdata/liboqs_vectors.json` checks it.

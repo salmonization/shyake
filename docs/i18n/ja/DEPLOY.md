@@ -59,7 +59,9 @@ cd shyake/server/cf
 ./deploy.sh --update
 ```
 
-最新のコードを取得し、新しいマイグレーションを適用して再デプロイします。既存のリソースは再利用され、設定もそのまま保たれます。
+最新のコードを取得し、新しいマイグレーションを適用して再デプロイします。既存のリソースは再利用され、設定もそのまま保たれます。また、`GET /api/version` が返すバージョンを `server/VERSION` から設定します。
+
+**v0.3.0 へのアップグレード。** v0.3.0 から、クライアントは block、unblock、rotate のリクエストボディに署名します（プロトコルレベル 2、[SPEC.md §3.3](SPEC.md)）。v0.3.0 のクライアントは古いサーバーでこの 3 つの操作を行えず、古いクライアントも v0.3.0 のサーバーでは行えません。先にサーバーをアップグレードし、その後クライアントを `shyake update` で更新してください。Go サーバーも同様です。
 
 #### 設定の変更
 
@@ -90,17 +92,31 @@ Go サーバーは自分のマシン上で動作します。単一の静的バ�
 
 手順：
 
-1. **バイナリをビルド**します：
+1. **バイナリを入手**します。リリース版をダウンロードするか、ソースからビルドします。
+
+ダウンロードする場合：サーバーを変更したリリースには、[リリースページ](https://github.com/salmonization/shyake/releases)に `shyake-server-linux-amd64.tar.gz` と `shyake-server-linux-arm64.tar.gz` があります。クライアントだけを変更したリリースにはありません。これらを含む最新のリリースを使ってください。
+
+```sh
+tar -xzf shyake-server-linux-amd64.tar.gz
+cd shyake-server-linux-amd64
+```
+
+アーカイブにはバイナリ、`shyake-server.service`、`shyake.env.example` が入っています。
+
+ソースからビルドする場合：
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
 cd shyake/server/go
-CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
 ```
 
-できあがるのは静的バイナリで、CPU アーキテクチャが同じ任意の Linux マシンにコピーして使えます。
+`-ldflags` は `shyake-server -version` と `GET /api/version` が返すバージョンを設定します。付けない場合、バージョンは `dev` になります。
 
-2. **systemd でインストール**します。サービス用のシステムユーザーを作成してから、`server/go/deploy/` のファイルをインストールします：
+どちらの方法でも静的バイナリが得られ、CPU アーキテクチャが同じ任意の Linux マシンにコピーして使えます。
+
+2. **systemd でインストール**します。サービス用のシステムユーザーを作成してから、ファイルをインストールします。ソースではこれらのファイルは `server/go/deploy/` にあります。リリースのアーカイブを使う場合は、以下のコマンドから `deploy/` を取り除いてください：
 
 ```sh
 sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
@@ -147,7 +163,8 @@ certbot で証明書を管理する nginx でも同様に動作します。`http
 #### Docker で動かす
 
 ```sh
-docker build -t shyake-server server/go
+docker build --build-arg VERSION=$(cat server/VERSION) \
+    -t shyake-server server/go
 docker run -d --name shyake --restart unless-stopped \
     -p 127.0.0.1:8787:8787 -v shyake:/data \
     -e SHYAKE_INSTANCE_DOMAIN=your.domain.example \
@@ -159,16 +176,20 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### アップグレード
 
+新しいリリースのアーカイブ、または新しいビルドから新しいバイナリをインストールします：
+
 ```sh
 cd shyake
 git pull
 cd server/go
-CGO_ENABLED=0 go build -trimpath -o shyake-server ./cmd/shyake-server
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
 sudo install -m 755 shyake-server /usr/local/bin/
 sudo systemctl restart shyake-server
+curl http://127.0.0.1:8787/api/version
 ```
 
-サーバーは起動時に新しいデータベースマイグレーションを適用します。再起動時には処理中のリレーを完了させ、キューに残ったリレーは次の起動後に再開します。
+サーバーは起動時に新しいデータベースマイグレーションを適用します。再起動中に処理中だった送信は失敗し、クライアントはそれを下書きとして残します。上の **v0.3.0 へのアップグレード** も参照してください。
 
 #### データの場所とバックアップ
 
