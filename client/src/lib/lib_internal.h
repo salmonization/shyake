@@ -21,9 +21,11 @@ struct shyake_ctx {
 	char last_error[512]; /* detail of the last failure, "" if none */
 };
 
-/* libshyake.c (error reporting) */
+/* libshyake.c (error reporting): the reason for a failure, as one or
+ * more sentences that complete "Error: <action> failed." */
 void set_error(shyake_ctx *ctx, const char *fmt, ...)
 	__attribute__((format(printf, 2, 3)));
+void clear_error(shyake_ctx *ctx);
 
 /* libcurl response buffer */
 struct curl_response {
@@ -43,13 +45,13 @@ struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
 					      const u8 *body, usize body_len);
 struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
 				       const char *username);
-char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient);
+char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient,
+			     shyake_err *err);
 int http_error_is(const char *body, const char *text);
-void set_http_error(shyake_ctx *ctx, const char *what, long code,
-		    const char *body);
+void set_server_error(shyake_ctx *ctx, long code, const char *body);
+void set_network_error(shyake_ctx *ctx, CURLcode res);
 int instance_protocol(shyake_ctx *ctx);
-void set_signed_body_error(shyake_ctx *ctx, const char *what, long code,
-			   const char *body);
+void set_signed_body_error(shyake_ctx *ctx, long code, const char *body);
 
 /* libshyake.c (file I/O & base64) */
 int save_file(const char *path, const u8 *data, usize len);

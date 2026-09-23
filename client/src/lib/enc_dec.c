@@ -44,11 +44,12 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 {
 	if (!ctx || !in_path)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 
 	/* load plaintext */
 	FILE *in = fopen(in_path, "rb");
 	if (!in) {
-		set_error(ctx, "Cannot open input file: %s", in_path);
+		set_error(ctx, "Cannot open %s.", in_path);
 		return SHYAKE_ERR;
 	}
 	fseek(in, 0, SEEK_END);
@@ -72,12 +73,11 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 	usize kem_pk_len = 0;
 
 	if (recipient) {
-		char *pk_b64 = fetch_recipient_pubkey(ctx, recipient);
+		shyake_err lookup;
+		char *pk_b64 = fetch_recipient_pubkey(ctx, recipient, &lookup);
 		if (!pk_b64) {
-			set_error(ctx, "Failed to fetch pubkey for %s.",
-				  recipient);
 			free(pt);
-			return SHYAKE_ERR_NETWORK;
+			return lookup;
 		}
 		kem_pk = base64_decode(pk_b64, &kem_pk_len);
 		free(pk_b64);
@@ -168,7 +168,7 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 
 	FILE *out = fopen(dest, "wb");
 	if (!out) {
-		set_error(ctx, "Cannot open output file: %s", dest);
+		set_error(ctx, "Cannot write %s.", dest);
 		free(ct);
 		free(kem_ct);
 		free(ss);
@@ -205,10 +205,11 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 {
 	if (!ctx || !in_path)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 
 	FILE *in = fopen(in_path, "rb");
 	if (!in) {
-		set_error(ctx, "Cannot open input file: %s", in_path);
+		set_error(ctx, "Cannot open %s.", in_path);
 		return SHYAKE_ERR;
 	}
 
@@ -266,7 +267,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 		free(ct);
 		free(ksk);
 		OQS_KEM_free(kem);
-		set_error(ctx, "Decryption failed: wrong key.");
+		set_error(ctx, "The file is not encrypted to your key.");
 		return SHYAKE_ERR_CRYPTO;
 	}
 
@@ -284,7 +285,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 				      pt) != 0) {
 		free(pt);
 		free(ct);
-		set_error(ctx, "Decryption failed: authentication error.");
+		set_error(ctx, "The file is damaged or was changed.");
 		return SHYAKE_ERR_CRYPTO;
 	}
 	free(ct);
@@ -293,7 +294,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 	if (out_path) {
 		out = fopen(out_path, "wb");
 		if (!out) {
-			set_error(ctx, "Cannot open output file: %s", out_path);
+			set_error(ctx, "Cannot write %s.", out_path);
 			free(pt);
 			return SHYAKE_ERR;
 		}
@@ -311,6 +312,6 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 bad_format:
 	fclose(in);
 	free(kem_ct);
-	set_error(ctx, "Invalid or corrupted .enc file.");
+	set_error(ctx, "The file is not a valid .enc file.");
 	return SHYAKE_ERR;
 }

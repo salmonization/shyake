@@ -146,7 +146,7 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 		return SHYAKE_ERR;
 
 	if (ensure_drafts_dir(config_dir) != 0) {
-		drafts_set_error("Failed to create drafts directory.");
+		drafts_set_error("Cannot create the drafts directory.");
 		return SHYAKE_ERR;
 	}
 
@@ -174,8 +174,7 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 	u8 sym_key[32];
 	char *enc_key = shyake_selfenc_begin(ctx, sym_key);
 	if (!enc_key) {
-		drafts_set_error(
-			"Failed to load kem_pk.bin. Run 'shyake init'.");
+		drafts_set_error("Cannot load kem_pk.bin. Run 'shyake init'.");
 		return SHYAKE_ERR_CRYPTO;
 	}
 
@@ -271,14 +270,14 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 
 	char *raw = read_text_file(path);
 	if (!raw) {
-		drafts_set_error("Draft not found: %s", draft_id);
+		drafts_set_error("There is no draft %s.", draft_id);
 		return NULL;
 	}
 
 	cJSON *json = cJSON_Parse(raw);
 	free(raw);
 	if (!json) {
-		drafts_set_error("Corrupt draft file: %s", draft_id);
+		drafts_set_error("Draft %s is corrupt.", draft_id);
 		return NULL;
 	}
 
@@ -288,7 +287,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 	cJSON *jcrt = cJSON_GetObjectItem(json, "created");
 	cJSON *jsz = cJSON_GetObjectItem(json, "size");
 	if (!jkey || !jkey->valuestring || !jbdy || !jbdy->valuestring) {
-		drafts_set_error("Corrupt draft file: %s", draft_id);
+		drafts_set_error("Draft %s is corrupt.", draft_id);
 		cJSON_Delete(json);
 		return NULL;
 	}
@@ -299,8 +298,9 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 	shyake_selfdec *sd = shyake_selfdec_new(ctx);
 	if (!sd) {
 		const char *e = shyake_last_error(ctx);
-		drafts_set_error("%s",
-				 (e && e[0]) ? e : "Cannot unlock secret key.");
+		drafts_set_error("%s", (e && e[0]) ?
+					       e :
+					       "Cannot unlock the secret key.");
 		cJSON_Delete(json);
 		return NULL;
 	}
@@ -317,7 +317,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 	}
 	shyake_selfdec_free(sd);
 	if (!have_sym || (decrypt_body && !bdy)) {
-		drafts_set_error("Failed to decrypt draft: %s", draft_id);
+		drafts_set_error("Cannot decrypt draft %s.", draft_id);
 		free(rec);
 		free(sub);
 		free(bdy);
@@ -390,8 +390,9 @@ shyake_saved_list *cli_list_drafts(shyake_ctx *ctx, const char *config_dir,
 	shyake_selfdec *sd = shyake_selfdec_new(ctx);
 	if (!sd) {
 		const char *e = shyake_last_error(ctx);
-		drafts_set_error("%s",
-				 (e && e[0]) ? e : "Cannot unlock secret key.");
+		drafts_set_error("%s", (e && e[0]) ?
+					       e :
+					       "Cannot unlock the secret key.");
 		closedir(d);
 		free(list);
 		return NULL;

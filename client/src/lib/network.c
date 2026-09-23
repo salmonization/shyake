@@ -110,12 +110,19 @@ struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
 	return create_signed_headers(ctx, "GET", endpoint, username);
 }
 
-char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient)
+/*
+ * Fetch the KEM public key of a recipient through our own instance.
+ * On failure, returns NULL, records the reason, and sets *err:
+ * NETWORK (no answer), NOT_FOUND (no such user), GONE (destroyed),
+ * or HTTP (any other refusal).
+ */
+char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient,
+			     shyake_err *err)
 {
-	// fetch public key for recipient from server
 	char url[512];
 	snprintf(url, sizeof(url), "%s/api/pubkey/%s", ctx->instance_url,
 		 recipient);
+	*err = SHYAKE_ERR;
 
 	CURL *curl = curl_easy_init();
 	if (!curl)
@@ -137,25 +144,39 @@ char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient)
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 	curl_easy_cleanup(curl);
 
-	if (res == CURLE_OK && http_code == 200) {
+	char *kem_pk = NULL;
+	if (res != CURLE_OK) {
+		set_network_error(ctx, res);
+		*err = SHYAKE_ERR_NETWORK;
+	} else if (http_code == 200) {
 		cJSON *json = cJSON_Parse(resp.data);
-		free(resp.data);
-		if (json) {
-			cJSON *kem_pk_item =
-				cJSON_GetObjectItem(json, "kem_pubkey");
-			char *kem_pk = NULL;
-			if (cJSON_IsString(kem_pk_item))
-				kem_pk = strdup(kem_pk_item->valuestring);
-			cJSON_Delete(json);
-			return kem_pk;
+		cJSON *item = json ? cJSON_GetObjectItem(json, "kem_pubkey") :
+				     NULL;
+		if (cJSON_IsString(item) && item->valuestring[0]) {
+			kem_pk = strdup(item->valuestring);
+			*err = SHYAKE_OK;
+		} else if (cJSON_IsString(item)) {
+			/* a destroyed account keeps its name, not its keys */
+			set_error(ctx, "%s no longer exists.", recipient);
+			*err = SHYAKE_ERR_GONE;
+		} else {
+			set_error(ctx, "The instance sent an invalid key.");
 		}
-		return NULL;
-	} else if (res != CURLE_OK) {
-		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
+		cJSON_Delete(json);
+	} else if (http_code == 404) {
+		set_error(ctx, "There is no user %s.", recipient);
+		*err = SHYAKE_ERR_NOT_FOUND;
+	} else if (http_code == 502) {
+		const char *at = strchr(recipient, '@');
+		set_error(ctx, "Cannot reach %s.", at ? at + 1 : recipient);
+		*err = SHYAKE_ERR_HTTP;
+	} else {
+		set_server_error(ctx, http_code, resp.data);
+		*err = SHYAKE_ERR_HTTP;
 	}
 
 	free(resp.data);
-	return NULL;
+	return kem_pk;
 }
 
 /* whether a server reply carries exactly this error text */
@@ -168,9 +189,44 @@ int http_error_is(const char *body, const char *text)
 	return match;
 }
 
-/* record "<what> (HTTP <code>): <server's error text>" */
-void set_http_error(shyake_ctx *ctx, const char *what, long code,
-		    const char *body)
+/* server error texts and the reason the client gives for each */
+static const struct {
+	const char *text;
+	const char *reason;
+} server_reasons[] = {
+	{ "Timestamp out of window",
+	  "Your clock is off by more than 5 minutes." },
+	{ "Invalid Proof of Work", "The instance rejected the proof of work." },
+	{ "Invalid signature", "The instance rejected your signature." },
+	{ "Signature verification failed",
+	  "The instance rejected your signature." },
+	{ "User not found", "Your account does not exist on this instance." },
+	{ "User not found or destroyed",
+	  "Your account does not exist on this instance." },
+	{ "Sender not registered",
+	  "Your account does not exist on this instance." },
+	{ "Replayed request",
+	  "The instance already saw this request. Try again." },
+	{ "Registration is disabled",
+	  "This instance does not accept new accounts." },
+	{ "Username already taken", "The username is taken." },
+	{ "Username is reserved", "The username is reserved." },
+	{ "Invalid username format", "The username is not valid." },
+	{ "Mail not found", "There is no such mail." },
+	{ "Payload too large", "The mail is too large." },
+	{ "Recipient instance unreachable",
+	  "Cannot reach the recipient's instance." },
+	{ "Federation disabled", "This instance does not federate." },
+	{ "Invalid target", "The block target is not valid." },
+	{ "Database error", "The instance had an internal error." },
+};
+
+/*
+ * Record why the server refused a request, as a sentence that
+ * completes "Error: <action> failed.". Known texts get a plain reason;
+ * others pass through, made printable.
+ */
+void set_server_error(shyake_ctx *ctx, long code, const char *body)
 {
 	char msg[256] = "";
 	cJSON *json = cJSON_Parse(body);
@@ -182,10 +238,32 @@ void set_http_error(shyake_ctx *ctx, const char *what, long code,
 				*p = '?';
 	}
 	cJSON_Delete(json);
-	if (msg[0])
-		set_error(ctx, "%s (HTTP %ld): %s", what, code, msg);
-	else
-		set_error(ctx, "%s (HTTP %ld).", what, code);
+
+	for (usize i = 0; i < sizeof(server_reasons) / sizeof(*server_reasons);
+	     i++) {
+		if (strcmp(msg, server_reasons[i].text) == 0) {
+			set_error(ctx, "%s", server_reasons[i].reason);
+			return;
+		}
+	}
+	if (code == 429) {
+		set_error(ctx, "Too many requests. Try again later.");
+	} else if (msg[0]) {
+		int stop = strchr(".!?", msg[strlen(msg) - 1]) != NULL;
+		set_error(ctx, "%s%s", msg, stop ? "" : ".");
+	} else if (code >= 500) {
+		set_error(ctx, "The instance had an internal error.");
+	} else {
+		set_error(ctx, "The instance answered with HTTP %ld.", code);
+	}
+}
+
+/* record that the instance did not answer */
+void set_network_error(shyake_ctx *ctx, CURLcode res)
+{
+	const char *host = strstr(ctx->instance_url, "://");
+	host = host ? host + 3 : ctx->instance_url;
+	set_error(ctx, "Cannot reach %s (%s).", host, curl_easy_strerror(res));
 }
 
 /* protocol level of the instance: 1 if it has no /api/version, 0 if
@@ -219,18 +297,13 @@ int instance_protocol(shyake_ctx *ctx)
 	return level;
 }
 
-/* failure detail of a body-signed request; a server older than
- * protocol 2 rejects the signature, so say that instead of 401 */
-void set_signed_body_error(shyake_ctx *ctx, const char *what, long code,
-			   const char *body)
+/* failure reason of a body-signed request; a server older than
+ * protocol 2 rejects the signature, so say that instead */
+void set_signed_body_error(shyake_ctx *ctx, long code, const char *body)
 {
 	if (code == 401 && instance_protocol(ctx) == 1) {
-		set_error(ctx,
-			  "%s: this instance does not accept signed "
-			  "request bodies. Its server must be v0.3.0 or "
-			  "later.",
-			  what);
+		set_error(ctx, "The instance must run server v0.3.0 or later.");
 		return;
 	}
-	set_http_error(ctx, what, code, body);
+	set_server_error(ctx, code, body);
 }

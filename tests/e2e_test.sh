@@ -495,8 +495,11 @@ out_mismatch=$(echo "after rotate" | sh_run "$DIR_D" send -t "$USER_E" \
     -s "Should fail" 2>&1)
 rc_mismatch=$?
 assert_exit "409 path: send exits non-zero after key rotation" 1 "$rc_mismatch"
-assert_contains "409 path: FATAL key-changed message" \
-    "Remote public key of recipient has changed" "$out_mismatch"
+assert_contains "409 path: key-changed message" \
+    "Error: Send failed. The public key of $USER_E has changed." \
+    "$out_mismatch"
+assert_contains "409 path: fingerprint hint" \
+    "Run 'shyake fingerprint $USER_E'" "$out_mismatch"
 
 # After --update, D can send again
 sh_run "$DIR_D" fingerprint "$USER_E" --update > /dev/null 2>&1 || true
@@ -638,7 +641,7 @@ pp_wrong_out=$(SHYAKE_PASSPHRASE="wrong-passphrase" sh_run "$DIR_PP" check inbox
 pp_wrong_rc=$?
 assert_exit "passphrase: wrong passphrase → non-zero exit" 1 "$pp_wrong_rc"
 assert_contains "passphrase: wrong passphrase message" \
-    "Incorrect passphrase" "$pp_wrong_out"
+    "The passphrase is wrong." "$pp_wrong_out"
 
 # 18f. enc (uses public key only, no passphrase) → dec with correct passphrase
 ENC_IN="$TMPDIR_ROOT/enc_input.txt"
@@ -801,7 +804,13 @@ assert_contains "send --draft -t: sent" "sent" "$out"
 out=$(sh_run "$DIR_A" send --draft 9999 2>&1)
 rc=$?
 assert_exit "send --draft unknown id fails" 1 "$rc"
-assert_contains "send --draft: not-found message" "not found" "$out"
+assert_contains "send --draft: not-found message" \
+    "Error: Draft read failed. There is no draft 9999." "$out"
+
+# 19j'. unknown recipient names the cause, not the network
+out=$(echo "hello?" | sh_run "$DIR_A" send -t "nobody${TS}" -s "x" 2>&1)
+assert_contains "send to unknown user: cause shown" \
+    "Error: Send failed. There is no user nobody${TS}." "$out"
 
 # 19k. passphrase-protected account: compose needs no passphrase,
 #      reading drafts does
@@ -817,7 +826,7 @@ out=$(SHYAKE_PASSPHRASE="wrong-passphrase" \
 rc=$?
 assert_exit "check drafts with wrong passphrase fails" 1 "$rc"
 assert_contains "check drafts: wrong passphrase message" \
-    "Incorrect passphrase" "$out"
+    "The passphrase is wrong." "$out"
 
 # ------------------------------------------------------------------ #
 # Summary

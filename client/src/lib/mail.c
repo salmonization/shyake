@@ -44,11 +44,13 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 {
 	if (!ctx || !recipient || !body)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 
 	/* Fetch recipient public key */
-	char *recip_pk_b64 = fetch_recipient_pubkey(ctx, recipient);
+	shyake_err lookup;
+	char *recip_pk_b64 = fetch_recipient_pubkey(ctx, recipient, &lookup);
 	if (!recip_pk_b64)
-		return SHYAKE_ERR_NETWORK;
+		return lookup;
 
 	usize recip_pk_len;
 	u8 *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
@@ -78,6 +80,9 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 			    0) {
 				free(recip_pk_b64);
 				free(recip_pk);
+				set_error(ctx,
+					  "The public key of %s has changed.",
+					  recipient);
 				return SHYAKE_ERR_KEY_MISMATCH;
 			}
 		}
@@ -212,8 +217,7 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 
 		CURLcode res = curl_easy_perform(curl);
 		if (res != CURLE_OK) {
-			set_error(ctx, "Network error: %s",
-				  curl_easy_strerror(res));
+			set_network_error(ctx, res);
 			ret = SHYAKE_ERR_NETWORK;
 		} else {
 			long http_code = 0;
@@ -222,17 +226,27 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 			if (http_code == 200 || http_code == 201) {
 				ret = SHYAKE_OK;
 			} else if (http_code == 409) {
+				set_error(ctx,
+					  "The public key of %s has changed.",
+					  recipient);
 				ret = SHYAKE_ERR_KEY_MISMATCH;
 			} else if (http_code == 410) {
+				set_error(ctx, "%s no longer exists.",
+					  recipient);
 				ret = SHYAKE_ERR_GONE;
 			} else if (http_code == 403 &&
 				   http_error_is(resp.data,
 						 "Recipient has blocked "
 						 "this sender")) {
+				set_error(ctx, "You are blocked by %s.",
+					  recipient);
 				ret = SHYAKE_ERR_BLOCKED;
+			} else if (http_code == 502 && strchr(recipient, '@')) {
+				set_error(ctx, "Cannot reach %s.",
+					  strchr(recipient, '@') + 1);
+				ret = SHYAKE_ERR_HTTP;
 			} else {
-				set_http_error(ctx, "Send failed", http_code,
-					       resp.data);
+				set_server_error(ctx, http_code, resp.data);
 				ret = SHYAKE_ERR_HTTP;
 			}
 		}
@@ -269,6 +283,7 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 {
 	if (!ctx || !type)
 		return NULL;
+	clear_error(ctx);
 	const char *username = ctx->username;
 
 	char endpoint[128];
@@ -401,11 +416,10 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 				cJSON_Delete(json);
 			}
 		} else {
-			set_error(ctx, "Failed to check mail (HTTP %ld): %s",
-				  http_code, resp.data);
+			set_server_error(ctx, http_code, resp.data);
 		}
 	} else {
-		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
+		set_network_error(ctx, res);
 	}
 
 	free(resp.data);
@@ -420,6 +434,7 @@ shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 {
 	if (!ctx || !mail_id)
 		return NULL;
+	clear_error(ctx);
 	const char *username = ctx->username;
 
 	char endpoint[128];
@@ -514,11 +529,10 @@ shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 				cJSON_Delete(json);
 			}
 		} else {
-			set_error(ctx, "Failed to fetch mail (HTTP %ld): %s",
-				  http_code, resp.data);
+			set_server_error(ctx, http_code, resp.data);
 		}
 	} else {
-		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
+		set_network_error(ctx, res);
 	}
 
 	free(resp.data);
@@ -533,6 +547,7 @@ shyake_mail_detail *shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 {
 	if (!ctx || !mail_id)
 		return NULL;
+	clear_error(ctx);
 	const char *username = ctx->username;
 
 	char endpoint[128];
@@ -621,14 +636,11 @@ shyake_mail_detail *shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 
 				cJSON_Delete(json);
 			}
-		} else if (http_code == 404) {
-			set_error(ctx, "Mail not found.");
 		} else {
-			set_error(ctx, "Failed (HTTP %ld): %s", http_code,
-				  resp.data);
+			set_server_error(ctx, http_code, resp.data);
 		}
 	} else {
-		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
+		set_network_error(ctx, res);
 	}
 
 	free(resp.data);
@@ -643,6 +655,7 @@ shyake_err shyake_burn(shyake_ctx *ctx, const char *mail_id)
 {
 	if (!ctx || !mail_id)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 	const char *username = ctx->username;
 
 	char endpoint[128];
@@ -681,14 +694,14 @@ shyake_err shyake_burn(shyake_ctx *ctx, const char *mail_id)
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 		if (http_code == 200) {
 			ret = SHYAKE_OK;
-		} else if (http_code == 404) {
-			ret = SHYAKE_ERR_NOT_FOUND;
-		} else if (http_code == 403) {
-			ret = SHYAKE_ERR_FORBIDDEN;
 		} else {
-			ret = SHYAKE_ERR_HTTP;
+			set_server_error(ctx, http_code, resp.data);
+			ret = http_code == 404 ? SHYAKE_ERR_NOT_FOUND :
+			      http_code == 403 ? SHYAKE_ERR_FORBIDDEN :
+						 SHYAKE_ERR_HTTP;
 		}
 	} else {
+		set_network_error(ctx, res);
 		ret = SHYAKE_ERR_NETWORK;
 	}
 
@@ -734,9 +747,10 @@ shyake_err shyake_save_mail(shyake_ctx *ctx, const char *mail_id)
 {
 	if (!ctx || !mail_id)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 
 	if (ensure_saved_dir(ctx->config_dir) != 0) {
-		set_error(ctx, "Failed to create saved directory.");
+		set_error(ctx, "Cannot create the saved directory.");
 		return SHYAKE_ERR;
 	}
 
@@ -783,14 +797,16 @@ shyake_err shyake_save_mail(shyake_ctx *ctx, const char *mail_id)
 				fputs(resp.data, f);
 				fclose(f);
 			} else {
+				set_error(ctx, "Cannot write %s.", save_path);
 				ret = SHYAKE_ERR;
 			}
-		} else if (http_code == 404) {
-			ret = SHYAKE_ERR_NOT_FOUND;
 		} else {
-			ret = SHYAKE_ERR_HTTP;
+			set_server_error(ctx, http_code, resp.data);
+			ret = http_code == 404 ? SHYAKE_ERR_NOT_FOUND :
+						 SHYAKE_ERR_HTTP;
 		}
 	} else {
+		set_network_error(ctx, res);
 		ret = SHYAKE_ERR_NETWORK;
 	}
 
@@ -810,7 +826,7 @@ parse_saved_json(shyake_ctx *ctx, const char *mail_id, int decrypt_body)
 
 	FILE *f = fopen(path, "r");
 	if (!f) {
-		set_error(ctx, "Saved mail not found: %s", mail_id);
+		set_error(ctx, "There is no saved mail %s.", mail_id);
 		return NULL;
 	}
 	fseek(f, 0, SEEK_END);
@@ -874,6 +890,7 @@ shyake_mail_detail *shyake_read_saved(shyake_ctx *ctx, const char *mail_id)
 {
 	if (!ctx || !mail_id)
 		return NULL;
+	clear_error(ctx);
 	return parse_saved_json(ctx, mail_id, 1);
 }
 
@@ -881,6 +898,7 @@ shyake_mail_detail *shyake_check_saved_one(shyake_ctx *ctx, const char *mail_id)
 {
 	if (!ctx || !mail_id)
 		return NULL;
+	clear_error(ctx);
 	return parse_saved_json(ctx, mail_id, 0);
 }
 
@@ -888,6 +906,7 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 {
 	if (!ctx)
 		return NULL;
+	clear_error(ctx);
 
 	char saved_dir[512];
 	snprintf(saved_dir, sizeof(saved_dir), "%s/saved", ctx->config_dir);

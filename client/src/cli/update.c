@@ -271,13 +271,15 @@ int cli_self_update(const char *version_url, const char *current_version,
 {
 	cli_version_info *info = cli_get_latest_version(version_url, debug);
 	if (!info) {
-		fprintf(stderr, "Failed to fetch version info.\n");
+		fprintf(stderr,
+			"Error: Update failed. Cannot get the latest version.\n");
 		return -1;
 	}
 
 	if (!info->release) {
 		cli_free_version_info(info);
-		fprintf(stderr, "No stable release available.\n");
+		fprintf(stderr,
+			"Error: Update failed. There is no stable release.\n");
 		return -1;
 	}
 
@@ -288,7 +290,9 @@ int cli_self_update(const char *version_url, const char *current_version,
 								     "stable";
 
 	if (!target) {
-		fprintf(stderr, "No %s release available.\n", channel_name);
+		fprintf(stderr,
+			"Error: Update failed. There is no %s release.\n",
+			channel_name);
 		cli_free_version_info(info);
 		return -1;
 	}
@@ -297,7 +301,7 @@ int cli_self_update(const char *version_url, const char *current_version,
 	if (channel == CLI_UPDATE_PREVIEW &&
 	    cli_version_cmp(info->pre_release, info->release) <= 0) {
 		fprintf(stderr,
-			"No preview release available newer than stable.\n");
+			"Error: Update failed. There is no preview newer than stable.\n");
 		cli_free_version_info(info);
 		return -1;
 	}
@@ -313,7 +317,9 @@ int cli_self_update(const char *version_url, const char *current_version,
 				     info->pre_release_digest :
 				     info->release_digest;
 	if (!digest) {
-		fprintf(stderr, "No checksum available for this platform.\n");
+		fprintf(stderr,
+			"Error: Update failed. The release has no checksum for this "
+			"platform.\n");
 		cli_free_version_info(info);
 		return -1;
 	}
@@ -332,14 +338,17 @@ int cli_self_update(const char *version_url, const char *current_version,
 
 	char *tar_path = download_to_tmp(dl_url, asset, debug);
 	if (!tar_path) {
-		fprintf(stderr, "Failed to download release archive.\n");
+		fprintf(stderr,
+			"Error: Update failed. Cannot download the release.\n");
 		cli_free_version_info(info);
 		return -1;
 	}
 
 	/* verify sha256 */
 	if (verify_sha256(tar_path, digest) != 0) {
-		fprintf(stderr, "SHA-256 verification failed. Aborting.\n");
+		fprintf(stderr,
+			"Error: Update failed. The download does not match its "
+			"checksum.\n");
 		remove(tar_path);
 		free(tar_path);
 		cli_free_version_info(info);
@@ -367,7 +376,8 @@ int cli_self_update(const char *version_url, const char *current_version,
 	}
 
 	if (self_path[0] == '\0') {
-		fprintf(stderr, "Cannot determine shyake binary path.\n");
+		fprintf(stderr,
+			"Error: Update failed. Cannot find the shyake binary.\n");
 		remove(tar_path);
 		free(tar_path);
 		cli_free_version_info(info);
@@ -382,8 +392,9 @@ int cli_self_update(const char *version_url, const char *current_version,
 			       tar_path, artifact, self_path, self_path,
 			       artifact);
 	if (cmd_len < 0 || (usize)cmd_len >= sizeof(extract_cmd)) {
-		fprintf(stderr, "Install path is too long to update in "
-				"place. Reinstall manually.\n");
+		fprintf(stderr,
+			"Error: Update failed. The install path is too long. "
+			"Reinstall manually.\n");
 		remove(tar_path);
 		free(tar_path);
 		cli_free_version_info(info);
@@ -399,7 +410,8 @@ int cli_self_update(const char *version_url, const char *current_version,
 	cli_free_version_info(info);
 
 	if (ext_ret != 0) {
-		fprintf(stderr, "Installation failed.\n");
+		fprintf(stderr,
+			"Error: Update failed. Cannot install the new binary.\n");
 		return -1;
 	}
 

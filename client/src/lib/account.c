@@ -10,6 +10,7 @@ shyake_err shyake_block(shyake_ctx *ctx, const char *target, int unblock)
 {
 	if (!ctx || !target)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 	const char *username = ctx->username;
 	const char *method = unblock ? "DELETE" : "POST";
 	const char *endpoint = "/api/block";
@@ -58,14 +59,11 @@ shyake_err shyake_block(shyake_ctx *ctx, const char *target, int unblock)
 		if (http_code == 200 || http_code == 201) {
 			ret = SHYAKE_OK;
 		} else {
-			set_signed_body_error(ctx,
-					      unblock ? "Unblock failed" :
-							"Block failed",
-					      http_code, resp.data);
+			set_signed_body_error(ctx, http_code, resp.data);
 			ret = SHYAKE_ERR_HTTP;
 		}
 	} else {
-		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
+		set_network_error(ctx, res);
 		ret = SHYAKE_ERR_NETWORK;
 	}
 
@@ -90,6 +88,7 @@ shyake_block_list *shyake_list_blocks(shyake_ctx *ctx)
 {
 	if (!ctx)
 		return NULL;
+	clear_error(ctx);
 	const char *username = ctx->username;
 	const char *endpoint = "/api/block";
 
@@ -161,11 +160,10 @@ shyake_block_list *shyake_list_blocks(shyake_ctx *ctx)
 				cJSON_Delete(json);
 			}
 		} else {
-			set_error(ctx, "Failed to list blocks (HTTP %ld): %s",
-				  http_code, resp.data);
+			set_server_error(ctx, http_code, resp.data);
 		}
 	} else {
-		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
+		set_network_error(ctx, res);
 	}
 
 	free(resp.data);
@@ -178,6 +176,7 @@ shyake_err shyake_rotate(shyake_ctx *ctx)
 {
 	if (!ctx)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 	const char *username = ctx->username;
 
 	OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
@@ -291,12 +290,11 @@ shyake_err shyake_rotate(shyake_ctx *ctx)
 			save_sk_encrypted(path, new_pp, new_ssk,
 					  sig->length_secret_key);
 		} else {
-			set_signed_body_error(ctx, "Key rotation failed",
-					      http_code, resp.data);
+			set_signed_body_error(ctx, http_code, resp.data);
 			ret = SHYAKE_ERR_HTTP;
 		}
 	} else {
-		set_error(ctx, "Network error: %s", curl_easy_strerror(res));
+		set_network_error(ctx, res);
 		ret = SHYAKE_ERR_NETWORK;
 	}
 
@@ -320,6 +318,7 @@ shyake_err shyake_destroy(shyake_ctx *ctx)
 {
 	if (!ctx)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 	const char *username = ctx->username;
 
 	char endpoint[128];
@@ -359,9 +358,11 @@ shyake_err shyake_destroy(shyake_ctx *ctx)
 		if (http_code == 200) {
 			ret = SHYAKE_OK;
 		} else {
+			set_server_error(ctx, http_code, resp.data);
 			ret = SHYAKE_ERR_HTTP;
 		}
 	} else {
+		set_network_error(ctx, res);
 		ret = SHYAKE_ERR_NETWORK;
 	}
 

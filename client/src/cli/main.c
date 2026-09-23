@@ -36,24 +36,36 @@ static char *build_version_url(const char *instance)
 	return url;
 }
 
-/* print lib failure detail as-is, or "Error: <fallback>" */
-static void print_lib_error(shyake_ctx *ctx, const char *fallback)
+/* print "Error: <action> <reason>"; the reason may be empty */
+static void print_failure(const char *action, const char *reason)
 {
-	const char *e = shyake_last_error(ctx);
-	if (e && e[0])
-		fprintf(stderr, "%s\n", e);
+	if (reason && reason[0])
+		fprintf(stderr, "Error: %s %s\n", action, reason);
 	else
-		fprintf(stderr, "Error: %s\n", fallback);
+		fprintf(stderr, "Error: %s\n", action);
 }
 
-/* print drafts failure detail as-is, or "Error: <fallback>" */
-static void print_drafts_error(const char *fallback)
+/* action failed in the library, e.g. "Send failed." */
+static void print_lib_error(shyake_ctx *ctx, const char *action)
 {
-	const char *e = cli_drafts_last_error();
-	if (e && e[0])
-		fprintf(stderr, "%s\n", e);
-	else
-		fprintf(stderr, "Error: %s\n", fallback);
+	print_failure(action, shyake_last_error(ctx));
+}
+
+/* action failed in the local drafts store */
+static void print_drafts_error(const char *action)
+{
+	print_failure(action, cli_drafts_last_error());
+}
+
+/* a send failed: the reason, plus how to act on a key change */
+static void print_send_error(shyake_ctx *ctx, shyake_err ret,
+			     const char *recipient)
+{
+	print_lib_error(ctx, "Send failed.");
+	if (ret == SHYAKE_ERR_KEY_MISMATCH)
+		fprintf(stderr,
+			"Run 'shyake fingerprint %s' to check the new key.\n",
+			recipient);
 }
 
 /* keep the text of a send that failed, so it is not lost */
@@ -64,7 +76,7 @@ static void rescue_draft(shyake_ctx *ctx, const char *config_dir,
 	char *new_id = NULL;
 	if (cli_save_draft(ctx, config_dir, recipient, subject, body, body_len,
 			   NULL, &new_id) != SHYAKE_OK) {
-		print_drafts_error("Failed to save the mail as a draft.");
+		print_drafts_error("Draft save failed.");
 		return;
 	}
 	if (new_id && retry) {
@@ -597,17 +609,13 @@ int main(int argc, char *argv[])
 			printf("Successfully registered.\n");
 			update_config_user_and_instance(config_dir, username,
 							inst);
-		} else if (ret == SHYAKE_ERR_NETWORK) {
-			fprintf(stderr, "\n");
-			print_lib_error(ctx, "Network failure during "
-					     "registration.");
 		} else if (ret == SHYAKE_ERR_NO_INSTANCE) {
-			fprintf(stderr,
-				"\nError: Instance URL not configured.\n");
+			fprintf(stderr, "\n");
+			print_failure("Registration failed.",
+				      "No instance is configured.");
 		} else {
 			fprintf(stderr, "\n");
-			print_lib_error(ctx, "Registration failed "
-					     "(server rejected).");
+			print_lib_error(ctx, "Registration failed.");
 		}
 
 		shyake_free_ctx(ctx);
@@ -677,7 +685,7 @@ int main(int argc, char *argv[])
 			shyake_mail_detail *d = cli_read_draft(
 				ctx, config_dir, app_cfg->username, draft_id);
 			if (!d || !d->body) {
-				print_drafts_error("Failed to read draft.");
+				print_drafts_error("Draft read failed.");
 				shyake_free_mail_detail(d);
 				shyake_free_ctx(ctx);
 				free_app_config(app_cfg);
@@ -715,32 +723,9 @@ int main(int argc, char *argv[])
 					    SHYAKE_OK)
 						printf("Draft %s deleted.\n",
 						       draft_id);
-				} else if (ret == SHYAKE_ERR_KEY_MISMATCH) {
-					fprintf(stderr,
-						"\n\nFATAL: Remote public key of "
-						"recipient has changed!\n"
-						"RUN 'shyake fingerprint <username>' to "
-						"inspect and update trust.\n");
-				} else if (ret == SHYAKE_ERR_GONE) {
-					fprintf(stderr,
-						"\n\nFATAL: Recipient no longer exists.\n");
-				} else if (ret == SHYAKE_ERR_BLOCKED) {
-					fprintf(stderr,
-						"\nError: Send failed. You are "
-						"blocked by %s.\n",
-						recipient);
-				} else if (ret == SHYAKE_ERR_NETWORK) {
-					fprintf(stderr, "\n");
-					print_lib_error(ctx,
-							"Network failure.");
-				} else if (ret == SHYAKE_ERR_CRYPTO) {
-					fprintf(stderr, "\n");
-					print_lib_error(
-						ctx,
-						"Cryptographic operation failed.");
 				} else {
 					fprintf(stderr, "\n");
-					print_lib_error(ctx, "Send failed.");
+					print_send_error(ctx, ret, recipient);
 				}
 			}
 
@@ -763,7 +748,8 @@ int main(int argc, char *argv[])
 		if (optind < argc) {
 			in_file = fopen(argv[optind], "rb");
 			if (!in_file) {
-				fprintf(stderr, "Failed to open file: %s\n",
+				fprintf(stderr,
+					"Error: Send failed. Cannot open %s.\n",
 					argv[optind]);
 				free_app_config(app_cfg);
 				free(config_dir);
@@ -777,7 +763,8 @@ int main(int argc, char *argv[])
 			fclose(in_file);
 
 		if (!body) {
-			fprintf(stderr, "Failed to read body.\n");
+			fprintf(stderr,
+				"Error: Send failed. Cannot read the body.\n");
 			free_app_config(app_cfg);
 			free(config_dir);
 			return EXIT_FAILURE;
@@ -876,35 +863,20 @@ int main(int argc, char *argv[])
 		if (ret == SHYAKE_OK) {
 			fprintf(stderr, "done.\n");
 			printf("Your mail was sent.\n");
-		} else if (ret == SHYAKE_ERR_KEY_MISMATCH) {
-			fprintf(stderr,
-				"\n\nFATAL: Remote public key of recipient "
-				"has changed!\n"
-				"RUN 'shyake fingerprint <username>' to "
-				"inspect and update trust.\n");
-		} else if (ret == SHYAKE_ERR_GONE) {
-			fprintf(stderr,
-				"\n\nFATAL: Recipient no longer exists.\n");
-		} else if (ret == SHYAKE_ERR_BLOCKED) {
-			fprintf(stderr,
-				"\nError: Send failed. You are blocked by %s.\n",
-				recipient);
-		} else if (ret == SHYAKE_ERR_NETWORK) {
-			fprintf(stderr, "\n");
-			print_lib_error(ctx, "Network failure.");
-		} else if (ret == SHYAKE_ERR_CRYPTO) {
-			fprintf(stderr, "\n");
-			print_lib_error(ctx, "Cryptographic operation failed.");
 		} else {
 			fprintf(stderr, "\n");
-			print_lib_error(ctx, "Send failed.");
+			print_send_error(ctx, ret, recipient);
 		}
 
 		/* a failed send must not eat what the user wrote; a
-		 * retry to a recipient who blocks you is pointless */
+		 * retry cannot help when you are blocked or the
+		 * recipient is gone */
 		if (ret != SHYAKE_OK)
 			rescue_draft(ctx, config_dir, recipient, subject, body,
-				     body_len, ret != SHYAKE_ERR_BLOCKED);
+				     body_len,
+				     ret != SHYAKE_ERR_BLOCKED &&
+					     ret != SHYAKE_ERR_GONE &&
+					     ret != SHYAKE_ERR_NOT_FOUND);
 
 		shyake_free_ctx(ctx);
 		free_app_config(app_cfg);
@@ -943,7 +915,7 @@ int main(int argc, char *argv[])
 			shyake_mail_detail *d = cli_read_draft(
 				ctx, config_dir, app_cfg->username, draft_id);
 			if (!d || !d->body) {
-				print_drafts_error("Failed to decrypt draft.");
+				print_drafts_error("Draft read failed.");
 				shyake_free_mail_detail(d);
 				shyake_free_ctx(ctx);
 				free_app_config(app_cfg);
@@ -970,7 +942,9 @@ int main(int argc, char *argv[])
 			 config_dir);
 		int fd = mkstemp(tmp_path);
 		if (fd < 0) {
-			fprintf(stderr, "Error: Failed to create temp file.\n");
+			fprintf(stderr,
+				"Error: Edit failed. Cannot create a temporary "
+				"file.\n");
 			free(initial);
 			shyake_free_ctx(ctx);
 			free_app_config(app_cfg);
@@ -1067,7 +1041,7 @@ int main(int argc, char *argv[])
 		if (ret == SHYAKE_OK) {
 			printf("Draft %s saved.\n", new_id ? new_id : draft_id);
 		} else {
-			print_drafts_error("Failed to save draft.");
+			print_drafts_error("Draft save failed.");
 		}
 
 		free(new_id);
@@ -1162,7 +1136,7 @@ int main(int argc, char *argv[])
 					shyake_free_mail_detail(d);
 				} else {
 					print_drafts_error(
-						"Failed to read draft.");
+						"Draft read failed.");
 					ret = -1;
 				}
 			} else {
@@ -1171,7 +1145,7 @@ int main(int argc, char *argv[])
 					ctx, config_dir, app_cfg->username);
 				if (!slist) {
 					print_drafts_error(
-						"Failed to list drafts.");
+						"Listing drafts failed.");
 					ret = -1;
 				} else if (slist->count > 0) {
 					shyake_mail_list mlist;
@@ -1271,9 +1245,7 @@ int main(int argc, char *argv[])
 						app_cfg->time_format_recent);
 					shyake_free_mail_detail(d);
 				} else {
-					print_lib_error(
-						ctx,
-						"Failed to read saved mail.");
+					print_lib_error(ctx, "Read failed.");
 					ret = -1;
 				}
 			} else {
@@ -1367,7 +1339,7 @@ int main(int argc, char *argv[])
 				cli_render_mail_list(list, &ro);
 				shyake_free_mail_list(list);
 			} else {
-				print_lib_error(ctx, "Failed to check mail.");
+				print_lib_error(ctx, "Check failed.");
 				ret = -1;
 			}
 		} else {
@@ -1380,7 +1352,7 @@ int main(int argc, char *argv[])
 					app_cfg->time_format_recent);
 				shyake_free_mail_detail(d);
 			} else {
-				print_lib_error(ctx, "Failed to check mail.");
+				print_lib_error(ctx, "Check failed.");
 				ret = -1;
 			}
 		}
@@ -1458,7 +1430,7 @@ int main(int argc, char *argv[])
 					       app_cfg->time_format_recent);
 			shyake_free_mail_detail(d);
 		} else {
-			print_lib_error(ctx, "Failed to fetch mail.");
+			print_lib_error(ctx, "Fetch failed.");
 			ret = -1;
 		}
 
@@ -1503,12 +1475,6 @@ int main(int argc, char *argv[])
 		shyake_err ret = shyake_burn(ctx, mail_id);
 		if (ret == SHYAKE_OK)
 			printf("Mail burned.\n");
-		else if (ret == SHYAKE_ERR_NOT_FOUND)
-			print_lib_error(ctx, "Mail not found.");
-		else if (ret == SHYAKE_ERR_FORBIDDEN)
-			print_lib_error(ctx, "Permission denied.");
-		else if (ret == SHYAKE_ERR_NETWORK)
-			print_lib_error(ctx, "Network failure.");
 		else
 			print_lib_error(ctx, "Burn failed.");
 		shyake_free_ctx(ctx);
@@ -1554,10 +1520,9 @@ int main(int argc, char *argv[])
 		if (ret == SHYAKE_OK)
 			printf("%s %s.\n", target,
 			       is_unblock ? "unblocked" : "blocked");
-		else if (ret == SHYAKE_ERR_NETWORK)
-			print_lib_error(ctx, "Network failure.");
 		else
-			print_lib_error(ctx, "Operation failed.");
+			print_lib_error(ctx, is_unblock ? "Unblock failed." :
+							  "Block failed.");
 		shyake_free_ctx(ctx);
 		free_app_config(app_cfg);
 		free(config_dir);
@@ -1592,7 +1557,7 @@ int main(int argc, char *argv[])
 		shyake_block_list *list = shyake_list_blocks(ctx);
 		int ok = list != NULL;
 		if (!list)
-			print_lib_error(ctx, "Failed to fetch block list.");
+			print_lib_error(ctx, "Listing blocks failed.");
 		shyake_free_ctx(ctx);
 		if (list && list->count == 0) {
 			printf("Block list is empty.\n");
@@ -1646,12 +1611,6 @@ int main(int argc, char *argv[])
 		if (ret == SHYAKE_OK) {
 			fprintf(stderr, "done.\n");
 			printf("Keys successfully rotated.\n");
-		} else if (ret == SHYAKE_ERR_NETWORK) {
-			fprintf(stderr, "\n");
-			print_lib_error(ctx, "Network failure.");
-		} else if (ret == SHYAKE_ERR_CRYPTO) {
-			fprintf(stderr, "\n");
-			print_lib_error(ctx, "Key generation failed.");
 		} else {
 			fprintf(stderr, "\n");
 			print_lib_error(ctx, "Rotation failed.");
@@ -1714,7 +1673,7 @@ int main(int argc, char *argv[])
 			}
 			shyake_free_fp_result(fp);
 		} else {
-			fprintf(stderr, "Failed to fetch public key.\n");
+			print_lib_error(ctx, "Fingerprint failed.");
 			ret = -1;
 		}
 
@@ -1783,8 +1742,6 @@ int main(int argc, char *argv[])
 			system(cmd_buf);
 			printf("Account destroyed. "
 			       "Local configuration and keys deleted.\n");
-		} else if (ret == SHYAKE_ERR_NETWORK) {
-			print_lib_error(ctx, "Network failure.");
 		} else {
 			print_lib_error(ctx, "Destroy failed.");
 		}
@@ -1831,10 +1788,6 @@ int main(int argc, char *argv[])
 		shyake_err ret = shyake_save_mail(ctx, mail_id);
 		if (ret == SHYAKE_OK)
 			printf("Mail saved.\n");
-		else if (ret == SHYAKE_ERR_NOT_FOUND)
-			print_lib_error(ctx, "Mail not found.");
-		else if (ret == SHYAKE_ERR_NETWORK)
-			print_lib_error(ctx, "Network failure.");
 		else
 			print_lib_error(ctx, "Save failed.");
 		shyake_free_ctx(ctx);
@@ -1905,7 +1858,7 @@ int main(int argc, char *argv[])
 					app_cfg->time_format_recent);
 				shyake_free_mail_detail(d);
 			} else {
-				print_drafts_error("Failed to read draft.");
+				print_drafts_error("Draft read failed.");
 				dret = -1;
 			}
 			shyake_free_ctx(dctx);
@@ -1953,7 +1906,7 @@ int main(int argc, char *argv[])
 					       app_cfg->time_format_recent);
 			shyake_free_mail_detail(d);
 		} else {
-			print_lib_error(ctx, "Failed to read saved mail.");
+			print_lib_error(ctx, "Read failed.");
 			ret = -1;
 		}
 		shyake_free_ctx(ctx);
@@ -2023,9 +1976,6 @@ int main(int argc, char *argv[])
 						 recipient, &used_path);
 		if (ret == SHYAKE_OK)
 			fprintf(stderr, "Encrypted: %s\n", used_path);
-		else if (ret == SHYAKE_ERR_NETWORK)
-			print_lib_error(ctx,
-					"Failed to fetch recipient pubkey.");
 		else
 			print_lib_error(ctx, "Encryption failed.");
 		free(used_path);
@@ -2112,9 +2062,8 @@ int main(int argc, char *argv[])
 			free(config_dir);
 
 			if (!info) {
-				fprintf(stderr,
-					"Error: Failed to fetch version "
-					"info.\n");
+				print_failure("Update failed.",
+					      "Cannot get the latest version.");
 				return EXIT_FAILURE;
 			}
 

@@ -28,6 +28,12 @@ void set_error(shyake_ctx *ctx, const char *fmt, ...)
 	va_end(ap);
 }
 
+void clear_error(shyake_ctx *ctx)
+{
+	if (ctx)
+		ctx->last_error[0] = '\0';
+}
+
 const char *shyake_last_error(shyake_ctx *ctx)
 {
 	return ctx ? ctx->last_error : "";
@@ -313,6 +319,7 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username)
 {
 	if (!ctx || !username)
 		return SHYAKE_ERR;
+	clear_error(ctx);
 
 	usize kpk_len, spk_len, ssk_len;
 	char path[512];
@@ -388,6 +395,7 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username)
 
 			CURLcode res = curl_easy_perform(curl);
 			if (res != CURLE_OK) {
+				set_network_error(ctx, res);
 				ret = SHYAKE_ERR_NETWORK;
 			} else {
 				long http_code = 0;
@@ -396,6 +404,8 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username)
 				if (http_code == 200 || http_code == 201) {
 					ret = SHYAKE_OK;
 				} else {
+					set_server_error(ctx, http_code,
+							 resp.data);
 					ret = SHYAKE_ERR_HTTP;
 				}
 			}

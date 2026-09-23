@@ -581,12 +581,11 @@ Shyake uses **Trust On First Use (TOFU)** for public key management:
   `recipient_kem_fingerprint`. If the fingerprint no longer matches
   the stored key, the server independently rejects the send with
   HTTP 409.
-- **Key rotation detected**: the client prints a fatal error and
-  halts:
+- **Key rotation detected**: the client stops and prints:
 
 ```
-FATAL: Remote public key of recipient has changed!
-RUN 'shyake fingerprint <username>' to inspect and update trust.
+Error: Send failed. The public key of <username> has changed.
+Run 'shyake fingerprint <username>' to check the new key.
 ```
 
 The `fingerprint` command provides **out-of-band (OOB)
@@ -629,10 +628,15 @@ const char* shyake_last_error(shyake_ctx *ctx);
 
 Internal struct definitions live in `src/lib/lib_internal.h`.
 Callers cannot see them. The library never writes to stdout or
-stderr. On failure, it records a human-readable detail and returns a
-semantic error code. Callers retrieve the detail with
-`shyake_last_error(ctx)`. This detail stays valid until the next
-call on the same context. Error codes are a typed enum
+stderr. On failure, it records the reason and returns a semantic
+error code. Callers get the reason with `shyake_last_error(ctx)`. The
+reason is one or more full sentences that say why the call failed,
+not what failed, for example `You are blocked by bob.` The client
+adds its own action in front of it. The CLI prints
+`Error: <Action> failed. <reason>`, for example
+`Error: Send failed. You are blocked by bob.` Each call clears the
+reason. It stays valid until the next call on the same context.
+Error codes are a typed enum
 (`shyake_err`), with `SHYAKE_OK = 0` for backward compatibility:
 
 | Code | Meaning |

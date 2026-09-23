@@ -84,6 +84,7 @@ shyake_fp_result *shyake_fingerprint(shyake_ctx *ctx, const char *target_user,
 {
 	if (!ctx)
 		return NULL;
+	clear_error(ctx);
 
 	shyake_fp_result *result = calloc(1, sizeof(shyake_fp_result));
 	if (!result)
@@ -107,7 +108,8 @@ shyake_fp_result *shyake_fingerprint(shyake_ctx *ctx, const char *target_user,
 	}
 
 	/* Remote user fingerprint */
-	char *recip_pk_b64 = fetch_recipient_pubkey(ctx, target_user);
+	shyake_err lookup;
+	char *recip_pk_b64 = fetch_recipient_pubkey(ctx, target_user, &lookup);
 	if (!recip_pk_b64) {
 		free(result);
 		return NULL;

@@ -107,7 +107,7 @@ echo "warm" | "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-3a" >/dev/null 
 stop B
 out=$(echo "sent while B was down" |
     "$CLI" -c "$WORK/alice" send -t "bobby@$B" -s "fed-3b" 2>&1)
-check "A reports the failed relay" "$out" "unreachable"
+check "A reports the failed relay" "$out" "Error: Send failed. Cannot reach $B."
 check "the client keeps a draft" "$out" "Saved as draft"
 out=$("$CLI" -c "$WORK/alice" --plain check sent 2>&1)
 if echo "$out" | grep -qF "fed-3b"; then

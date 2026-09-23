@@ -172,6 +172,9 @@ Architecture notes:
   commands; it returns `shyake_err` codes and data. Failure detail
   goes through `set_error()` and is read by the client via
   `shyake_last_error(ctx)`. The client decides how to present it.
+- `set_error()` records only the reason, as full sentences ("You are
+  blocked by bob."), never the action or an HTTP status. The CLI
+  prints every failure as `Error: <Action> failed. <reason>`.
 - The CLI links against `libshyake.a` and talks to the library only
   through `include/shyake.h`.
 - Internal library headers are `lib_internal.h` / `internal.h`; do not

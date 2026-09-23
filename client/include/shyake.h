@@ -46,10 +46,13 @@ typedef enum {
 } shyake_err;
 
 /*
- * Human-readable detail of the last failure on this context, or ""
- * if none. The library never prints; on error it records the detail
- * here and returns an error code (or NULL) — the client decides how
- * to present it. Valid until the next library call on the same ctx.
+ * Reason for the last failure on this context, or "" if none. It is
+ * one or more full sentences that say why, not what failed, e.g.
+ * "You are blocked by bob." A client prefixes its own action:
+ * "Send failed. You are blocked by bob." The library never prints; on
+ * error it records the reason here and returns an error code (or
+ * NULL). Each call clears it; it stays valid until the next call on
+ * the same ctx.
  */
 const char *shyake_last_error(shyake_ctx *ctx);
 

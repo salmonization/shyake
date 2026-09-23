@@ -136,7 +136,7 @@ u8 *load_sk_decrypted(shyake_ctx *ctx, const char *path, usize *out_len)
 	usize file_len;
 	u8 *data = load_file(path, &file_len);
 	if (!data) {
-		set_error(ctx, "Cannot load key file: %s", path);
+		set_error(ctx, "Cannot read %s.", path);
 		return NULL;
 	}
 
@@ -148,19 +148,19 @@ u8 *load_sk_decrypted(shyake_ctx *ctx, const char *path, usize *out_len)
 	}
 
 	if (!passphrase || passphrase[0] == '\0') {
-		set_error(ctx, "Key is encrypted; passphrase required.");
+		set_error(ctx, "The key needs a passphrase.");
 		free(data);
 		return NULL;
 	}
 
 	if (file_len < (usize)(HEADER_LEN + POLY1305_MAC_SIZE)) {
-		set_error(ctx, "Key file is corrupted.");
+		set_error(ctx, "The key file is corrupt.");
 		free(data);
 		return NULL;
 	}
 
 	if (data[4] != 0x01 || data[5] != 0x01) {
-		set_error(ctx, "Unsupported key file format.");
+		set_error(ctx, "The key file format is not supported.");
 		free(data);
 		return NULL;
 	}
@@ -196,7 +196,7 @@ u8 *load_sk_decrypted(shyake_ctx *ctx, const char *path, usize *out_len)
 
 	if (dec_ret != 0) {
 		free(sk);
-		set_error(ctx, "Incorrect passphrase.");
+		set_error(ctx, "The passphrase is wrong.");
 		return NULL;
 	}
 
