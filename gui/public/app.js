@@ -53,13 +53,18 @@ function show(view) {
         $("view-" + v).classList.toggle("hidden", v !== view);
 }
 
+/* canonical shyake address: user@instance.host (scheme stripped) */
+function fmtAddr(username, instance) {
+    const host = (instance ?? "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    return `${username ?? "?"}@${host || "?"}`;
+}
+
 async function boot() {
     const st = await api("/status");
     if (!st.initialized || !st.registered) {
         show("setup");
     } else if (!st.unlocked) {
-        $("unlock-ident").textContent =
-            `${st.username ?? "?"} @ ${st.instance ?? "?"}`;
+        $("unlock-ident").textContent = fmtAddr(st.username, st.instance);
         $("unlock-pass-wrap").classList.toggle("hidden", !st.keyEncrypted);
         show("unlock");
         if (!st.keyEncrypted) unlock("");
@@ -69,9 +74,9 @@ async function boot() {
 }
 
 function enterMain(st) {
-    $("main-ident").textContent = `${st.username} @ ${st.instance}`;
-    $("acct-ident").textContent =
-        `${st.username} @ ${st.instance} · 配置目录 ${st.configDir}`;
+    const addr = fmtAddr(st.username, st.instance);
+    $("main-ident").textContent = addr;
+    $("acct-ident").textContent = `${addr} · 配置目录 ${st.configDir}`;
     show("main");
     refreshBox("inbox");
     loadBlocklist();
@@ -86,6 +91,8 @@ $("btn-setup").onclick = async () => {
     const p2 = $("setup-pass2").value;
     const msg = $("setup-msg");
     if (!username) return showMsg(msg, "请输入用户名");
+    if (!/^(?=.*[a-zA-Z])[a-zA-Z0-9_]{4,16}$/.test(username))
+        return showMsg(msg, "用户名需为 4-16 位字母/数字/下划线，且至少含一个字母");
     if (p1 !== p2) return showMsg(msg, "两次输入的密码不一致");
     $("btn-setup").disabled = true;
     showMsg(msg, "正在生成密钥并注册（可能需要几十秒）…", true);
