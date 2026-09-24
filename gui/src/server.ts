@@ -126,27 +126,39 @@ route("GET", "/api/status", () => {
     });
 });
 
+/* mirrors server-side validation (server/src/utils.ts) */
+const USERNAME_RE = /^(?=.*[a-zA-Z])[a-zA-Z0-9_]{4,16}$/;
+
 route("POST", "/api/setup", async ({ req }) => {
     const { instance, username, passphrase } = await req.json();
     if (!instance || !username)
         return json({ error: "instance and username are required" }, 400);
+    if (!USERNAME_RE.test(username))
+        return json({
+            error: "username must be 4-16 chars (letters, digits, underscore; at least one letter)",
+        }, 400);
     try {
         mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
-        writeConfigUserInstance(username, instance);
+        /* persist USERNAME only after the server accepts registration */
+        writeConfigUserInstance("", instance);
         const s = new Session(CONFIG_DIR, instance, username);
         try {
             s.setPassphrase(passphrase || null);
-            await s.generateKeys();
+            if (!keysExist())
+                await s.generateKeys();
             await s.register(username);
         } catch (e) {
             s.close();
             throw e;
         }
+        writeConfigUserInstance(username, instance);
         session?.close();
         session = s;
         return json({ ok: true });
     } catch (e) {
-        return err(e);
+        /* SHYAKE_ERR_HTTP (-3): the instance rejected registration */
+        const code = (e as { code?: number }).code;
+        return err(e, code === -3 ? 400 : 500);
     }
 });
 
