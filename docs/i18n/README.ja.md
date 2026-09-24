@@ -38,6 +38,16 @@ shyake version
 
 インストール後は `shyake update` でその場でアップグレードできます（後述の update コマンドを参照）。
 
+### GUI
+
+実験的なローカル Web GUI が [`gui/`](../../gui) にあります。[Bun](https://bun.sh) 上で動作し、FFI 経由で `libshyake` を呼び出します：
+
+```sh
+cd gui && bun run start
+```
+
+詳しくは [gui/README.md](../../gui/README.md) を参照してください。
+
 ### 使い方
 
 **初回利用**：

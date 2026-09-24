@@ -106,6 +106,10 @@ shyake/
 │   └── wrangler.toml       # Worker config, bindings, env vars
 ├── tests/
 │   └── e2e_test.sh         # end-to-end test suite (bash)
+├── gui/                    # experimental local web GUI (Bun + bun:ffi)
+│   ├── src/ffi.ts          #   bun:ffi bindings for include/shyake.h
+│   ├── src/server.ts       #   token-guarded HTTP API on 127.0.0.1
+│   └── public/             #   vanilla HTML/JS UI (no build step)
 └── docs/
     ├── SPEC.md             # technical specification (protocol, crypto)
     ├── DEV.md              # developer guide (deps, build, testing)
@@ -136,6 +140,10 @@ Architecture notes:
   expose internals through `shyake.h` unless the FFI needs them.
 - Server API changes must stay in sync with the client's network layer
   (`client/src/lib/network.c`) and with `docs/SPEC.md`.
+- `gui/` is a third-party-style client: it must talk to the library
+  only through `include/shyake.h` (via `bun:ffi`), never reaching into
+  library internals. The struct layouts mirrored in `gui/src/ffi.ts`
+  must be updated whenever `shyake.h` structs change.
 
 ## Coding Conventions
 

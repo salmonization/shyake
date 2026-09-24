@@ -38,6 +38,16 @@ shyake version
 
 安装完成后，可以使用 `shyake update` 对客户端进行更新（参见下文的 update 命令）。
 
+### 图形界面
+
+一个实验性的本地 Web 图形界面位于 [`gui/`](../../gui)，基于 [Bun](https://bun.sh) 运行，通过 FFI 调用 `libshyake`：
+
+```sh
+cd gui && bun run start
+```
+
+详见 [gui/README.md](../../gui/README.md)。
+
 ### 使用方法
 
 **首次使用**：
