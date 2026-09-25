@@ -45,14 +45,14 @@ Once installed, you can upgrade in place with `shyake update`
 
 ### GUI
 
-An experimental local web GUI lives in [`gui/`](./gui). It runs on
+An experimental local web GUI lives in [`webui/`](./webui). It runs on
 [Bun](https://bun.sh) and drives `libshyake` through FFI:
 
 ```sh
-cd gui && bun run start
+cd webui && bun run start
 ```
 
-See [gui/README.md](./gui/README.md) for details.
+See [webui/README.md](./webui/README.md) for details.
 
 ### Usage
 

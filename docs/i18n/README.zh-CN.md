@@ -40,13 +40,13 @@ shyake version
 
 ### 图形界面
 
-一个实验性的本地 Web 图形界面位于 [`gui/`](../../gui)，基于 [Bun](https://bun.sh) 运行，通过 FFI 调用 `libshyake`：
+一个实验性的本地 Web 图形界面位于 [`webui/`](../../webui)，基于 [Bun](https://bun.sh) 运行，通过 FFI 调用 `libshyake`：
 
 ```sh
-cd gui && bun run start
+cd webui && bun run start
 ```
 
-详见 [gui/README.md](../../gui/README.md)。
+详见 [webui/README.md](../../webui/README.md)。
 
 ### 使用方法
 

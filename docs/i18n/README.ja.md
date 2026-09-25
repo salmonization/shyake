@@ -40,13 +40,13 @@ shyake version
 
 ### GUI
 
-実験的なローカル Web GUI が [`gui/`](../../gui) にあります。[Bun](https://bun.sh) 上で動作し、FFI 経由で `libshyake` を呼び出します：
+実験的なローカル Web GUI が [`webui/`](../../webui) にあります。[Bun](https://bun.sh) 上で動作し、FFI 経由で `libshyake` を呼び出します：
 
 ```sh
-cd gui && bun run start
+cd webui && bun run start
 ```
 
-詳しくは [gui/README.md](../../gui/README.md) を参照してください。
+詳しくは [webui/README.md](../../webui/README.md) を参照してください。
 
 ### 使い方
 
