@@ -148,6 +148,10 @@ shyake/
 ├── tests/
 │   ├── e2e_test.sh         # end-to-end test suite (bash)
 │   └── federation_test.sh  # two Go instances, relays between them
+├── gui/                    # experimental local web GUI (Bun + bun:ffi)
+│   ├── src/ffi.ts          #   bun:ffi bindings for include/shyake.h
+│   ├── src/server.ts       #   token-guarded HTTP API on 127.0.0.1
+│   └── public/             #   vanilla HTML/JS UI (no build step)
 └── docs/
     ├── SPEC.md             # technical specification (protocol, crypto)
     ├── DEV.md              # developer guide (deps, build, testing)
@@ -193,6 +197,10 @@ Architecture notes:
 - In the Go server, `internal/protocol` holds the wire rules and does
   no I/O. The signed-message rebuild there must stay byte-exact with
   the client's cJSON; `testdata/liboqs_vectors.json` checks it.
+- `gui/` is a third-party-style client: it must talk to the library
+  only through `include/shyake.h` (via `bun:ffi`), never reaching into
+  library internals. The struct layouts mirrored in `gui/src/ffi.ts`
+  must be updated whenever `shyake.h` structs change.
 
 ## Coding Conventions
 

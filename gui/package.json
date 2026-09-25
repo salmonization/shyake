@@ -1,0 +1,8 @@
+{
+    "name": "shyake-gui",
+    "description": "Local web GUI for shyake, built on libshyake via bun:ffi",
+    "type": "module",
+    "scripts": {
+        "start": "bun src/server.ts"
+    }
+}

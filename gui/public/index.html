@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shyake</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- 初始化 / 注册 -->
+<div id="view-setup" class="center-wrap hidden">
+    <h1>shyake</h1>
+    <p class="sub">后量子端到端加密邮件 · 初始化你的身份</p>
+    <label>实例地址</label>
+    <input type="text" id="setup-instance" placeholder="https://shyake.eee.coffee">
+    <label>用户名</label>
+    <input type="text" id="setup-username" autocomplete="off">
+    <label>密码（可选，用于加密本地密钥）</label>
+    <input type="password" id="setup-pass1">
+    <label>确认密码</label>
+    <input type="password" id="setup-pass2">
+    <div class="btn-row">
+        <button id="btn-setup">初始化并注册</button>
+    </div>
+    <div class="msg" id="setup-msg"></div>
+</div>
+
+<!-- 解锁 -->
+<div id="view-unlock" class="center-wrap hidden">
+    <h1>shyake</h1>
+    <p class="sub" id="unlock-ident"></p>
+    <div id="unlock-pass-wrap">
+        <label>密钥密码</label>
+        <input type="password" id="unlock-pass">
+    </div>
+    <div class="btn-row">
+        <button id="btn-unlock">解锁</button>
+    </div>
+    <div class="msg" id="unlock-msg"></div>
+</div>
+
+<!-- 主界面 -->
+<div id="view-main" class="hidden">
+    <header>
+        <span class="brand">shyake</span>
+        <span class="ident" id="main-ident"></span>
+        <span class="spacer"></span>
+        <button class="ghost" id="btn-lock">锁定</button>
+    </header>
+    <nav class="tabs">
+        <button data-tab="inbox" class="active">收件箱</button>
+        <button data-tab="sent">已发送</button>
+        <button data-tab="saved">已保存</button>
+        <button data-tab="compose">写信</button>
+        <button data-tab="account">账户</button>
+    </nav>
+    <main>
+        <div id="tab-inbox" class="tabpane">
+            <div class="toolbar">
+                <button class="ghost" data-refresh="inbox">刷新</button>
+                <span class="msg" id="msg-inbox"></span>
+            </div>
+            <div id="list-inbox"></div>
+        </div>
+        <div id="tab-sent" class="tabpane hidden">
+            <div class="toolbar">
+                <button class="ghost" data-refresh="sent">刷新</button>
+                <span class="msg" id="msg-sent"></span>
+            </div>
+            <div id="list-sent"></div>
+        </div>
+        <div id="tab-saved" class="tabpane hidden">
+            <div class="toolbar">
+                <button class="ghost" data-refresh="saved">刷新</button>
+                <span class="msg" id="msg-saved"></span>
+            </div>
+            <div id="list-saved"></div>
+        </div>
+        <div id="tab-compose" class="tabpane hidden">
+            <label>收件人（跨实例用 user@instance）</label>
+            <input type="text" id="compose-to">
+            <label>主题（不超过 128 字节）</label>
+            <input type="text" id="compose-subject">
+            <label>正文</label>
+            <textarea id="compose-body" rows="14"></textarea>
+            <div class="btn-row">
+                <button id="btn-send">发送</button>
+            </div>
+            <div class="msg" id="compose-msg"></div>
+        </div>
+        <div id="tab-account" class="tabpane hidden">
+            <div class="section">
+                <h3>身份</h3>
+                <div class="desc" id="acct-ident"></div>
+                <div class="btn-row" style="margin-top:4px">
+                    <button class="ghost" id="btn-self-fp">查看我的指纹</button>
+                </div>
+                <div class="mono hidden" id="acct-fp"></div>
+            </div>
+            <div class="section">
+                <h3>验证对方指纹</h3>
+                <div class="desc">输入用户名获取其公钥指纹；若与已知密钥不符，核实后再更新信任。</div>
+                <div class="btn-row" style="margin-top:0">
+                    <input type="text" id="fp-user" placeholder="用户名" style="flex:1">
+                    <button class="ghost" id="btn-fp-lookup">查询</button>
+                    <button class="ghost hidden" id="btn-fp-update">更新信任</button>
+                </div>
+                <div class="mono hidden" id="fp-result" style="margin-top:10px"></div>
+            </div>
+            <div class="section">
+                <h3>拉黑列表</h3>
+                <div class="btn-row" style="margin-top:0">
+                    <input type="text" id="block-target" placeholder="用户名或实例地址" style="flex:1">
+                    <button class="ghost" id="btn-block">拉黑</button>
+                </div>
+                <ul class="plain" id="block-list" style="margin-top:10px"></ul>
+            </div>
+            <div class="section">
+                <h3>密钥轮换</h3>
+                <div class="desc">重新生成密钥对并上传。会清空与你相关的所有邮件。</div>
+                <label>新密钥密码（留空则不加密）</label>
+                <input type="password" id="rotate-pass">
+                <div class="btn-row">
+                    <button class="ghost" id="btn-rotate">轮换密钥</button>
+                </div>
+            </div>
+            <div class="section">
+                <h3 style="color:var(--danger)">销毁账户</h3>
+                <div class="desc">删除本地配置与密钥，并销毁实例上的账户。所有邮件被清除，用户名在该实例上永久锁定。输入你的用户名以确认。</div>
+                <div class="btn-row" style="margin-top:0">
+                    <input type="text" id="destroy-confirm" placeholder="输入用户名确认" style="flex:1">
+                    <button class="danger" id="btn-destroy">销毁</button>
+                </div>
+            </div>
+            <div class="msg" id="acct-msg"></div>
+        </div>
+    </main>
+</div>
+
+<!-- 邮件详情弹窗 -->
+<div id="overlay" class="overlay hidden">
+    <div class="modal">
+        <h2 id="mail-subject"></h2>
+        <div class="meta" id="mail-meta"></div>
+        <pre id="mail-body"></pre>
+        <div class="btn-row">
+            <button class="ghost" id="btn-reply">回复</button>
+            <button class="ghost" id="btn-save-mail">保存到本地</button>
+            <button class="ghost" id="btn-block-sender">拉黑发件人</button>
+            <button class="danger" id="btn-burn">删除</button>
+            <span class="spacer" style="flex:1"></span>
+            <button class="ghost" id="btn-close-modal">关闭</button>
+        </div>
+        <div class="msg" id="modal-msg"></div>
+    </div>
+</div>
+
+<script>window.__SHYAKE_TOKEN__ = "__SHYAKE_TOKEN__";</script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -43,6 +43,17 @@ shyake version
 Once installed, you can upgrade in place with `shyake update`
 (see the update command below).
 
+### GUI
+
+An experimental local web GUI lives in [`gui/`](./gui). It runs on
+[Bun](https://bun.sh) and drives `libshyake` through FFI:
+
+```sh
+cd gui && bun run start
+```
+
+See [gui/README.md](./gui/README.md) for details.
+
 ### Usage
 
 **First use**:
