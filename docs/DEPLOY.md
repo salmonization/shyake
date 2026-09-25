@@ -1,215 +1,235 @@
 ## Shyake Deployment Guide
 
-The server runs as a Cloudflare Worker with a D1 database.
-However, you can also self-host it on your own hardware.
+Shyake has two server implementations with the same HTTP API. A
+client works with either one, and the two kinds federate with each
+other.
 
-There are 2 ways to deploy the server:
-
-* Using Cloudflare
-* Self-hosting
+* **Using Cloudflare**: the Worker in `server/cf/`, on Cloudflare
+  Workers with a D1 database. You need no machine of your own.
+* **Self-hosting**: the Go server in `server/go/`, one binary with
+  one SQLite file, on your own machine.
 
 **Federation**
 
-Two instances federate automatically when both have
-`FEDERATION_ENABLED = true`. No additional configuration is required.
-Cross-instance mail is routed server-to-server; clients only ever talk
-to their own instance.
+Two instances federate automatically when both have federation
+enabled, which is the default. You need no additional configuration.
+The server routes cross-instance mail directly, server-to-server.
+Clients only ever talk to their own instance.
 
-To disable inbound and outbound federation:
-
-```toml
-FEDERATION_ENABLED = false
-```
+To disable inbound and outbound federation, set
+`FEDERATION_ENABLED = false` in `wrangler.toml` (Worker) or
+`SHYAKE_FEDERATION_ENABLED=false` (Go server).
 
 ### Using Cloudflare
+
+Everything runs from your own machine with the Wrangler CLI. You do
+not need to fork this repository, connect it to Cloudflare, or touch
+the dashboard.
 
 Prerequisites:
 
 - Node.js 18+
 - A Cloudflare account
 
-Steps:
-
-1. **Fork and clone** this repo on GitHub.
-
-2. **Authenticate** Cloudflare **Wrangler CLI** in your terminal:
-
 ```sh
-npx wrangler login
+git clone https://github.com/salmonization/shyake.git
+cd shyake/server/cf
+./deploy.sh
 ```
 
-`npx` will prompt you to install Wrangler on first run if it is
-not already present. No separate install step is needed.
+`deploy.sh` runs the whole deployment:
 
-3. **Create the D1 database**:
+1. installs the Worker's dependencies
+2. runs `npx wrangler login` if you are not authenticated yet
+3. asks for your instance domain
+4. creates the D1 database and the KV cache namespace, reusing them
+   if they already exist
+5. writes `server/cf/wrangler.toml` with the resulting ids
+6. applies the database migrations
+7. deploys the Worker and checks `/health`
+
+Your instance domain appears in every address on your instance
+(`user@your.domain.example`). Other instances use it to route
+federated mail back to you. If you do not have a custom domain, the
+default `*.workers.dev` URL works.
+
+Options:
+
+| Option | Effect |
+|---|---|
+| `--domain <d>` | set the instance domain non-interactively |
+| `--update` | switch to the newest release first, then redeploy |
+| `--no-kv` | skip the KV version cache |
+| `--config-only` | write `wrangler.toml` and stop |
+| `--local` | set up a local development server ([DEV.md](DEV.md)) |
+
+#### Upgrading
 
 ```sh
-npx wrangler d1 create shyake-db
+cd shyake/server/cf
+./deploy.sh --update
 ```
 
-Copy the `database_id` from the output.
+This fetches the release tags and checks out the newest release
+(`vX.Y.Z`). It skips pre-releases and code that is not released yet.
+Then it reapplies any new migrations and redeploys. Git reports a
+"detached HEAD" after the checkout. This is expected. The script
+reuses existing resources and keeps your settings. It also sets the version that `GET /api/version` reports,
+from `server/VERSION`.
 
-4. **Create the KV namespace** (version relay cache):
+**Upgrading to v0.3.0.** From v0.3.0, clients sign the body of
+block, unblock, and rotate requests (protocol level 2, [SPEC.md
+§3.3](SPEC.md)). A v0.3.0 client cannot block, unblock, or rotate on
+an older server. An older client cannot do these on a v0.3.0 server.
+Upgrade the server first. Clients then update with `shyake update`.
+This applies to the Go server too.
 
-```sh
-npx wrangler kv namespace create VERSION_CACHE
-```
+#### Changing settings
 
-Copy the `id` from the output. Every instance relays the GitHub
-Releases API for `shyake update` on its own clients; this KV
-namespace caches the lookup for one hour. The binding is optional —
-without it the endpoint still works but hits GitHub on every
-request.
-
-5. **Edit `server/wrangler.toml`** in your fork:
+`deploy.sh` generates `server/cf/wrangler.toml` from
+`wrangler.template.toml` on first run. Git does **not** track it, so
+your instance settings survive `git pull` and never conflict. Edit
+it, then re-run `./deploy.sh`:
 
 ```toml
 [vars]
-INSTANCE_DOMAIN      = "your.domain.example" # edit this
+INSTANCE_DOMAIN      = "your.domain.example"
 REGISTRATION_ENABLED = true
 RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
 FEDERATION_ENABLED   = true
 MAX_MAIL_SIZE        = 196608 # 192 KiB; do not exceed 786432 (768 KiB)
-
-[[d1_databases]]
-binding        = "DB"
-database_name  = "shyake-db"
-database_id    = "<your database_id>" # paste your database_id here
-migrations_dir = "migrations"
-
-[[kv_namespaces]]
-binding = "VERSION_CACHE"
-id      = "<your kv namespace id>" # paste your KV namespace id here
 ```
 
-The `[[d1_databases]]` block must be present and contain the
-correct `database_id`. Without it the Worker has no database
-binding and every request will fail.
+If you re-run the script, it never overwrites these values. It only
+fills in resource ids that are still unset.
 
-You can use the default `*.workers.dev` URL as `INSTANCE_DOMAIN`
-if you do not have a custom domain.
+If you deployed an instance before `wrangler.toml` became generated,
+`./deploy.sh --update` moves your settings aside as
+`wrangler.toml.bak` and restores them after the checkout.
 
-6. **Apply database migrations** (creates all tables):
+### GitHub token (recommended)
 
-```sh
-cd server
-npx wrangler d1 migrations apply shyake-db --remote
-```
+`shyake update` asks your instance for the newest release, and your
+instance asks the GitHub API. Without a token, GitHub allows 60 calls
+an hour per IP address. Cloudflare Workers share IP addresses, so
+other Workers can use up that limit, and `shyake update` then fails.
+A token gives your instance a limit of its own.
 
-Cloudflare's CI pipeline does not apply database migrations
-automatically. You must run `wrangler d1 migrations apply` once
-manually. Skipping this leaves the database empty and the Worker
-will error on every API call.
+1. On GitHub, go to **Settings > Developer settings > Personal access
+   tokens > Fine-grained tokens** and select **Generate new token**.
+2. Under **Repository access**, select **Public repositories**. Do not
+   add any permissions.
+3. Set an expiration date, generate the token, and copy it.
+4. Give it to your instance:
+   - Worker: in `server/cf`, run `npx wrangler secret put GITHUB_TOKEN`
+     and paste the token. It applies at once.
+   - Go server: add `SHYAKE_GITHUB_TOKEN=<token>` to
+     `/etc/shyake/shyake.env`, then run
+     `sudo systemctl restart shyake-server`.
 
-7. **Deploy**
-
-Choose one of the following:
-
-**Option A: Dashboard**: Go to
-`Compute → Workers & Pages → Create application → Continue with GitHub`
-in the Cloudflare Dashboard (you may need to `Add GitHub account` at the first
-time), select your fork, and set:
-
-| Field | Value |
-|-------|-------|
-| Framework preset | None |
-| Build command | None |
-| Deploy command | `npx wrangler deploy` |
-| Root directory | `/server` |
-
-Future pushes to your fork will redeploy automatically.
-
-**Option B: CLI only**:
-
-```sh
-cd server
-npm install
-npx wrangler deploy
-```
-
-8. **Verify**
-
-Wait for deployment to complete and then open
-`https://<worker>.workers.dev/health` (or your custom domain).
-A `200 OK` confirms the Worker and database are working correctly.
+When GitHub refuses, the instance serves the last answer it got, and
+its log shows GitHub's status: `npx wrangler tail` for a Worker,
+`journalctl -u shyake-server` for the Go server. A `401` means that
+the token expired. Create a new one and repeat step 4.
 
 ### Self-hosting
 
-Self-hosting runs the exact same Worker code on your own machine,
-inside the local `workerd` runtime that ships with Wrangler. D1
-(SQLite) and KV are emulated locally by Wrangler itself, so **no
-Cloudflare account is needed**. No `wrangler login`, no resource
-creation on the dashboard.
+The Go server runs on your own machine. It is one static binary,
+`shyake-server`, and keeps all data in one SQLite file. It needs no
+Node.js and no Cloudflare account.
 
 Prerequisites:
 
-- Node.js 18+
-- A machine that stays online (any OS Node.js supports; the examples
-  below assume Linux with systemd)
-- For federation: a public domain name pointing at the machine, and a
-  reverse proxy with a valid TLS certificate (see below)
+- A machine that stays online. The examples below assume Linux with
+  systemd.
+- Go 1.26 or newer to build the binary, or Docker.
+- For federation: a public domain name that points at the machine,
+  and a reverse proxy with a valid TLS certificate (step 4).
 
 Steps:
 
-1. **Clone** this repo (a fork is not required):
+1. **Get the binary**. Download a release build, or build it from
+source.
+
+To download: a release that changes the server has the assets
+`shyake-server-linux-amd64.tar.gz` and
+`shyake-server-linux-arm64.tar.gz` on the [releases
+page](https://github.com/salmonization/shyake/releases). A release
+that changes only the client does not have them. Use the newest
+release that has them.
+
+```sh
+tar -xzf shyake-server-linux-amd64.tar.gz
+cd shyake-server-linux-amd64
+```
+
+The archive contains the binary, `shyake-server.service`, and
+`shyake.env.example`.
+
+To build from source:
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server
-npm install
+cd shyake/server/go
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
 ```
 
-2. **Edit `server/wrangler.toml`**: only the `[vars]` section
-matters. The `database_id` and KV `id` are ignored in local mode, so
-the placeholder values can stay as they are:
+The `-ldflags` option sets the version that `shyake-server -version`
+and `GET /api/version` report. Without it, the version is `dev`.
 
-```toml
-[vars]
-INSTANCE_DOMAIN      = "your.domain.example" # edit this
-REGISTRATION_ENABLED = true
-RESERVED_USERNAMES   = "admin,system,support,noreply,shyake,root,postmaster"
-FEDERATION_ENABLED   = true
-MAX_MAIL_SIZE        = 196608 # 192 KiB; do not exceed 786432 (768 KiB)
-```
+Both ways give a static binary. You can copy it to any Linux machine
+with the same CPU architecture.
 
-`INSTANCE_DOMAIN` must be the domain your instance is reachable at
-from the outside. It is embedded in every address on your instance
-(`user@your.domain.example`) and other instances use it to route
-federated mail back to you.
-
-3. **Apply database migrations** locally (creates all tables):
+2. **Install it with systemd**. Create a system user for the
+service, then install the files. In a source checkout they are in
+`server/go/deploy/`. From a release archive, remove `deploy/` from
+the commands below.
 
 ```sh
-npx wrangler d1 migrations apply shyake-db --local
+sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo install -D -m 640 -g shyake deploy/shyake.env.example /etc/shyake/shyake.env
+sudo install -m 644 deploy/shyake-server.service /etc/systemd/system/
 ```
 
-Note the `--local` flag. This writes to a SQLite file on disk
-instead of a Cloudflare-hosted database.
-
-4. **Run the server**:
+3. **Configure it**. Edit `/etc/shyake/shyake.env` and set at least
+the instance domain:
 
 ```sh
-npx wrangler dev --local --ip 127.0.0.1 --port 8787
+SHYAKE_INSTANCE_DOMAIN=your.domain.example
+SHYAKE_LISTEN=127.0.0.1:8787
 ```
 
-Verify with `curl http://127.0.0.1:8787/health`. A `200 OK` means
-the Worker and database are working.
+Your instance domain appears in every address on your instance
+(`user@your.domain.example`). Other instances use it to route
+federated mail back to you. The file lists every other setting with
+its default. [SPEC.md §11.2](SPEC.md) describes them all. Also set
+`SHYAKE_GITHUB_TOKEN` ([GitHub token](#github-token-recommended)).
 
-Keep the server bound to `127.0.0.1` and let a reverse proxy handle
-outside traffic (next step). Binding to `0.0.0.0` directly is only
-reasonable on a trusted LAN without federation.
+Then start the service:
 
-5. **Set up a reverse proxy with TLS**
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now shyake-server
+curl http://127.0.0.1:8787/health
+```
+
+A `200 OK` means the server and its database work. The service runs
+as the `shyake` user. It can write only to `/var/lib/shyake`, where
+the database lives.
+
+4. **Set up a reverse proxy with TLS**
 
 This step is **required for federation**. Instances always contact
 each other over `https://<domain>/...`, so your instance must be
-reachable at `https://your.domain.example` with a certificate that
-other instances will accept. A self-signed certificate will not
-work. If your instance is private (its users only mail each other),
-you can skip this step and let clients connect over plain HTTP.
+reachable at `https://your.domain.example` with a certificate other
+instances accept. A self-signed certificate does not work. If your
+instance is private (its users only mail each other), you can skip
+this step and let clients connect over plain HTTP.
 
-With [Caddy](https://caddyserver.com/), certificates are obtained
-and renewed automatically; the entire `Caddyfile` is:
+With [Caddy](https://caddyserver.com/), Caddy obtains and renews
+certificates automatically. The entire `Caddyfile` is:
 
 ```
 your.domain.example {
@@ -220,67 +240,117 @@ your.domain.example {
 nginx with a certbot-managed certificate works just as well. Proxy
 `https://your.domain.example` to `http://127.0.0.1:8787`.
 
-6. **Keep it running**
+The server limits requests per client address. Behind a proxy, it
+reads the client address from `X-Forwarded-For`, but only when the
+proxy is in `SHYAKE_TRUSTED_PROXIES`. The default trusts proxies on
+the same machine (`127.0.0.1`, `::1`). If your proxy runs elsewhere,
+add its address. Otherwise all clients share the proxy's address and
+one rate limit.
 
-`wrangler dev` is a foreground process; use a supervisor to start it
-on boot and restart it on failure. A minimal systemd unit
-(`/etc/systemd/system/shyake.service`):
-
-```ini
-[Unit]
-Description=Shyake server (local workerd)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=shyake
-WorkingDirectory=/home/shyake/shyake/server
-ExecStart=/usr/bin/npx wrangler dev --local --ip 127.0.0.1 --port 8787
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+#### Running it with Docker
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now shyake
+docker build --build-arg VERSION=$(cat server/VERSION) \
+    -t shyake-server server/go
+docker run -d --name shyake --restart unless-stopped \
+    -p 127.0.0.1:8787:8787 -v shyake:/data \
+    -e SHYAKE_INSTANCE_DOMAIN=your.domain.example \
+    -e SHYAKE_TRUSTED_PROXIES=172.16.0.0/12 \
+    shyake-server
 ```
 
-**Data location and backups**
+The database is `/data/shyake.db` on the `shyake` volume. The
+container sees the reverse proxy at the Docker bridge address, so
+set `SHYAKE_TRUSTED_PROXIES` to the bridge network, as above.
 
-All local state (the D1 SQLite database and the KV cache) lives
-under `server/.wrangler/state/`. Backing up your instance means
-backing up that directory (stop the server first, or use SQLite-safe
-tooling, to avoid copying a database mid-write). Deleting it resets
-the instance to an empty database. Pass `--persist-to <dir>` to
-`wrangler dev` to store state somewhere else.
+#### Upgrading
 
-**Caveats: Know what you are running**
+Install the new binary, from a newer release archive or a new build.
+To build, check out the newest release (`vX.Y.Z`, pre-releases
+skipped) first:
 
-`wrangler dev` is Wrangler's development server, not a hardened
-production server. It runs the same `workerd` runtime that powers
-Cloudflare Workers, and for a personal or small-community instance
-it holds up fine, but be aware of its development-oriented behavior:
+```sh
+cd shyake
+git fetch --tags
+git checkout "$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
+cd server/go
+CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o shyake-server ./cmd/shyake-server
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo systemctl restart shyake-server
+curl http://127.0.0.1:8787/api/version
+```
 
-- **File watching / hot reload.** It watches the source tree and
-  reloads the Worker when files change. Convenient in development,
-  but on a server it means an edit or a `git pull` in `server/`
-  restarts your instance immediately. Update deliberately: pull,
-  review, then let it reload (or restart the service yourself).
-- **Single process, no supervision of its own.** There is no
-  clustering and no built-in crash recovery. That is what the
-  systemd unit above is for.
-- **No rate limiting or DDoS protection.** On Cloudflare those come
-  with the platform. Self-hosted, your reverse proxy is the place to
-  add rate limits if your instance is publicly reachable.
-- **Interactive keybindings.** `wrangler dev` reads hotkeys from
-  stdin when attached to a terminal. Under systemd there is no TTY,
-  so this is a non-issue, but if you run it in `tmux` instead, avoid
-  stray keypresses (`x` clears the console, `Ctrl+C` exits).
+The server applies new database migrations when it starts. A send
+that is in progress during the restart fails, and the client keeps
+it as a draft. See also **Upgrading to v0.3.0** above.
 
-If your instance outgrows this setup, the Cloudflare deployment path
-above is the scalable option. The database can be migrated by
-exporting the local SQLite file and importing it with
-`wrangler d1 execute --remote`.
+#### Data location and backups
+
+All data is in one SQLite file: `/var/lib/shyake/shyake.db` under
+systemd, `/data/shyake.db` in Docker. The database runs in WAL mode,
+so two more files (`-wal`, `-shm`) sit next to it while the server
+runs.
+
+To back up a running server, use SQLite's online backup, which is
+safe during writes:
+
+```sh
+sudo sqlite3 /var/lib/shyake/shyake.db ".backup /root/shyake-backup.db"
+```
+
+Or stop the service and copy the three files.
+
+#### Moving from the Worker
+
+The Go server can take over the data of a Worker instance: users,
+mail, and blocks. Keep the same instance domain, because stored
+addresses depend on it.
+
+From a Worker on Cloudflare, export the database first:
+
+```sh
+cd shyake/server/cf
+npx wrangler d1 export shyake-db --remote --output=d1-export.sql
+```
+
+From a local `wrangler dev` instance, stop it and use its database
+file. It is the `.sqlite` file under
+`server/cf/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/` that is
+not named `metadata.sqlite`. The file runs in WAL mode: most of its
+data is in the `-wal` file next to it. If you copy the database, copy
+its `-wal` file too.
+
+Then import into a new database as the `shyake` user, before the
+service first starts. The user must be able to read the export file:
+
+```sh
+sudo install -d -o shyake -g shyake -m 700 /var/lib/shyake
+sudo install -o shyake -m 600 d1-export.sql /var/lib/shyake/
+# for a D1 file instead: install both <file>.sqlite and <file>.sqlite-wal
+sudo -u shyake env \
+    SHYAKE_INSTANCE_DOMAIN=your.domain.example \
+    SHYAKE_DATABASE=/var/lib/shyake/shyake.db \
+    shyake-server -import-d1 /var/lib/shyake/d1-export.sql
+sudo rm /var/lib/shyake/d1-export.sql
+```
+
+The import refuses a database that already has users. It reports
+what it could not copy unchanged:
+
+- Two names that differ only by case: the older account keeps the
+  name. The Go server does not allow such pairs.
+- A mail stored twice under the same signature: it keeps one copy.
+
+It also rewrites block entries to the normalized form ([SPEC.md
+§4](SPEC.md)).
+
+Then point your domain at the new machine. Clients need no change:
+their keys and addresses stay the same.
+
+#### Database
+
+The Go server supports SQLite only. The storage layer sits behind an
+interface, with a test suite that every backend must pass.
+PostgreSQL support is planned on that basis. Until then, the server
+refuses a `postgres://` value in `SHYAKE_DATABASE`.

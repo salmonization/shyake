@@ -14,14 +14,14 @@
   * [インストール](#インストール)
   * [テスト](#テスト)
 - [サーバー](#サーバー)
-  * [ローカル開発](#ローカル開発)
+  * [Worker](#worker)
+  * [Go サーバー](#go-サーバー)
 
 ## クライアント
 
 ### 依存関係
 
-`liboqs` はすべてのプラットフォームで静的リンクされるため、バイナリはそれに対する実行時依存を持ちません。`libcurl` と
-`libcrypto` はすべてのプラットフォームで動的リンクのままです。
+`liboqs` はすべてのプラットフォームで静的リンクされるため、バイナリはそれに対する実行時依存を持ちません。`libcurl` と `libcrypto` はすべてのプラットフォームで動的リンクのままです。
 
 依存関係（ビルド時のみ）：
 
@@ -60,11 +60,9 @@ pkg install clang cmake make curl-dev openssl-dev
 
 **liboqs のビルド**
 
-`liboqs` をソースからコンパイルする場合（GNU/Linux や Termux
-など）、最小構成でビルドする必要があります。すべてのアルゴリズムを有効にして `liboqs` をビルドすると、バイナリサイズが大幅に肥大化します（約 20MB）。
+`liboqs` をソースからコンパイルする場合（GNU/Linux や Termux など）、最小構成でビルドする必要があります。すべてのアルゴリズムを有効にして `liboqs` をビルドすると、バイナリサイズが大幅に肥大化します（約 20MB）。
 
-Shyake に必要なアルゴリズム（ML-KEM-768 と ML-DSA-65）のみで
-`liboqs` をビルドするには、次を実行します：
+Shyake に必要なアルゴリズム（ML-KEM-768 と ML-DSA-65）のみで `liboqs` をビルドするには、次を実行します：
 
 ```sh
 git clone --depth 1 \
@@ -119,20 +117,31 @@ cp bin/shyake /usr/local/bin/
 
 ### テスト
 
-ローカル開発サーバーに対してエンドツーエンドのテストスイートを実行します：
+ローカルのサーバーに対してエンドツーエンドのテストスイートを実行します。どちらのサーバーでも構いませんが、プロトコルに関わる変更は両方で通る必要があります：
 
 ```sh
-# ターミナル 1
-cd server && npx wrangler dev --local
+# ターミナル 1：Worker
+cd server/cf && npx wrangler dev --local
+# または Go サーバー
+cd server/go && SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 go run ./cmd/shyake-server
 
 # ターミナル 2
 cd client && make
 bash tests/e2e_test.sh
 ```
 
+`SHYAKE_TEST_INSTANCE` でテストスイートの接続先 URL を変えられます。
+
+フェデレーションのテストは Go サーバーを 2 つ自分で起動し、その間でクライアントを動かします。双方向のリレー、停止中のインスタンスへのリレー（クライアントが下書きを残し、復帰後に送信する）、リレーされたメールに対するブロックを確認します：
+
+```sh
+cd client && make && cd ..
+bash tests/federation_test.sh
+```
+
 ### 非対話的なパスフレーズ
 
-`SHYAKE_PASSPHRASE` を設定すると、秘密鍵の解錠が必要などの場面で対話的プロンプトをスキップできる（`init` も初期パスフレーズとしてこれを使う）。スクリプトによるテストを想定したもので、一般ユーザー向けではない。コマンドラインに直接書いた値はシェル履歴に残り、エクスポートした環境変数は子プロセスから見える。
+`SHYAKE_PASSPHRASE` を設定すると、秘密鍵の解錠が必要な場面で対話的プロンプトをスキップできます（`init` も初期パスフレーズとしてこれを使います）。スクリプトによるテストを想定したもので、一般ユーザー向けではありません。コマンドラインに直接書いた値はシェル履歴に残り、エクスポートした環境変数は子プロセスから見えます。
 
 ```sh
 export SHYAKE_PASSPHRASE=$(openssl rand -base64 12)
@@ -142,10 +151,71 @@ shyake check inbox
 
 ## サーバー
 
-### ローカル開発
+### Worker
 
 ```sh
+cd server/cf
+./deploy.sh --local      # 依存関係、wrangler.toml、ローカルデータベース
 npx wrangler dev --local
 ```
 
 Worker はデフォルトで `http://localhost:8787` をリッスンします。
+
+`wrangler.toml` は `wrangler.template.toml` から生成され、git の管理対象ではありません。Cloudflare へのデプロイは同じスクリプトを `--local` なしで実行します。[DEPLOY.md](DEPLOY.md) を参照してください。
+
+### Go サーバー
+
+Go 1.26 以降が必要です。サーバーは cgo に依存しません。
+
+```sh
+cd server/go
+go test ./...                    # ユニットテスト
+go vet ./...
+gofmt -l .                       # 何も出力されないこと
+SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 SHYAKE_DATABASE=/tmp/dev.db \
+    go run ./cmd/shyake-server
+```
+
+パッケージの構成（外側から内側へ）：
+
+| パッケージ | 役割 |
+|---|---|
+| `internal/protocol` | アドレス、PoW、署名、署名対象メッセージ。I/O は行いません。 |
+| `internal/api` | HTTP ハンドラー、認証、レート制限 |
+| `internal/federation` | 送信クライアント、リモート公開鍵キャッシュ、リレー |
+| `internal/store` | ストレージインターフェースとバックエンドのテストスイート |
+| `internal/store/sqlite` | SQLite バックエンドとマイグレーション |
+| `internal/config` | `SHYAKE_*` 環境変数の設定 |
+
+**署名のテストベクター。** `internal/protocol/testdata/liboqs_vectors.json` には、クライアント自身の cJSON で組み立てたメッセージに liboqs が付けた署名が入っています。Go のテストは、circl がそれらの署名を受け入れること、そしてサーバーが署名対象メッセージをバイト単位で正確に再構築できることを確認します。署名対象メッセージを変更したら、このファイルを再生成してください：
+
+```sh
+cd server/go/internal/protocol/testdata
+cc -std=c11 -o /tmp/gen gen_vectors.c \
+   ../../../../../client/src/lib/vendor/cJSON/cJSON.c \
+   -I../../../../../client/src/lib/vendor/cJSON \
+   /usr/local/lib/liboqs.a -lcrypto
+/tmp/gen > liboqs_vectors.json
+```
+
+**新しいストレージバックエンド**は `store.Store` を実装し、`storetest.Run`（SQLite バックエンドと同じテストスイート）に通る必要があります。PostgreSQL はこの方法で対応する予定です。SQL はバックエンドのパッケージ内に閉じ込めてください。インターフェースが扱うのはユーザー、メール、ブロックだけです。
+
+**1 台のマシンでのフェデレーション。** インスタンス同士は HTTPS で通信し、サーバーはプライベートアドレスへの接続を拒否します。ローカルでのテストでは、`SHYAKE_FEDERATION_INSECURE=true` で平文 HTTP とループバックアドレスを許可できます。公開インスタンスでは絶対に設定しないでください。
+
+## リリース
+
+リポジトリのバージョン系列は 1 本だけで、それがリリースタグです（[SPEC.md §12.1](SPEC.md)）。各コンポーネントは、最後に変更されたリリースのバージョンを記録します：
+
+- クライアント：`client/Makefile` の `VERSION`。
+- 両サーバー：`server/VERSION`。
+
+リリースの手順：
+
+1. 変更した各コンポーネントのバージョンを新しいタグにします。変更していないコンポーネントは元のバージョンのままにします。
+2. そのタグで GitHub のリリースを公開します。
+
+リリースのワークフローは、`client/Makefile` がタグと一致すればクライアントを、`server/VERSION` が一致すれば Go サーバーをビルドします。どちらも一致しなければ、ワークフローは失敗します。
+
+Worker インスタンスが追うのは `main` ではなくタグです。`deploy.sh --update` は最新の `vX.Y.Z` タグに切り替えます。`main` へのマージは、タグを打つまでこれらのインスタンスには届きません。プレリリースのタグ（`vX.Y.Z-rc.1`）は決して届きません。
+
+クライアントに影響するサーバーの変更は、先にサーバーへ届けてください。サーバーが新しいリクエスト形式を受け付けるようになるときは、プロトコルレベル（Go サーバーの `protocol.Level`、Worker の `PROTOCOL_LEVEL`）を上げます。クライアントはそれを `GET /api/version` から読み取ります。

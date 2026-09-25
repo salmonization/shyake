@@ -7,8 +7,8 @@
 Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 <table>
-<tr><td>バージョン</td><td>0.2</td></tr>
-<tr><td>最終更新</td><td>2026-07-11</td></tr>
+<tr><td>バージョン</td><td>0.3</td></tr>
+<tr><td>最終更新</td><td>2026-09-23</td></tr>
 </table>
 
 ---
@@ -20,9 +20,7 @@ Shyake は、POSIX スタイルのコマンドラインインターフェース�
 主な特性：
 
 - **エンドツーエンド暗号化**：サーバーは平文を一切保持しない。すべてのメッセージ内容は送信前にクライアント側で暗号化される。
-- **耐量子暗号**：鍵カプセル化には ML-KEM-768 を、認証には
-  ML-DSA-65（CRYSTALS-Dilithium）を使用する。いずれも
-  [liboqs](https://github.com/open-quantum-safe/liboqs) 由来である。
+- **耐量子暗号**：鍵カプセル化には ML-KEM-768 を、認証には ML-DSA-65（CRYSTALS-Dilithium）を使用する。いずれも [liboqs](https://github.com/open-quantum-safe/liboqs) 由来である。
 - **分散型**：どの運営者もほぼゼロコストで自分のインスタンスをホストできる。インスタンスは、サーバー間リレーモデルを用いて任意でフェデレーションする。
 - **ステートレスなサーバー**：サーバーは暗号文と公開鍵のみを保存する。
 - **保存時に暗号化される鍵**：クライアントの秘密鍵は、任意でパスフレーズ（scrypt + ChaCha20-Poly1305）によりディスク上で保護される。
@@ -43,18 +41,22 @@ shyake/
 │   ├── include/shyake.h    # 公開 API（不透明ポインタ）
 │   ├── tests/              # ライブラリテストプログラム
 │   └── Makefile
-├── server/                 # Cloudflare Worker
-│   ├── src/index.ts        # Hono ルート
-│   ├── src/utils.ts        # ヘルパー（PoW、ユーザー名検証）
-│   ├── migrations/         # D1 スキーママイグレーション
-│   └── wrangler.toml       # Worker 設定
+├── server/
+│   ├── cf/                 # Cloudflare Worker
+│   │   ├── src/index.ts    # Hono ルート
+│   │   ├── src/utils.ts    # ヘルパー（PoW、ユーザー名検証）
+│   │   ├── migrations/     # D1 スキーママイグレーション
+│   │   └── wrangler.template.toml  # Worker 設定
+│   └── go/                 # Go サーバー（セルフホスティング用）
+│       ├── cmd/shyake-server/      # エントリポイント
+│       └── internal/       # protocol、store、api、federation
 └── docs/
 ```
 
 #### 2.2 クライアント
 
 - **標準**：C11、POSIX.1-2008（`_POSIX_C_SOURCE=200809L`）
-- **ビルドシステム**：GNU Make；クロスプラットフォーム（macOS、GNU/Linux、Termux）
+- **ビルドシステム**：GNU Make、クロスプラットフォーム（macOS、GNU/Linux、Termux）
 - **成果物**：
   - `bin/shyake`: CLI バイナリ、`libshyake.a` を静的リンク
   - `lib/libshyake.a`: 静的ライブラリ
@@ -62,18 +64,25 @@ shyake/
 - **依存関係**：
   - `liboqs`（常に静的リンク）: ML-KEM と ML-DSA
   - `libcurl`: HTTP トランスポート
-  - `libcrypto`（OpenSSL）: SHA-256 フィンガープリント、
-    SHA-1（PoW）、ChaCha20-Poly1305 AEAD、
-    scrypt KDF（`EVP_PBE_scrypt`）
+  - `libcrypto`（OpenSSL）: SHA-256 フィンガープリント、SHA-1（PoW）、ChaCha20-Poly1305 AEAD、scrypt KDF（`EVP_PBE_scrypt`）
   - `cJSON`（同梱）: JSON 解析
 
 #### 2.3 サーバー
 
+サーバーには 2 つの実装があり、同じ HTTP API（§5）を提供する。クライアントはどちらにも接続でき、両種のインスタンスは相互にフェデレーションできる。
+
+**Worker**（`server/cf/`）、Cloudflare 向け：
+
 - **ランタイム**：Cloudflare Workers
 - **フレームワーク**：[Hono](https://hono.dev/)
 - **データベース**：Cloudflare D1（SQLite）
-- **署名検証**：WebAssembly にコンパイルされた ML-DSA-65
-  （`mldsa65-wasm`）を、Wrangler の `CompiledWasm` ルール経由でロードする。
+- **署名検証**：WebAssembly にコンパイルされた ML-DSA-65（`mldsa65-wasm`）を、Wrangler の `CompiledWasm` ルール経由でロードする。
+
+**Go サーバー**（`server/go/`）、セルフホスティング向け：
+
+- **ランタイム**：単一の静的バイナリ `shyake-server`
+- **データベース**：単一の SQLite ファイル。PostgreSQL は同じストレージインターフェースの背後に追加する計画である。
+- **署名検証**：[circl](https://github.com/cloudflare/circl) の純粋な Go 実装による ML-DSA-65
 
 ---
 
@@ -93,18 +102,13 @@ shyake/
 #### 3.2 メッセージ暗号化
 
 1. ランダムな 256 ビット対称鍵を生成する。
-2. その鍵を用いて `subject` と `body` を
-   **ChaCha20-Poly1305** で暗号化する。それぞれ独立したランダムな
-   96 ビット nonce を使用する。各暗号文は
-   `base64(nonce || ciphertext || tag)` として送信される。
-3. **受信者の ML-KEM 公開鍵**にカプセル化する：KEM カプセル化により KEM 暗号文と 32 バイトの共有秘密が得られる。対称鍵を共有秘密と XOR して連結する：
-   `enc_key_recipient = base64(kem_ct || (sym_key XOR ss))`。
+2. その鍵を用いて `subject` と `body` を **ChaCha20-Poly1305** で暗号化する。それぞれ独立したランダムな 96 ビット nonce を使用する。各暗号文は `base64(nonce || ciphertext || tag)` として送信される。
+3. **受信者の ML-KEM 公開鍵**にカプセル化する：KEM カプセル化により KEM 暗号文と 32 バイトの共有秘密が得られる。対称鍵を共有秘密と XOR して連結する：`enc_key_recipient = base64(kem_ct || (sym_key XOR ss))`。
 4. **送信者自身の ML-KEM 公開鍵**に対して同じカプセル化を繰り返す → `enc_key_sender`（送信者が自分の送信ボックスを読めるようにするため）。
 
 復号はこの逆の手順である：クライアントは自身の KEM 秘密鍵で共有秘密をデカプセル化し、それを暗号化鍵フィールドと XOR して対称鍵を復元し、その後コンテンツを復号する。
 
-単体ファイル暗号化コマンド（`enc` / `dec`）は、同じ
-ML-KEM-768 + ChaCha20-Poly1305 構成を、長さプレフィックス付きのバイナリコンテナ（`.enc` ファイル）で使用する。
+単体ファイル暗号化コマンド（`enc` / `dec`）は、同じ ML-KEM-768 + ChaCha20-Poly1305 構成を、長さプレフィックス付きのバイナリコンテナ（`.enc` ファイル）で使用する。
 
 #### 3.3 認証プロトコル
 
@@ -124,6 +128,14 @@ X-Shyake-Pow:       <Hashcash token>
 ```
 GET:/api/mail?type=inbox:salmon:1749513600
 ```
+
+ボディを持つリクエスト（`POST /api/rotate`、`POST /api/block`、`DELETE /api/block`）では、末尾にさらにコロンと、ボディの生バイト列の SHA-256（小文字の 16 進）を付ける：
+
+```
+POST:/api/block:salmon:1749513600:<ボディの sha256 16 進>
+```
+
+これによりボディが署名に結び付く。そうでなければ、転送中のリクエストを読める者（たとえば TLS を終端するプロキシ）が署名をそのまま残してボディを差し替えられる。rotate なら自分の公開鍵に、block なら別の対象に置き換えられてしまう。プロトコルレベル 2（§5.1）のサーバーは、この 3 つのエンドポイントではこの形式のみを受け付け、ダイジェストのない旧形式には `401` を返す。
 
 **ボディベース**（`POST /api/register` と `POST /api/mail`）：署名と PoW トークンはリクエストボディの JSON フィールドとして運ばれる。署名対象のメッセージは、以下のペイロード部分集合のコンパクト JSON シリアライゼーションである（フィールド順はクライアントが生成した通り）：
 
@@ -152,33 +164,37 @@ GET:/api/mail?type=inbox:salmon:1749513600
 }
 ```
 
-完全なリクエストボディはさらに `enc_key_sender`、
-`enc_key_recipient`、`signature`、`pow` を運ぶが、これらは署名対象の部分集合には含まれない。
+完全なリクエストボディはさらに `enc_key_sender`、`enc_key_recipient`、`signature`、`pow` を運ぶが、これらは署名対象の部分集合には含まれない。
 
-サーバーは、D1 に保存された送信者の `sig_pubkey`
-（フェデレーションメールの場合は送信者のインスタンスから取得）を用い、WASM ML-DSA モジュール経由で署名を検証する。
+サーバーは送信者の `sig_pubkey` で署名を検証する。公開鍵は自インスタンスのデータベースから読み出すか、フェデレーションメールの場合は送信者のインスタンスから取得する。
 
 #### 3.4 リプレイ対策
 
-署名対象のすべてのメッセージにタイムスタンプが含まれる。サーバーは、タイムスタンプがサーバー時刻から **300 秒（5 分）**
-を超えて乖離しているリクエストを拒否する。
+署名対象のすべてのメッセージにタイムスタンプが含まれる。サーバーは、タイムスタンプがサーバー時刻から **300 秒（5 分）**を超えて乖離しているリクエストを拒否する。
+
+Go サーバーはさらに、受け入れた署名をすべて記憶し、同じ署名を再利用したリクエストを HTTP 403 で拒否する。ただし `POST /api/mail` では、署名の重複はエラーではない。サーバーは保存済みメールの id とともに `201` を返し、二重には保存しない。したがってクライアントの再送は安全である。
 
 #### 3.5 プルーフ・オブ・ワーク（PoW）
 
-読み取りを含むすべての認証リクエストには、SHA-1 難易度
-**20 ビット**の Hashcash-v1 スタイルの PoW トークンが必要である：
+読み取りを含むすべての認証リクエストには、SHA-1 難易度 **20 ビット**の Hashcash-v1 スタイルの PoW トークンが必要である：
 
 ```
 1:<bits>:<yymmdd>:<resource>::<rand>:<counter-hex>
 ```
 
-`resource` は操作するユーザーのユーザー名である。トークンはクライアント側で生成（マイニング）され、署名検証やデータベース処理より前にサーバー側で検証される。
+`resource` は操作するユーザーである。登録とヘッダー認証ではユーザー名、メール送信では `sender` フィールドとなる。トークンはクライアント側で生成（マイニング）され、署名検証やデータベース処理より前にサーバー側で検証される。サーバーは次のいずれかに当てはまるトークンを拒否する：
+
+- resource が操作するユーザーでない
+- 日付がサーバーの日付（UTC）から 1 日を超えて離れている
+- SHA-1 ハッシュの先頭 20 ビットがすべて 0 ではない
+
+フェデレーションの送信者の resource にはコロンが含まれることがある（`alice@host:8787`）。そのためサーバーは先頭 3 フィールドと末尾 3 フィールドを位置で取り出し、その間をすべて resource とみなす。
+
+Go サーバーはさらに、一度受け入れたトークンを拒否する。したがって 1 つのトークンで支払えるのは 1 回のリクエストだけである。
 
 #### 3.6 鍵フィンガープリント
 
-フィンガープリントは、生の（デコード済み）ML-KEM 公開鍵バイトの
-**SHA-256** を小文字 16 進エンコードしたものである。クライアントは信頼済みの鍵を `~/.config/shyake/known_hosts` にキャッシュする。
-1 行につき 1 エントリで、スペース区切りである：
+フィンガープリントは、生の（デコード済み）ML-KEM 公開鍵バイトの **SHA-256** を小文字 16 進エンコードしたものである。クライアントは信頼済みの鍵を `~/.config/shyake/known_hosts` にキャッシュする。1 行につき 1 エントリで、スペース区切りである：
 
 ```
 <username> <fingerprint-hex> <kem_pubkey-base64>
@@ -203,13 +219,11 @@ GET:/api/mail?type=inbox:salmon:1749513600
 | 62 | — | 暗号文（平文の鍵と同じ長さ） |
 | 末尾 | 16 B | Poly1305 タグ |
 
-62 バイトのヘッダーは AAD として結び付けられるため、KDF
-パラメータへのいかなる改ざんも認証に失敗する。KDF はパスフレーズから 256 ビットの ChaCha20-Poly1305 鍵を導出する。
+62 バイトのヘッダーは AAD として結び付けられるため、KDF パラメータへのいかなる改ざんも認証に失敗する。KDF はパスフレーズから 256 ビットの ChaCha20-Poly1305 鍵を導出する。
 
 `SHYK` マジックを持たないファイルはレガシーな生鍵として扱われ、そのままロードされる。空のパスフレーズの場合は生の（暗号化されていない）鍵が書き込まれる。
 
-パスフレーズは対話的に入力（ターミナルエコー無効）するか、非対話用途では `SHYAKE_PASSPHRASE` 環境変数で渡す。
-`rotate` は現在のパスフレーズと新しいパスフレーズの入力を求め、新しい鍵ペアはサーバーがローテーションを確認した後にのみ、新しいパスフレーズで保存される。
+パスフレーズは対話的に入力（ターミナルエコー無効）するか、非対話用途では `SHYAKE_PASSPHRASE` 環境変数で渡す。`rotate` は現在のパスフレーズと新しいパスフレーズの入力を求め、新しい鍵ペアはサーバーがローテーションを確認した後にのみ、新しいパスフレーズで保存される。
 
 #### 3.8 ローカル暗号化下書き
 
@@ -239,8 +253,9 @@ compose のエディタが扱う平文一時ファイルは `mkstemp`（モー�
 
 ### 4. データベーススキーマ
 
-Cloudflare D1（SQLite）で管理される。マイグレーション：
-`migrations/0001_initial.sql`。
+どちらのサーバーも SQLite を使う。Worker は Cloudflare D1（`server/cf/migrations/`）、Go サーバーはローカルファイル（`server/go/internal/store/sqlite/migrations/`）である。以下のテーブルは両者に共通する。Go サーバーはさらに次を追加する：
+
+- `mail` テーブルの `sig_hash` 列：`signature` の SHA-256 で、一意である。再送されたメールを識別するために使う（§3.4）。
 
 #### `users`
 
@@ -251,8 +266,9 @@ Cloudflare D1（SQLite）で管理される。マイグレーション：
 | `sig_pubkey` | TEXT | Base64 エンコードされた ML-DSA-65 公開鍵 |
 | `created_at` | INTEGER | UNIX タイムスタンプ |
 
-`destroy` 時、`kem_pubkey` と `sig_pubkey` は空文字列に設定され、そのユーザーに関わるすべてのメール行とブロック行が削除される。ユーザー行自体は、ユーザー名を永久にロックするために
-**保持される**。
+ユーザー名は**大文字小文字を区別せずに**一意である。大文字小文字だけが既存の名前と異なる場合、登録は HTTP 409 で拒否されるため、`Alice` を `alice` と並べて取得することはできない。それ以外の場所での照合は完全一致であり、両者が混同されることはない。
+
+`destroy` 時、`kem_pubkey` と `sig_pubkey` は空文字列に設定され、そのユーザーに関わるすべてのメール行とブロック行が削除される。ユーザー行自体は、ユーザー名を永久にロックするために **保持される**。
 
 #### `mail`
 
@@ -269,9 +285,7 @@ Cloudflare D1（SQLite）で管理される。マイグレーション：
 | `signature` | TEXT | 送信者の ML-DSA-65 署名、base64 |
 | `timestamp` | INTEGER | サーバーが割り当てる UNIX タイムスタンプ |
 
-ローカルアドレスは裸の名前で保存される：`@<INSTANCE_DOMAIN>`
-サフィックスは挿入前に取り除かれる。`recipient` と `sender`
-のインデックスがメールボックスクエリを支える。`rotate` はそのユーザーが送信者または受信者であるすべてのメール行を削除する。
+ローカルアドレスは裸の名前で保存される：`@<INSTANCE_DOMAIN>` サフィックスは挿入前に取り除かれる。`recipient` と `sender` のインデックスがメールボックスクエリを支える。`rotate` はそのユーザーが送信者または受信者であるすべてのメール行を削除する。
 
 #### `blocks`
 
@@ -282,33 +296,51 @@ Cloudflare D1（SQLite）で管理される。マイグレーション：
 | `created_at` | INTEGER | UNIX タイムスタンプ |
 | PK | | `(blocker, blocked)` 複合主キー |
 
-メール送信時、受信者が送信者のローカル名または送信者のドメインをブロックしている場合、サーバーは HTTP 403 で送信を拒否する。
+アドレスは保存や照合の前に**正規化**される。`@<INSTANCE_DOMAIN>` サフィックスは取り除かれ、リモートアドレスのドメイン部分と裸のドメインは小文字化される。したがってローカルユーザーは常に `bob`、リモートユーザーは常に `mallory@evil.example` となる。
+
+メール送信時、受信者が送信者の正規化されたアドレスまたは送信者のドメインをブロックしている場合、サーバーは HTTP 403 で送信を拒否する。双方が先に正規化されるため、受信者が完全修飾形式で届く中継メールでもこの検査が機能する。
 
 ---
 
 ### 5. HTTP API
 
-すべてのエンドポイントは Cloudflare Worker 上でホストされる。ベース URL は設定された `INSTANCE_DOMAIN` である。
+両サーバーは同じエンドポイントを、同じステータスコードとレスポンスボディで提供する。ベース URL はインスタンスのドメインである。
 
 #### 5.1 公開エンドポイント
 
 | メソッド | パス | 説明 |
 |---|---|---|
-| `GET` | `/health` | 死活チェック；D1 に問い合わせ |
+| `GET` | `/health` | 死活チェック、データベースに問い合わせ |
 | `GET` | `/api/pubkey/:username` | `kem_pubkey`、`sig_pubkey` を返す |
+| `GET` | `/api/version` | サーバーのリリースとプロトコルレベル |
 | `GET` | `/api/client/version` | 最新のクライアントリリースタグ |
 
 `/api/pubkey/:username` は `user@domain` 構文をサポートする。ドメインがローカルインスタンスと異なる場合、サーバーはリクエストをリモートインスタンスへプロキシする（フェデレーションの有効化が必要）。
 
-`/api/client/version` は GitHub Releases API をプロキシし、
-`{"release": "vX.Y.Z", "pre_release": "vX.Y.Z-..."}` を返す（どちらのフィールドも欠けることがある）。結果は KV に
-1 時間キャッシュされる。§12 を参照。
+`/api/version` はサーバー自身を示す：
+
+```json
+{"version": "v0.3.0", "implementation": "go", "protocol": 2}
+```
+
+`version` は `server/VERSION` にあるリリース（§12.1）で、バージョンを埋め込まずにビルドした場合は `dev` になる。`implementation` は `cf` または `go` である。`protocol` はプロトコルレベルで、レベル 2 はリクエストボディに署名する（§3.3）。このエンドポイントを持たないサーバーはレベル 1 とみなす。クライアントは、インスタンスが受け付けるリクエスト形式をバージョンではなくプロトコルレベルで判断する。
+
+`/api/client/version` は GitHub Releases API をプロキシし、クライアントのビルドを含む各チャネルの最新タグと、そのリリースの各アセットの SHA-256 ダイジェストを返す：
+
+```json
+{
+  "release": "vX.Y.Z",
+  "release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"},
+  "pre_release": "vX.Y.Z-...",
+  "pre_release_digests": {"shyake-linux-x86_64.tar.gz": "<hex>"}
+}
+```
+
+どちらのチャネルも欠けることがある。サーバーのビルド（`shyake-server-*`）しか含まないリリースは飛ばす。結果は 1 時間キャッシュされる。Worker は KV に、Go サーバーはメモリに保持する。GitHub が失敗したときは、最後に取得できた結果を返す。一度も取得できていない場合に限り `502` を返す。§12 を参照。
 
 #### 5.2 認証エンドポイント
 
-すべてのエンドポイントは PoW トークン、タイムスタンプウィンドウ、
-ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と
-`POST /api/mail` は認証フィールドを JSON ボディで運び、その他はすべて `X-Shyake-*` ヘッダーを使用する。
+すべてのエンドポイントは PoW トークン、タイムスタンプウィンドウ、ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と `POST /api/mail` は認証フィールドを JSON ボディで運び、その他はすべて `X-Shyake-*` ヘッダーを使用する。
 
 | メソッド | パス | 説明 |
 |---|---|---|
@@ -323,13 +355,21 @@ ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と
 | `POST` | `/api/rotate` | 公開鍵をローテーション |
 | `DELETE` | `/api/destroy` | アカウントを抹消 |
 
-`POST /api/mail` の注目すべきステータスコード：`409`
-（`KEY_MISMATCH`、送信された受信者フィンガープリントがもはや一致しない）、`410`（`USER_DESTROYED`）、`413`（ペイロードが大きすぎる）、`403`（ブロック済み、不正な PoW、または古いタイムスタンプ）。
+`POST /api/mail` の注目すべきステータスコード：`409`（`KEY_MISMATCH`、送信された受信者フィンガープリントがもはや一致しない）、`410`（`USER_DESTROYED`）、`413`（ペイロードが大きすぎる）、`403`（ブロック済み、不正な PoW、または古いタイムスタンプ）。
+
+Go サーバーはさらに次を返すことがある：
+
+- `429`：任意のエンドポイントで、クライアントアドレスがレート制限を超えたとき。
+- `403`：リクエストが署名または PoW トークンを再利用したとき（§3.4、§3.5）。
+- `403`：`POST /api/mail` で、送信者と受信者のどちらもこのインスタンスに属さないとき。サーバーは他の 2 つのインスタンス間ではリレーしない。
+- `503`：`POST /api/mail` で、送信者のインスタンスが公開鍵の問い合わせに応答しないとき。
+- `502`：`POST /api/mail` で、受信者のインスタンスが公開鍵の問い合わせに応答しないとき。Worker はこの場合 `404` を返す。
+
+リレーが失敗したとき、どちらのサーバーも `502`、またはリモートインスタンス自身の拒否をそのまま返す（§6.2）。
 
 #### 5.3 サイズ制限
 
-サーバーは `POST /api/mail` の生の HTTP リクエストボディにハードキャップを課す。デフォルトは **196608 バイト**（192 KiB）で、`wrangler.toml` の
-`MAX_MAIL_SIZE` で設定可能である。絶対上限は 786432 バイト（768 KiB）で、Cloudflare D1 の単一行制限によるものである。
+サーバーは `POST /api/mail` の生の HTTP リクエストボディにハードキャップを課す。デフォルトは **196608 バイト**（192 KiB）で、運用者が変更できる（§11）。絶対上限は 786432 バイト（768 KiB）で、Cloudflare D1 の単一行制限によるものである。Go サーバーも同じ上限を守る。これにより、そのメールはフェデレーションで Worker インスタンスにも受け入れられる。
 
 ---
 
@@ -340,25 +380,30 @@ ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と
 - **ローカルユーザー**：`username`（`@` なし）
 - **リモートユーザー**：`username@instance.domain`
 
-クライアントは常にユーザー自身のインスタンスとのみ通信する。リモートの受信者へ送信する際、クライアントは自身の送信者文字列を
-`username@<own-domain>` として修飾する。
+クライアントは常にユーザー自身のインスタンスとのみ通信する。リモートの受信者へ送信する際、クライアントは自身の送信者文字列を `username@<own-domain>` として修飾する。
 
 #### 6.2 送信メールリレー
 
 `recipient` がリモートインスタンスに属する場合：
 
 1. クライアントは署名・暗号化済みペイロードを**送信者自身のインスタンス**に POST する（`POST /api/mail`）。
-2. 送信者のインスタンスはメールをローカルの D1 データベースに保存する。
-3. 同一リクエストのライフサイクル内で（`executionCtx.waitUntil` 経由）、サーバーは元の生ペイロードを `https://<recipientDomain>/api/mail` へ転送する。
+2. 送信者のインスタンスは検証を終えた後、元の生ペイロードを `https://<recipientDomain>/api/mail` へ転送し、最大 15 秒まで応答を待つ。
+3. リモートインスタンスがメールを受け入れたら（`2xx`）、送信者のインスタンスは送信ボックス用に自身のコピーを保存し、`201` を返す。
+
+リレーが失敗した場合、送信者のインスタンスは何も保存しない：
+
+- リモートインスタンスが拒否したとき（`408`、`429` 以外の `4xx`）：送信者のインスタンスは同じステータスとリモートの `error` テキストをそのまま返す。たとえば `403` と `Recipient has blocked this sender` である。どちらのサーバーもブロック時には必ずこのテキストを使い、クライアントはこれでブロックを識別する（`SHYAKE_ERR_BLOCKED`、§8）。
+- それ以外の失敗（接続できない、タイムアウト、`408`、`429`、`5xx`）：送信者のインスタンスは `502` と `Recipient instance unreachable` を返す。
+
+サーバーはリレーをキューに入れず、再試行もしない。キューがあっても長くはもたない。受信者のインスタンスは送信者が署名したタイムスタンプの 300 秒後にペイロードを拒否し（§3.4）、署名し直せるのはクライアントだけだからである。送信に失敗すると、クライアントはメールをローカルの下書きとして残し（§3.8）、ユーザーは後で送り直せる。送り直すときは新しいペイロードに署名する。
 
 受信者のインスタンスは、送信者のインスタンスから送信者の公開鍵を取得して（`GET /api/pubkey/<sender>`）、送信者の署名を独立に検証する。
 
-送信者と受信者の両方のデータベースがメールを保存する。これにより、リモートインスタンスの可用性に関わらず、送信者側の原子性（送信ボックスの可用性）が保証される。
+送信者と受信者の両方のデータベースがメールを保存する。そのため、リモートインスタンスが使えないときでも送信者の送信ボックスは使える。
 
 #### 6.3 フェデレーションの切り替え
 
-`wrangler.toml` の `FEDERATION_ENABLED` で設定できる。
-`false` の場合、インスタンスはリモートユーザーの解決を拒否し、受信のリレーメールと送信のインスタンス間送信の両方が拒否される。
+`FEDERATION_ENABLED`（Worker）または `SHYAKE_FEDERATION_ENABLED`（Go サーバー）で設定できる。`false` の場合、インスタンスはリモートユーザーの解決を拒否し、受信のリレーメールと送信のインスタンス間送信の両方が拒否される。
 
 ---
 
@@ -366,21 +411,17 @@ ML-DSA-65 署名（§3.3）を検証する。`POST /api/register` と
 
 Shyake は公開鍵管理に **Trust On First Use（TOFU）** を採用している：
 
-- **初回接触**：クライアントは `GET /api/pubkey/<recipient>` を問い合わせ、KEM フィンガープリントを計算し、
-  `~/.config/shyake/known_hosts` に黙って追記する。
+- **初回接触**：クライアントは `GET /api/pubkey/<recipient>` を問い合わせ、KEM フィンガープリントを計算し、`~/.config/shyake/known_hosts` に黙って追記する。
 - **以降の接触**：送信のたびに、取得した鍵を `known_hosts` のエントリと比較する。不一致の場合、何も送信される前にローカルで `KEY_MISMATCH` により中止する。
-- **サーバー側のダブルチェック**：ペイロードに
-  `recipient_kem_fingerprint` が埋め込まれており、保存済みの鍵と一致しなくなった場合、サーバーは独立に HTTP 409 で拒否する。
-- **鍵ローテーションの検出**：クライアントは致命的エラーを表示して停止する：
+- **サーバー側のダブルチェック**：ペイロードに `recipient_kem_fingerprint` が埋め込まれており、保存済みの鍵と一致しなくなった場合、サーバーは独立に HTTP 409 で拒否する。
+- **鍵ローテーションの検出**：クライアントは致命的エラーとして停止する：
 
 ```
-FATAL: Remote public key of recipient has changed!
-RUN 'shyake fingerprint <username>' to inspect and update trust.
+FATAL: The public key of <username> has changed.
+Run 'shyake fingerprint <username>' to check the new key.
 ```
 
-`fingerprint` コマンドは**帯域外（OOB）検証**を提供する：サーバーから現在の公開鍵を取得し、フィンガープリントを計算して
-`known_hosts` と比較する。出力には GPG スタイルの 16 進グループと OpenSSH スタイルの randomart イメージが表示される。
-`--update` フラグは、ユーザーが信頼できるチャネルで新しいフィンガープリントを検証した後に `known_hosts` を書き換える。
+`fingerprint` コマンドは**帯域外（OOB）検証**を提供する：サーバーから現在の公開鍵を取得し、フィンガープリントを計算して `known_hosts` と比較する。出力には GPG スタイルの 16 進グループと OpenSSH スタイルの randomart イメージが表示される。`--update` フラグは、ユーザーが信頼できるチャネルで新しいフィンガープリントを検証した後に `known_hosts` を書き換える。
 
 ---
 
@@ -404,7 +445,7 @@ void shyake_set_new_passphrase(shyake_ctx *ctx, const char *pp);
 const char* shyake_last_error(shyake_ctx *ctx);
 ```
 
-内部構造体の定義は `src/lib/lib_internal.h` にあり、呼び出し側には公開されない。ライブラリは stdout/stderr へ一切出力しない。失敗時には人間可読の詳細を記録し（`shyake_last_error(ctx)` で取得でき、同一コンテキストでの次の呼び出しまで有効）、セマンティックなエラーコードを返す。エラーコードは型付き列挙型（`shyake_err`）として返され、後方互換のため `SHYAKE_OK = 0` である：
+内部構造体の定義は `src/lib/lib_internal.h` にあり、呼び出し側には公開されない。ライブラリは stdout/stderr へ一切出力しない。失敗時には失敗の理由を記録し（`shyake_last_error(ctx)` で取得できる）、セマンティックなエラーコードを返す。理由は 1 つ以上の完全な文であり、何が失敗したかではなく、なぜ失敗したかだけを述べる。例は `You are blocked by bob.` である。操作名はクライアントが前に付ける。CLI は `<Action> failed. <reason>` の形で表示し、例は `Send failed. You are blocked by bob.` である。唯一の例外は受信者の公開鍵の変更で、CLI は `FATAL: <reason>` と表示する（§7）。呼び出しのたびに理由はクリアされ、同一コンテキストでの次の呼び出しまで有効である。エラーコードは型付き列挙型（`shyake_err`）として返され、後方互換のため `SHYAKE_OK = 0` である：
 
 | コード | 意味 |
 |---|---|
@@ -418,6 +459,7 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_FORBIDDEN` | HTTP 403 |
 | `SHYAKE_ERR_CRYPTO` | 暗号操作の失敗 |
 | `SHYAKE_ERR_NO_INSTANCE` | インスタンス URL が未設定 |
+| `SHYAKE_ERR_BLOCKED` | HTTP 403：受信者が送信者をブロックしている |
 
 API グループ：コンテキストのライフサイクル、鍵生成、PoW 生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`）。
 
@@ -429,8 +471,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 
 ### 9. ローカル設定
 
-設定ディレクトリ：`~/.config/shyake/`（デフォルト）、または
-`-c` / `--config` で指定するカスタムパス。
+設定ディレクトリ：`~/.config/shyake/`（デフォルト）、または `-c` / `--config` で指定するカスタムパス。
 
 | ファイル | 内容 |
 |---|---|
@@ -441,8 +482,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `saved/<id>.json` | `shyake save` で保存された暗号化メール |
 | `drafts/<id>.json` | `shyake compose` が書き込む暗号化下書き（§3.8） |
 
-`saved/<id>.json` は `GET /api/mail/:id` が返す暗号文 JSON
-そのままであり、`shyake read` の実行時にのみ復号される。
+`saved/<id>.json` は `GET /api/mail/:id` が返す暗号文 JSON そのままであり、`shyake read` の実行時にのみ復号される。
 
 主な `config` フィールド：
 
@@ -485,7 +525,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `init [-c <dir>]` | 設定ディレクトリと鍵ペアを生成 |
 | `register -u <user> -i <url>` | インスタンスに登録 |
 | `whoami` | 現在のプロファイルを表示（ネットワーク不使用） |
-| `send -t <to> [-s <subj>] [file]` | メールを送信（テキストのみ） |
+| `send -t <to> [-s <subj>] [file]` | メールを送信（テキストのみ）。失敗時は下書きとして保存 |
 | `send --draft <id> [-t <to>] [-s <subj>]` | 保存済み下書きを送信（成功時に削除） |
 | `compose [<id>]` | 暗号化下書きの作成・編集（§3.8） |
 | `check inbox\|sent [opts]` | メールボックスのメタデータを一覧表示 |
@@ -509,12 +549,13 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `man [<command>]` | ドキュメントを表示 |
 | `version` | バージョン文字列を表示 |
 
-`check inbox|sent` は `--count`、`--json`、`--csv`、
-`--no-header` を受け付ける。`send` の宛先はローカル（`username`）またはリモート（`username@instance`）を指定でき、バイナリデータは呼び出し側で base64 エンコードする必要がある。`enc`/`dec` はデバッグとテスト用途を想定している。
+`check inbox|sent` は `--count`、`--json`、`--csv`、`--no-header` を受け付ける。`send` の宛先はローカル（`username`）またはリモート（`username@instance`）を指定でき、バイナリデータは呼び出し側で base64 エンコードする必要がある。`enc`/`dec` はデバッグとテスト用途を想定している。
 
 ---
 
-### 11. Worker 設定（`wrangler.toml`）
+### 11. サーバー設定
+
+#### 11.1 Worker（`wrangler.toml`）
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
@@ -523,6 +564,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `RESERVED_USERNAMES` | `admin,system,...` | 予約済みの名前（CSV） |
 | `FEDERATION_ENABLED` | `true` | フェデレーションメールの受信とリレー |
 | `MAX_MAIL_SIZE` | `196608` | `POST /api/mail` の最大ペイロードバイト数 |
+| `GITHUB_TOKEN` | — | 任意の secret（`wrangler secret put`）：リリース照会に使う GitHub トークン（§5.1） |
 
 必須のバインディング：
 
@@ -533,21 +575,56 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 
 `CompiledWasm` ビルドルールが `mldsa65-wasm` モジュールをロードする。
 
+`wrangler.toml` は `server/cf/deploy.sh` が `wrangler.template.toml` から生成するもので、git の管理対象ではない。運用者自身のドメインとリソース id を保持する。
+
+#### 11.2 Go サーバー（環境変数）
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `SHYAKE_INSTANCE_DOMAIN` | — | このインスタンスの正規ドメイン（必須） |
+| `SHYAKE_LISTEN` | `127.0.0.1:8787` | 待ち受けアドレス |
+| `SHYAKE_DATABASE` | `shyake.db` | SQLite ファイルのパス |
+| `SHYAKE_REGISTRATION_ENABLED` | `true` | 新規ユーザー登録を受け付ける |
+| `SHYAKE_RESERVED_USERNAMES` | `admin,system,...` | 予約済みの名前（CSV） |
+| `SHYAKE_FEDERATION_ENABLED` | `true` | フェデレーションメールの受信とリレー |
+| `SHYAKE_MAX_MAIL_SIZE` | `196608` | 最大ペイロードバイト数（最大 `786432`） |
+| `SHYAKE_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | `X-Forwarded-For` を信頼するプロキシ |
+| `SHYAKE_RATE_LIMIT` | `5` | クライアントアドレスごとの毎秒リクエスト数 |
+| `SHYAKE_RATE_BURST` | `30` | クライアントアドレスごとのバースト許容量 |
+| `SHYAKE_LOG_FORMAT` | `text` | `text` または `json` |
+| `SHYAKE_GITHUB_TOKEN` | — | 任意：リリース照会に使う GitHub トークン（§5.1） |
+| `SHYAKE_FEDERATION_INSECURE` | `false` | テスト専用：平文 HTTP とプライベートアドレスでのフェデレーションを許可する |
+
+Go サーバーは起動時にデータベースのマイグレーションを適用する。
+
 ---
 
 ### 12. リリースチャネルと自己更新
 
-リリースは GitHub で 2 つのチャネルで公開される：**stable**
-（通常リリース）と **preview**（プレリリース）。サーバーエンドポイント `GET /api/client/version` は GitHub Releases API
-をプロキシし、各チャネルの最新タグを選択して、結果を KV に
-1 時間キャッシュする。
+リリースは GitHub で 2 つのチャネルで公開される：**stable**（通常リリース）と **preview**（プレリリース）。サーバーエンドポイント `GET /api/client/version` は GitHub Releases API をプロキシし、各チャネルの最新タグを選択して、結果を 1 時間キャッシュする（§5.1）。
 
-`shyake update` はこのエンドポイントを**ユーザー自身のインスタンス**（profile 設定の `INSTANCE`）から取得する。したがって各インスタンスが自身の KV キャッシュで GitHub API を中継する。`shyake.eee.coffee` は組み込みのフォールバックにすぎず、インスタンスが未設定の場合にのみ使用される。タグは semver 順序（`vX.Y.Z`；同じベースバージョンではリリースがプレリリースより上位）で比較される。preview チャネルは stable より新しい場合にのみ提示される。
+`shyake update` はこのエンドポイントを**ユーザー自身のインスタンス**（profile 設定の `INSTANCE`）から取得する。したがって各インスタンスが自身のキャッシュで GitHub API を中継する。`shyake.eee.coffee` は組み込みのフォールバックにすぎず、インスタンスが未設定の場合にのみ使用される。タグは semver 順序（`vX.Y.Z`、同じベースバージョンではリリースがプレリリースより上位）で比較される。preview チャネルは stable より新しい場合にのみ提示される。
 
 `shyake update stable|preview` は自己更新を実行する：
 
-1. OS／アーキテクチャに一致するリリースアセット（`shyake-<os>-<arch>.tar.gz`）と `sha256sums.txt` を
-   GitHub Releases からダウンロードする。
-2. アーカイブの SHA-256 をチェックサムファイルと照合し、不一致なら中止する。
-3. アーカイブを展開し、実行中のバイナリをその場で置き換える（パスは `/proc/self/exe`、`_NSGetExecutablePath`、または
-   `which shyake` で解決）。
+1. OS／アーキテクチャに一致するリリースアセット（`shyake-<os>-<arch>.tar.gz`）を GitHub Releases からダウンロードする。
+2. アーカイブの SHA-256 を、`/api/client/version` の応答に含まれるそのアセットのダイジェストと照合する（§5.1）。不一致の場合、または応答にそのアセットのダイジェストがない場合は中止する。
+3. アーカイブを展開し、実行中のバイナリをその場で置き換える（パスは `/proc/self/exe`、`_NSGetExecutablePath`、または `which shyake` で解決）。
+
+#### 12.1 バージョン
+
+リポジトリのバージョン系列は 1 本だけで、それがリリースタグである。各コンポーネントは、最後に変更されたリリースのバージョンを記録する：
+
+- クライアント：`client/Makefile` の `VERSION`。
+- サーバー：`server/VERSION`。Worker と Go サーバーはこれを共有する。両者はすべてのリクエストに同じ応答を返さなければならないからである。
+
+リリースは、バージョンがそのタグと一致するコンポーネントだけをビルドする。クライアントだけを変更したリリースではサーバーを再ビルドせず、サーバーは古いバージョンのままとなる。サーバーを変更したリリースでは `server/VERSION` を新しいタグにする。
+
+リリースアセット：
+
+| アセット | 内容 |
+|---|---|
+| `shyake-<os>-<arch>.tar.gz` | クライアント |
+| `shyake-server-linux-<arch>.tar.gz` | Go サーバー（`amd64`、`arm64`）、その systemd unit、設定例 |
+
+サーバーのアセットしか含まないリリースは、クライアントに提示されない（§5.1）。

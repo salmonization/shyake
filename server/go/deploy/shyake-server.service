@@ -1,0 +1,55 @@
+# systemd unit for shyake-server. Install:
+#
+#   sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
+#   sudo install -m 755 shyake-server /usr/local/bin/
+#   sudo install -D -m 640 -g shyake shyake.env.example /etc/shyake/shyake.env
+#   sudo install -m 644 shyake-server.service /etc/systemd/system/
+#   sudoedit /etc/shyake/shyake.env
+#   sudo systemctl enable --now shyake-server
+#
+# The database lives in /var/lib/shyake (StateDirectory), owned by the
+# shyake user. The service has no access to the rest of the system.
+
+[Unit]
+Description=Shyake server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/shyake-server
+Environment=SHYAKE_DATABASE=/var/lib/shyake/shyake.db
+EnvironmentFile=/etc/shyake/shyake.env
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+
+User=shyake
+Group=shyake
+StateDirectory=shyake
+StateDirectoryMode=0700
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

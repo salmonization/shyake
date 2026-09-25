@@ -1,0 +1,381 @@
+#!/usr/bin/env bash
+#
+# Deploy or upgrade a Shyake instance on Cloudflare Workers, entirely
+# from this machine with the Wrangler CLI. No fork, no GitHub
+# connection, no dashboard clicking.
+#
+#   ./deploy.sh                    first deploy, or redeploy
+#   ./deploy.sh --update           switch to the newest release, then redeploy
+#   ./deploy.sh --domain d.example non-interactive domain
+#   ./deploy.sh --local            configure for `wrangler dev --local`
+#
+# Re-running is the upgrade path: existing resources are reused and
+# your wrangler.toml edits are preserved.
+
+set -eu
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+cd "$SCRIPT_DIR"
+
+TEMPLATE=wrangler.template.toml
+CONFIG=wrangler.toml
+DB_NAME=shyake-db
+KV_BINDING=VERSION_CACHE
+
+DOMAIN=""
+DO_UPDATE=0
+# the arguments minus --update, for the re-run after an update
+RERUN_ARGS=()
+DO_LOCAL=0
+WANT_KV=1
+CONFIG_ONLY=0
+
+RED=''
+GREEN=''
+YELLOW=''
+BOLD=''
+RESET=''
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+	RED=$(printf '\033[31m')
+	GREEN=$(printf '\033[32m')
+	YELLOW=$(printf '\033[33m')
+	BOLD=$(printf '\033[1m')
+	RESET=$(printf '\033[0m')
+fi
+
+say() { printf '%s==>%s %s\n' "$BOLD" "$RESET" "$*"; }
+ok() { printf '%s  ok%s  %s\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '%s  warning:%s %s\n' "$YELLOW" "$RESET" "$*" >&2; }
+die() {
+	printf '%serror:%s %s\n' "$RED" "$RESET" "$*" >&2
+	exit 1
+}
+
+usage() {
+	awk 'NR > 1 { if (!/^#/) exit; sub(/^#[[:space:]]?/, ""); print }' "$0"
+	exit "${1:-0}"
+}
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--domain)
+		[ $# -ge 2 ] || die "--domain needs a value"
+		DOMAIN=$2
+		RERUN_ARGS+=("$1" "$2")
+		shift 2
+		;;
+	--domain=*)
+		DOMAIN=${1#--domain=}
+		RERUN_ARGS+=("$1")
+		shift
+		;;
+	--update)
+		DO_UPDATE=1
+		shift
+		;;
+	--local)
+		DO_LOCAL=1
+		RERUN_ARGS+=("$1")
+		shift
+		;;
+	--no-kv)
+		WANT_KV=0
+		RERUN_ARGS+=("$1")
+		shift
+		;;
+	--config-only)
+		CONFIG_ONLY=1
+		RERUN_ARGS+=("$1")
+		shift
+		;;
+	-h | --help) usage 0 ;;
+	*) die "unknown option: $1 (try --help)" ;;
+	esac
+done
+
+# ---------------------------------------------------------------- #
+# preflight
+
+command -v node >/dev/null 2>&1 || die "node is required (18 or newer)"
+command -v npx >/dev/null 2>&1 || die "npx is required (ships with npm)"
+
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+[ "$NODE_MAJOR" -ge 18 ] ||
+	die "node 18 or newer is required (found $(node -v))"
+
+wrangler() { npx --yes wrangler "$@"; }
+
+# Read a JSON field out of a wrangler --json listing, without jq.
+# $1: json text  $2: node expression over the parsed array `d`
+json_pick() {
+	node -e '
+		let raw = "";
+		process.stdin.on("data", c => raw += c);
+		process.stdin.on("end", () => {
+			// wrangler may prefix the JSON with log lines
+			const i = raw.search(/[[{]/);
+			if (i < 0) { process.exit(0); }
+			let d;
+			try { d = JSON.parse(raw.slice(i)); } catch (e) { process.exit(0); }
+			const out = (process.argv[1] ? eval(process.argv[1]) : "");
+			if (out) process.stdout.write(String(out));
+		});
+	' "$2" <<<"$1"
+}
+
+# ---------------------------------------------------------------- #
+# update: check out the newest release, then run its own deploy.sh
+
+if [ "$DO_UPDATE" -eq 1 ]; then
+	say "Updating source"
+	REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null) ||
+		die "--update needs a git checkout; re-run without it"
+
+	# One-time migration: wrangler.toml used to be tracked. Keep the
+	# operator's values, then get out of git's way before pulling.
+	if git -C "$REPO_ROOT" ls-files --error-unmatch \
+		server/cf/wrangler.toml >/dev/null 2>&1; then
+		cp "$CONFIG" "$CONFIG.bak" 2>/dev/null || true
+		git -C "$REPO_ROOT" checkout -- server/cf/wrangler.toml 2>/dev/null || true
+		warn "wrangler.toml is no longer tracked by git;" \
+			"your settings were saved to wrangler.toml.bak"
+	fi
+
+	# releases are vX.Y.Z tags; a pre-release (vX.Y.Z-...) is skipped,
+	# and so is anything merged but not yet released
+	git -C "$REPO_ROOT" fetch --quiet --tags --force ||
+		die "git fetch failed; check your network and re-run"
+	TARGET=$(git -C "$REPO_ROOT" tag -l --sort=-v:refname 'v*' |
+		grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+	[ -n "$TARGET" ] || die "no release tag found"
+
+	CURRENT=$(git -C "$REPO_ROOT" describe --tags --exact-match 2>/dev/null || true)
+	if [ "$CURRENT" = "$TARGET" ]; then
+		ok "already on $TARGET"
+	else
+		git -C "$REPO_ROOT" -c advice.detachedHead=false \
+			checkout --quiet "$TARGET" ||
+			die "cannot check out $TARGET; commit or stash your local changes and re-run"
+		ok "checked out $TARGET"
+	fi
+
+	if [ -f "$CONFIG.bak" ] && [ ! -f "$CONFIG" ]; then
+		mv "$CONFIG.bak" "$CONFIG"
+		ok "restored your wrangler.toml"
+	fi
+
+	# the release may change this script: finish with its version
+	exec bash "$SCRIPT_DIR/deploy.sh" ${RERUN_ARGS[@]+"${RERUN_ARGS[@]}"}
+fi
+
+say "Installing dependencies"
+if [ -f package-lock.json ] && [ ! -d node_modules ]; then
+	npm ci --no-audit --no-fund
+else
+	npm install --no-audit --no-fund
+fi
+ok "dependencies ready"
+
+# ---------------------------------------------------------------- #
+# configuration
+
+# $1: key, $2: file. Reads `key = "value"` or `key = value`.
+toml_get() {
+	sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"#]*\)\"\{0,1\}.*/\1/p" \
+		"$2" | head -n 1 | sed 's/[[:space:]]*$//'
+}
+
+# $1: key, $2: new value, $3: file (first occurrence only)
+toml_set() {
+	awk -v key="$1" -v val="$2" '
+		!done && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+			sub(/=.*/, "= \"" val "\"")
+			done = 1
+		}
+		{ print }
+	' "$3" >"$3.tmp" && mv "$3.tmp" "$3"
+}
+
+if [ ! -f "$CONFIG" ]; then
+	[ -f "$TEMPLATE" ] || die "$TEMPLATE is missing"
+	{
+		printf '# Shyake instance configuration.\n#\n'
+		printf '# Generated by deploy.sh from %s.\n' "$TEMPLATE"
+		printf '# Git-ignored, so these settings survive `git pull`.\n'
+		printf '# Edit it freely: re-running deploy.sh keeps your\n'
+		printf '# changes and only fills in ids that are still unset.\n'
+		# drop the template's own header, keep every later comment
+		awk 'NR == 1 && /^#/ { inhdr = 1 }
+		     inhdr && /^#/ { next }
+		     inhdr { inhdr = 0 }
+		     { print }' "$TEMPLATE"
+	} >"$CONFIG"
+	say "Created $CONFIG from the template"
+else
+	say "Using your existing $CONFIG"
+	# Point out settings the template grew since this config was made.
+	for key in INSTANCE_DOMAIN REGISTRATION_ENABLED RESERVED_USERNAMES \
+		FEDERATION_ENABLED MAX_MAIL_SIZE; do
+		if ! grep -q "^[[:space:]]*$key[[:space:]]*=" "$CONFIG"; then
+			warn "$key is not set in $CONFIG (see $TEMPLATE)"
+		fi
+	done
+fi
+
+CUR_DOMAIN=$(toml_get INSTANCE_DOMAIN "$CONFIG")
+case "$CUR_DOMAIN" in
+"" | __INSTANCE_DOMAIN__ | your.domain.example) CUR_DOMAIN="" ;;
+esac
+
+if [ -n "$DOMAIN" ]; then
+	toml_set INSTANCE_DOMAIN "$DOMAIN" "$CONFIG"
+elif [ -n "$CUR_DOMAIN" ]; then
+	DOMAIN=$CUR_DOMAIN
+elif [ "$DO_LOCAL" -eq 1 ]; then
+	DOMAIN=localhost:8787
+	toml_set INSTANCE_DOMAIN "$DOMAIN" "$CONFIG"
+elif [ -t 0 ]; then
+	printf '\n  Your instance domain is embedded in every address on it\n'
+	printf '  (user@your.domain.example) and other instances use it to\n'
+	printf '  route federated mail back to you. A *.workers.dev URL\n'
+	printf '  works if you have no custom domain.\n\n'
+	printf '  Instance domain: '
+	read -r DOMAIN
+	[ -n "$DOMAIN" ] || die "an instance domain is required"
+	toml_set INSTANCE_DOMAIN "$DOMAIN" "$CONFIG"
+else
+	die "no instance domain; pass --domain <d> or edit $CONFIG"
+fi
+ok "instance domain: $DOMAIN"
+
+# ---------------------------------------------------------------- #
+# local mode stops here
+
+if [ "$DO_LOCAL" -eq 1 ]; then
+	say "Applying migrations to the local database"
+	wrangler d1 migrations apply "$DB_NAME" --local
+	ok "local database ready"
+	printf '\n%sRun your instance:%s\n\n' "$BOLD" "$RESET"
+	printf '  cd %s\n' "$SCRIPT_DIR"
+	printf '  npx wrangler dev --local --ip 127.0.0.1 --port 8787\n\n'
+	exit 0
+fi
+
+# ---------------------------------------------------------------- #
+# Cloudflare account
+
+say "Checking Cloudflare authentication"
+if ! wrangler whoami >/dev/null 2>&1; then
+	[ -t 0 ] || die "not logged in; run 'npx wrangler login' first"
+	wrangler login
+fi
+ok "authenticated"
+
+# D1 database
+say "Resolving the D1 database"
+D1_ID=$(toml_get database_id "$CONFIG")
+case "$D1_ID" in
+"" | __D1_ID__ | 00000000-0000-0000-0000-000000000000) D1_ID="" ;;
+esac
+
+if [ -z "$D1_ID" ]; then
+	LIST=$(wrangler d1 list --json 2>/dev/null || true)
+	D1_ID=$(json_pick "$LIST" \
+		'(d.find(x => x.name === "'"$DB_NAME"'") || {}).uuid')
+	if [ -z "$D1_ID" ]; then
+		wrangler d1 create "$DB_NAME"
+		LIST=$(wrangler d1 list --json 2>/dev/null || true)
+		D1_ID=$(json_pick "$LIST" \
+			'(d.find(x => x.name === "'"$DB_NAME"'") || {}).uuid')
+		[ -n "$D1_ID" ] || die "could not determine the database id"
+		ok "created database $DB_NAME"
+	else
+		ok "reusing existing database $DB_NAME"
+	fi
+	toml_set database_id "$D1_ID" "$CONFIG"
+else
+	ok "database id already configured"
+fi
+
+# KV namespace for the version cache (optional)
+if [ "$WANT_KV" -eq 1 ]; then
+	say "Resolving the KV version cache"
+	KV_ID=$(awk '/^\[\[kv_namespaces\]\]/,/^$/' "$CONFIG" |
+		sed -n 's/^[[:space:]]*id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' |
+		head -n 1)
+	case "$KV_ID" in
+	"" | __KV_ID__ | 00000000000000000000000000000000) KV_ID="" ;;
+	esac
+
+	if [ -z "$KV_ID" ]; then
+		LIST=$(wrangler kv namespace list 2>/dev/null || true)
+		KV_ID=$(json_pick "$LIST" \
+			'(d.find(x => /VERSION_CACHE$/.test(x.title)) || {}).id')
+		if [ -z "$KV_ID" ]; then
+			wrangler kv namespace create "$KV_BINDING" || true
+			LIST=$(wrangler kv namespace list 2>/dev/null || true)
+			KV_ID=$(json_pick "$LIST" \
+				'(d.find(x => /VERSION_CACHE$/.test(x.title)) || {}).id')
+		fi
+		if [ -n "$KV_ID" ]; then
+			# only the id inside the kv block, never the d1 one
+			awk -v val="$KV_ID" '
+				/^\[\[kv_namespaces\]\]/ { inkv = 1 }
+				/^\[\[d1_databases\]\]/ { inkv = 0 }
+				inkv && !done && /^[[:space:]]*id[[:space:]]*=/ {
+					sub(/=.*/, "= \"" val "\""); done = 1
+				}
+				{ print }
+			' "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+			ok "version cache ready"
+		else
+			warn "could not set up the KV cache; the instance will" \
+				"still work, but /api/client/version will hit" \
+				"GitHub on every request"
+		fi
+	else
+		ok "version cache already configured"
+	fi
+fi
+
+if [ "$CONFIG_ONLY" -eq 1 ]; then
+	ok "$CONFIG written; stopping here as asked"
+	exit 0
+fi
+
+# ---------------------------------------------------------------- #
+# migrate and deploy
+
+say "Applying database migrations"
+wrangler d1 migrations apply "$DB_NAME" --remote
+ok "schema up to date"
+
+say "Deploying the Worker"
+# the release tag this checkout is at, reported by GET /api/version
+SERVER_VERSION=$(tr -d '[:space:]' <"$SCRIPT_DIR/../VERSION" 2>/dev/null)
+case "$SERVER_VERSION" in
+v[0-9]*) ;;
+*) die "../VERSION is missing or malformed" ;;
+esac
+wrangler deploy --define "SERVER_VERSION:\"$SERVER_VERSION\""
+ok "deployed $SERVER_VERSION"
+
+# ---------------------------------------------------------------- #
+# verify
+
+if command -v curl >/dev/null 2>&1; then
+	say "Verifying"
+	URL="https://$DOMAIN/health"
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || echo 000)
+	if [ "$CODE" = "200" ]; then
+		ok "$URL returned 200"
+	else
+		warn "$URL returned $CODE."
+		warn "A custom domain may need a route or DNS record; a fresh" \
+			"deployment can also take a moment to propagate."
+	fi
+fi
+
+printf '\n%sYour instance is live at https://%s%s\n' "$BOLD" "$DOMAIN" "$RESET"
+printf 'Point a client at it with:  shyake config instance https://%s\n' "$DOMAIN"
+printf 'Upgrade later with:         ./deploy.sh --update\n\n'

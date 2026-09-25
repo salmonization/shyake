@@ -144,7 +144,7 @@ Shyake 只能传输文本。二进制数据在发送前必须先进行 base64 �
 
 ```sh
 # 发送弱影像
-base64 image.png | shyake send -t flat_white -s "image.png"
+base64 < image.png | shyake send -t flat_white -s "image.png"
 
 # 发送小型磁带归档
 tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"

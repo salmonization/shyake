@@ -123,7 +123,7 @@ shyake send -s "This is the subject" -t flat_white < body.txt
 shyake send -t flat_white < content.txt
 ```
 
-件名の長さは 128 バイトを超えてはならないことに注意してください。
+件名の長さは 128 バイトを超えてはなりません。
 
 外部インスタンスのユーザーに送るには、宛先に
 `username@instance` を使用します。
@@ -145,7 +145,7 @@ base64 エンコードする必要があります。
 
 ```sh
 # 貧しい画像を送る
-base64 image.png | shyake send -t flat_white -s "image.png"
+base64 < image.png | shyake send -t flat_white -s "image.png"
 
 # 小さなアーカイブを送る
 tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"

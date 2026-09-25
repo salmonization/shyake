@@ -2,6 +2,7 @@
 .antigravitycli
 .claude
 
+stargazers/
 docs/archives/
 client/obj/
 client/bin/
@@ -16,3 +17,12 @@ dist/
 *.bin
 *.pem
 *.key
+
+# rendered by server/cf/deploy.sh from wrangler.template.toml
+server/cf/wrangler.toml
+
+# Go server: local build and default database
+server/go/shyake-server
+server/go/*.db
+server/go/*.db-shm
+server/go/*.db-wal

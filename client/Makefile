@@ -1,5 +1,5 @@
 CC ?= gcc
-VERSION ?= v0.2.1-indev.4
+VERSION ?= v0.3.0
 
 # detect OS and architecture
 OS   := $(shell uname -s)
@@ -47,6 +47,7 @@ CFLAGS = -Wall -Wextra -std=c11 -pedantic \
          -DSHYAKE_VERSION='"$(VERSION)"' \
          -MMD -MP \
          -Iinclude \
+         -Isrc/lib \
          -Isrc/lib/vendor/cJSON \
          $(addprefix -I, $(SYS_INC))
 

@@ -2,10 +2,11 @@
 #define SHYAKE_PROMPT_H
 
 #include "shyake.h"
+#include "internal.h"
 
 /* Read passphrase from stdin with echo suppressed; prompt printed to stderr.
  * Returns 0 on success, -1 on error. buf is NUL-terminated, newline stripped. */
-int read_passphrase(const char *prompt, char *buf, size_t buflen);
+int read_passphrase(const char *prompt, char *buf, usize buflen);
 
 /* Return 1 if the secret key file at path starts with the "SHYK" magic. */
 int sk_file_is_encrypted(const char *path);
