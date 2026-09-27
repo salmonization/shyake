@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" type="image/svg+xml" href="/src/assets/salmonization.svg" />
+        <title>Shyake — 1952</title>
+        <style>
+            :root {
+                color-scheme: dark;
+                --bg: #03060b;
+                --panel: #0c1a2b;
+                --line: #253649;
+                --text: #dcebf7;
+                --dim: #5d7187;
+                --accent: #43c6e6;
+            }
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                background: var(--bg);
+                color: var(--text);
+                font:
+                    13px/1.4 FreeSans,
+                    'Helvetica Neue',
+                    sans-serif;
+                overflow: hidden;
+            }
+            #stage {
+                position: absolute;
+                inset: 0 0 44px 0;
+                display: grid;
+                place-items: center;
+            }
+            #film {
+                max-width: 100%;
+                max-height: 100%;
+                aspect-ratio: 16 / 9;
+                background: #000;
+            }
+            body.render #stage {
+                inset: 0;
+                display: block;
+            }
+            body.render #film {
+                max-width: none;
+                max-height: none;
+            }
+            body.render #bar,
+            body.render #overlay {
+                display: none;
+            }
+            #bar {
+                position: absolute;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                height: 44px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 0 16px;
+                background: var(--panel);
+                border-top: 1px solid var(--line);
+                font-family: FreeMono, monospace;
+            }
+            #bar button {
+                font: inherit;
+                color: var(--text);
+                background: var(--line);
+                border: 1px solid #5d7187;
+                padding: 4px 10px;
+                cursor: pointer;
+            }
+            #scrub {
+                flex: 1;
+                accent-color: var(--accent);
+            }
+            #clock,
+            #where {
+                min-width: 9ch;
+                color: var(--dim);
+                white-space: nowrap;
+            }
+            #overlay {
+                position: absolute;
+                inset: 0;
+                display: grid;
+                place-items: center;
+                background: rgba(3, 6, 11, 0.8);
+                font-family: FreeMono, monospace;
+                cursor: pointer;
+            }
+            #overlay[hidden] {
+                display: none;
+            }
+            @media (max-width: 600px) {
+                #where {
+                    display: none;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div id="stage"><canvas id="film"></canvas></div>
+        <div id="overlay">loading…</div>
+        <div id="bar">
+            <button id="play" type="button">play</button>
+            <input id="scrub" type="range" min="0" max="1000" value="0" step="1" />
+            <span id="clock">0:00.00</span>
+            <span id="where">boot</span>
+        </div>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>

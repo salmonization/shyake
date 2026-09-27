@@ -1,0 +1,30 @@
+{
+    "name": "shyake-funny",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vp dev",
+        "build": "vp build",
+        "preview": "vp preview",
+        "lint": "vp lint",
+        "check": "vp check",
+        "test": "vp test run",
+        "audio": "node scripts/audio.ts",
+        "render": "node scripts/render.ts"
+    },
+    "dependencies": {
+        "@noble/ciphers": "^2.4.0",
+        "@noble/hashes": "^2.4.0",
+        "@noble/post-quantum": "^0.7.1",
+        "three": "^0.186.1"
+    },
+    "devDependencies": {
+        "@types/node": "^26.6.3",
+        "@types/three": "^0.186.0",
+        "playwright-core": "^1.63.0",
+        "typescript": "^7.0.2",
+        "vite-plus": "1.0.0-rc.1"
+    },
+    "packageManager": "pnpm@10.33.0"
+}
