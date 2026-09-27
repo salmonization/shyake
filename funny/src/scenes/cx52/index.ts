@@ -234,6 +234,7 @@ export const cx52: SceneDef = {
                 const bars = f.bar;
                 const capA = hold(bars, 2.5, 9.6, 0.6, 0.4);
                 if (capA > 0) {
+                    hud.scrim(H - 320, H, 0.85 * capA);
                     hud.text('CX-52', 120, H - 150, {
                         face: 'sansBold',
                         size: 22,

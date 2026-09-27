@@ -52,7 +52,7 @@ async function open(addr: string) {
         args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
     });
     const page = await browser.newPage({
-        viewport: { width: 1920 * scale, height: 1080 * scale },
+        viewport: { width: Math.round(1920 * scale), height: Math.round(1080 * scale) },
     });
     page.on('console', (m) => {
         if (m.type() === 'error' || m.type() === 'warning') console.error(`[page] ${m.text()}`);
@@ -101,7 +101,7 @@ async function video() {
     const from = Number(values.from);
     const to = Math.min(DURATION, Number(values.to));
     const jobs = Math.max(1, Number(values.jobs));
-    const out = values.out ?? `out/shyake-${1080 * scale}p${fps}.mp4`;
+    const out = values.out ?? `out/shyake-${Math.round(1080 * scale)}p${fps}.mp4`;
     mkdirSync('out/segments', { recursive: true });
 
     console.log('composing soundtrack…');

@@ -21,8 +21,8 @@ export class Director {
     slots: Slot[];
 
     constructor(canvas: HTMLCanvasElement, defs: SceneDef[], scale = 1) {
-        const w = 1920 * scale;
-        const h = 1080 * scale;
+        const w = Math.round(1920 * scale);
+        const h = Math.round(1080 * scale);
         this.renderer = new THREE.WebGLRenderer({
             canvas,
             antialias: false,

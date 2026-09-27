@@ -24,8 +24,8 @@ async function main() {
 
     if (renderMode) {
         document.body.classList.add('render');
-        canvas.style.width = `${1920 * scale}px`;
-        canvas.style.height = `${1080 * scale}px`;
+        canvas.style.width = `${Math.round(1920 * scale)}px`;
+        canvas.style.height = `${Math.round(1080 * scale)}px`;
         window.__film = { duration: DURATION, frame: (t) => director.frame(t) };
         return;
     }

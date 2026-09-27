@@ -38,8 +38,8 @@ export class Hud {
     constructor(scale: number) {
         this.scale = scale;
         this.canvas = document.createElement('canvas');
-        this.canvas.width = W * scale;
-        this.canvas.height = H * scale;
+        this.canvas.width = Math.round(W * scale);
+        this.canvas.height = Math.round(H * scale);
         const ctx = this.canvas.getContext('2d');
         if (!ctx) throw new Error('no 2d context');
         this.ctx = ctx;
