@@ -132,7 +132,7 @@ export const chacha: SceneDef = {
         function drawHud(hud: Hud, f: Frame, round: number, since: number, groups: number[][]) {
             const bar = f.bar;
             const stateA = hold(bar, 0.1, 5.15, 0.3, 0.3);
-            hud.scrim(0, 360, 0.75, '3,6,11');
+            hud.scrim(360, 0, 0.75);
             hud.text('CHACHA20-POLY1305', 120, 130, {
                 face: 'sansBold',
                 size: 26,

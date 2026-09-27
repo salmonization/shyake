@@ -140,7 +140,7 @@ export const cx52: SceneDef = {
         scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
         scene.environmentIntensity = 0.35;
         env.renderer.shadowMap.enabled = true;
-        env.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        env.renderer.shadowMap.type = THREE.PCFShadowMap;
 
         const cam = new THREE.PerspectiveCamera(30, 16 / 9, 0.05, 100);
         const m = buildMachine(cipherLetters());

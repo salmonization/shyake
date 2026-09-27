@@ -107,7 +107,7 @@ export const sign: SceneDef = {
         };
 
         function drawHud(hud: Hud, bar: number, sigB64: string) {
-            hud.scrim(0, 300, 0.7);
+            hud.scrim(300, 0, 0.7);
             hud.text('ML-DSA-65', 120, 130, {
                 face: 'sansBold',
                 size: 26,
