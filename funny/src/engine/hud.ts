@@ -97,6 +97,18 @@ export class Hud {
         c.restore();
     }
 
+    // Dark gradient behind text, fading out towards `from`
+    scrim(from: number, to: number, alpha = 0.8, color = '3,6,11') {
+        const c = this.ctx;
+        const g = c.createLinearGradient(0, from, 0, to);
+        g.addColorStop(0, `rgba(${color},0)`);
+        g.addColorStop(1, `rgba(${color},${alpha})`);
+        c.save();
+        c.fillStyle = g;
+        c.fillRect(0, Math.min(from, to), W, Math.abs(to - from));
+        c.restore();
+    }
+
     line(pts: [number, number][], color: string, width = 1, alpha = 1, dash: number[] = []) {
         const c = this.ctx;
         c.save();
