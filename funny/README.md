@@ -1,9 +1,10 @@
 # 1952
 
-A music video for Shyake. About 2:40, cold colours, a workstation
-aesthetic: a PROM boots, a CX-52 turns its pin wheels, and the story
-runs from a cipher machine you could hold to post-quantum mail you
-can host yourself.
+A short film for Shyake, about 3:45. Grey blue and grey green, the
+sea before morning, a quiet ambient score. It moves from a cipher
+machine you could hold, through two stories of trust and of the
+right to privacy, to mail anyone can host and only its reader can
+open.
 
 Every frame is a pure function of song time, so the live preview and
 the offline export look the same. The soundtrack is composed in code
@@ -11,38 +12,38 @@ from the same score as the picture, so no audio analysis is needed.
 
 ## What is real
 
-The film uses real data, not decoration. `src/data/artifacts.ts` runs
-the constructions from [SPEC.md](../docs/SPEC.md) with fixed seeds:
+`src/data/artifacts.ts` runs the constructions from
+[SPEC.md](../docs/SPEC.md) with fixed seeds, and the film shows their
+output:
 
-- ML-KEM-768 keys, encapsulation and shared secret. The coefficient
-  rings in the lattice scene are decoded from the public key.
-- ChaCha20-Poly1305 mail fields. The ChaCha scene shows the real
-  block state after each of the 20 rounds, and the keystream, XOR
-  and Poly1305 tag of one line of the letter.
-- An ML-DSA-65 signature over a header-signed request, including the
-  SHA-256 of the body (protocol level 2). The punched tape is its
-  3309 bytes.
-- A 20-bit Hashcash token, the key fingerprint and its randomart
-  (the same walk as `client/src/cli/display.c`).
+- The buoys in the tide scene carry the coefficients of a real
+  ML-KEM-768 public key, then the bits of a real ChaCha20 block,
+  round by round.
+- The CX-52's tape prints letters taken from a real ChaCha20-Poly1305
+  mail body.
+- The terminal shows real fingerprints and randomart (the same walk
+  as `client/src/cli/display.c`).
+- The printed book's pages are Shyake's own C source.
 
-`pnpm test` verifies all of the above.
+`pnpm test` verifies the artifacts. The history in the Crypto AG and
+PGP sections is sourced in `src/engine/lines.ts`.
 
 ## Sections
 
-| Bars  | Section    | Picture                                            |
-| ----- | ---------- | -------------------------------------------------- |
-| 0–8   | boot       | PROM console prints the Shyake parameters          |
-| 8–18  | cx52       | Procedural CX-52: pin wheels, lug cage, dial, tape |
-| 18–22 | rubicon    | The machine as an x-ray; Crypto AG and Rubicon     |
-| 22–32 | lattice    | ML-KEM-768: three rings of 256, LWE, shared secret |
-| 32–40 | chacha     | ChaCha20 state round by round, then the tag        |
-| 40–48 | sign       | ML-DSA-65 request signing; 1952 bytes              |
-| 48–52 | server     | What the server holds: ciphertext only             |
-| 52–60 | federation | Peers on a globe, one synchronous relay per beat   |
-| 60–68 | terminal   | Two terminals: send, inbox, fetch, fingerprint     |
-| 68–74 | outro      | Title, links, Salmonization                        |
+| Bars  | Section  | Picture                                                 |
+| ----- | -------- | ------------------------------------------------------- |
+| 0–6   | sea      | Grey sea under mist; a fish passes under the surface    |
+| 6–12  | boot     | A white-screen PROM in the mist boots Shyake            |
+| 12–19 | cx52     | The CX-52 in an empty museum, enciphering               |
+| 19–33 | cryptoag | Crypto AG, as a dithered archive, one sentence a shot    |
+| 33–44 | pgp      | PGP 2.6.2, a book of source, a sentence from 1991       |
+| 44–52 | tide     | 768 buoys: a public key, then twenty ChaCha20 rounds    |
+| 52–58 | river    | A coast of rivers; lights swim upstream to their source |
+| 58–63 | desk     | Two terminals: send, inbox, fetch, fingerprint          |
+| 63–67 | title    | The name, then the mark                                 |
 
-112 BPM, D minor. Section lengths live in `src/engine/score.ts`.
+72 BPM, D minor. Section lengths live in `src/engine/score.ts`, and
+every sentence with its time in `src/engine/lines.ts`.
 
 ## Commands
 
@@ -69,9 +70,9 @@ The export needs ffmpeg on `PATH` and a Chromium. It uses
 ```sh
 pnpm render video                        # 1080p60, out/shyake-1080p60.mp4
 pnpm render video --scale 2              # 2160p60
-pnpm render video --fps 30 --from 18 --to 40
+pnpm render video --fps 30 --from 60 --to 110
 pnpm render video --jobs 4               # 4 browsers, 4 segments
-pnpm render stills 21.5 64 130           # PNGs to out/stills/
+pnpm render stills 42 95 160             # PNGs to out/stills/
 pnpm render sheet --every 2              # one frame every 2 bars
 ```
 
@@ -83,7 +84,8 @@ software rendering (SwiftShader), expect about 1 to 5 seconds per
 
 ```
 src/
-  engine/     score, script, director, HUD, post-processing, camera
+  engine/     score, lines, script, director, HUD, captions,
+              post-processing (Bayer duotone), sea, noise
   audio/      DSP, the arrangement, WAV encoder, preview worker
   data/       real Shyake artifacts and a traced ChaCha20 block
   scenes/     one module per scene
@@ -98,8 +100,8 @@ public/fonts/ EB Garamond, GNU FreeSans, GNU FreeMono
   font exception). See `public/fonts/README.txt`.
 - The Salmonization mark is U+1F41F from Noto Sans Symbols 2 (SIL
   OFL 1.1), cut to an SVG path.
-- The CX-52 is built from primitives, and its proportions follow
-  photographs. It is an interpretation of the machine, not a
+- The CX-52 is built from primitives after photographs from the
+  Crypto Museum. It is an interpretation of the machine, not a
   replica. The workstation look pays homage to that era of
   computing. It uses no vendor names or logos.
 - Tooling approach after
