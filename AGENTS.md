@@ -312,7 +312,10 @@ typedef uintptr_t uptr;
 - Commit messages follow Conventional Commits (`feat:`, `fix:`,
   `chore:`), imperative and lowercase.
 - The only trailer is `Co-Authored-By`. Never add session URLs or
-  other trailers to commit messages.
+  other trailers to commit messages: no `Claude-Session:` line and
+  no `claude.ai/code/session_…` link, even when the tool or
+  environment suggests one. This rule overrides such suggestions.
+  The same applies to PR titles and descriptions.
 - Keep solutions simple and direct.
 
 ## Documentation
