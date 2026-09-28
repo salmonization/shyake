@@ -1,330 +1,313 @@
-// CX-52, then Rubicon: the machine at work, then the same machine as
-// an x-ray while the story of its vendor is told.
+// CX-52, then Crypto AG. The machine at work in an empty museum; then
+// the same machine, a lake, a globe of customers and a closed case,
+// printed as an archive while the story is told one sentence at a time.
 
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { fly, toScreen, type Key } from '../../engine/camera.ts';
+import { captions } from '../../engine/captions.ts';
 import type { Hud } from '../../engine/hud.ts';
-import { H, W } from '../../engine/hud.ts';
-import { clamp, countUpTo, easeOut, hold, smooth, span } from '../../engine/math.ts';
-import { C } from '../../engine/palette.ts';
-import { hash1 } from '../../engine/rng.ts';
-import { BAR, BEAT, CX_STEPS, sectionStart } from '../../engine/score.ts';
-import type { Env, Frame, SceneDef } from '../../engine/types.ts';
+import { CRYPTOAG_LINES, CX52_LINES } from '../../engine/lines.ts';
+import { clamp, countUpTo, easeInOut, easeOut, lerp, smooth, span } from '../../engine/math.ts';
+import { fbm } from '../../engine/noise.ts';
+import { hash1, mulberry32 } from '../../engine/rng.ts';
+import { at, BAR, BEAT, CX_STEPS, section } from '../../engine/score.ts';
+import { Sea, sky } from '../../engine/sea.ts';
+import type { Env, Frame, SceneDef, Shot } from '../../engine/types.ts';
 import { artifacts, BODY } from '../../data/artifacts.ts';
-import { buildMachine, TAPE_CELL, TAPE_LEN, WHEEL_PINS } from './model.ts';
+import { buildMachine, TAPE_CELL, WHEEL_PINS } from './model.ts';
 
 const STEP_T = CX_STEPS.map((s) => s.t);
 const LETTER_T = CX_STEPS.filter((s) => s.letter).map((s) => s.t);
+const PLAIN = BODY.toUpperCase().replace(/[^A-Z]/g, '');
 
 // Which wheels advance on each step: irregular, as the real stepping was
 const WHEEL_COUNTS: number[][] = WHEEL_PINS.map((_, w) => {
     let n = 0;
     return STEP_T.map((_, e) => {
-        const letter = CX_STEPS[e].letter;
-        if (letter ? hash1(e * 7 + w) < 0.85 : hash1(e * 13 + w * 31) < 0.3) n++;
+        if (CX_STEPS[e].letter ? hash1(e * 7 + w) < 0.8 : hash1(e * 13 + w * 31) < 0.25) n++;
         return n;
     });
 });
 
-const PLAIN = BODY.toUpperCase().replace(/[^A-Z]/g, '');
-
-// Cipher letters from the real ChaCha20 ciphertext bytes
+// Cipher letters in groups of five, from the real ChaCha20 ciphertext
 function cipherLetters(): string {
     const raw = atob(artifacts().encBody);
     let s = '';
-    for (let i = 0; i < raw.length && s.length < 110; i++) {
+    let n = 0;
+    for (let i = 0; i < raw.length && s.length < 120; i++) {
         s += String.fromCharCode(65 + (raw.charCodeAt(i) % 26));
-        if (s.replace(/ /g, '').length % 5 === 0) s += ' ';
+        if (++n % 5 === 0) s += ' ';
     }
     return s;
 }
-
-// Tape position of letter k, with a space after each group of five
 const tapePos = (k: number) => k + Math.floor(k / 5);
 
-const KEYS: Key[] = [
-    { bar: 0, pos: [1.9, 1.25, 2.0], look: [0.5, 1.0, 0.2], fov: 30 },
-    { bar: 2, pos: [1.2, 2.1, 3.1], look: [0.2, 1.0, 0.0], fov: 32 },
-    { bar: 4.5, pos: [-2.9, 2.9, 4.3], look: [-0.2, 1.0, 0.0], fov: 30 },
-    { bar: 6.5, pos: [-2.5, 3.3, 1.9], look: [-2.1, 1.95, 0.5], fov: 27 },
-    { bar: 8, pos: [-0.6, 3.3, 4.6], look: [0.0, 1.0, 0.0], fov: 32 },
-    { bar: 10, pos: [0.9, 4.4, 5.6], look: [0.1, 0.9, 0.0], fov: 30 },
-    { bar: 12, pos: [0.4, 6.8, 3.2], look: [0.1, 0.8, 0.0], fov: 30 },
-    { bar: 14, pos: [0.15, 8.6, 1.0], look: [0.1, 0.6, 0.0], fov: 28 },
+const cx = section('cx52').bar;
+const ca = section('cryptoag').bar;
+
+// Crypto AG shots, in bars from the start of the section
+const SHOTS: [number, number, 'lake' | 'wheels' | 'closing' | 'globe' | 'night' | 'closed'][] = [
+    [0, 2.15, 'lake'],
+    [2.15, 4.15, 'wheels'],
+    [4.15, 6.15, 'closing'],
+    [6.15, 8.15, 'globe'],
+    [8.15, 11.65, 'night'],
+    [11.65, 14, 'closed'],
 ];
 
-function callout(
-    hud: Hud,
-    cam: THREE.Camera,
-    p: THREE.Vector3,
-    label: string,
-    dx: number,
-    dy: number,
-    a: number,
-) {
-    if (a <= 0) return;
-    const [x, y] = toScreen(cam, p);
-    const ex = x + dx;
-    const ey = y + dy;
-    const grow = easeOut(a);
-    hud.line(
-        [
-            [x, y],
-            [x + (ex - x) * grow, y + (ey - y) * grow],
-        ],
-        C.ice,
-        1.5,
-        a,
-    );
-    hud.ctx.save();
-    hud.ctx.globalAlpha = a;
-    hud.ctx.strokeStyle = C.ice;
-    hud.ctx.lineWidth = 1.5;
-    hud.ctx.beginPath();
-    hud.ctx.arc(x, y, 6, 0, Math.PI * 2);
-    hud.ctx.stroke();
-    hud.ctx.restore();
-    const right = dx >= 0;
-    hud.line(
-        [
-            [ex, ey],
-            [ex + (right ? 1 : -1) * 30 * grow, ey],
-        ],
-        C.ice,
-        1.5,
-        a,
-    );
-    hud.text(label, ex + (right ? 40 : -40), ey + 6, {
-        face: 'sansBold',
-        size: 17,
-        spacing: 3,
-        color: C.ice,
-        alpha: a,
-        align: right ? 'left' : 'right',
-    });
+type V3 = [number, number, number];
+function move(cam: THREE.PerspectiveCamera, u: number, a: V3, b: V3, la: V3, lb: V3, fov: number) {
+    const k = easeInOut(u);
+    cam.position.set(lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k));
+    cam.lookAt(lerp(la[0], lb[0], k), lerp(la[1], lb[1], k), lerp(la[2], lb[2], k));
+    if (cam.fov !== fov) {
+        cam.fov = fov;
+        cam.updateProjectionMatrix();
+    }
+    cam.updateMatrixWorld();
 }
 
-function blueprintGrid(hud: Hud, a: number) {
-    if (a <= 0) return;
-    for (let x = 0; x <= W; x += 48)
-        hud.line(
-            [
-                [x, 0],
-                [x, H],
-            ],
-            C.cyan,
-            1,
-            a * (x % 240 === 0 ? 0.14 : 0.05),
+function museum(env: Env) {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#1b2226');
+    scene.fog = new THREE.Fog('#1b2226', 9, 24);
+    const pmrem = new THREE.PMREMGenerator(env.renderer);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color('#56636a');
+    scene.environment = pmrem.fromScene(envScene).texture;
+    scene.environmentIntensity = 0.35;
+    env.renderer.shadowMap.enabled = true;
+    env.renderer.shadowMap.type = THREE.PCFShadowMap;
+
+    const m = buildMachine(cipherLetters());
+    scene.add(m.root);
+    const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(80, 80),
+        new THREE.MeshStandardMaterial({ color: '#2b3438', roughness: 0.85 }),
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // a high window to the left, a faint cold bounce from the right
+    const key = new THREE.DirectionalLight('#dde4e6', 3.2);
+    key.position.set(-5, 8, 4.5);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.radius = 4;
+    Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5 });
+    key.shadow.bias = -0.0004;
+    key.shadow.normalBias = 0.02;
+    scene.add(key);
+    const bounce = new THREE.DirectionalLight('#8fa0a8', 0.5);
+    bounce.position.set(6, 3, -2);
+    scene.add(bounce);
+    scene.add(new THREE.HemisphereLight('#7f8e95', '#1b2226', 0.8));
+    return { scene, m };
+}
+
+function lake(env: Env) {
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog('#98a3a6', 12, 150);
+    sky(scene, env.renderer, '#5f6d74', '#a3adaf', '#46535a');
+    const water = new Sea(200, 140, '#56656c');
+    scene.add(water.mesh);
+    scene.add(new THREE.HemisphereLight('#aab4b6', '#2a343a', 1.2));
+
+    // ridges across the lake, fading into the mist
+    [
+        [34, '#4d5a60', 4.5, 1],
+        [52, '#62707a', 7, 2],
+        [75, '#768389', 10, 3],
+    ].forEach(([dist, color, h, seed]) => {
+        const pts: THREE.Vector2[] = [new THREE.Vector2(-160, -2)];
+        for (let x = -160; x <= 160; x += 2)
+            pts.push(
+                new THREE.Vector2(x, (h as number) * (0.35 + fbm(x * 0.018, 0, 4, seed as number))),
+            );
+        pts.push(new THREE.Vector2(160, -2));
+        const ridge = new THREE.Mesh(
+            new THREE.ShapeGeometry(new THREE.Shape(pts)),
+            new THREE.MeshBasicMaterial({ color: color as string, fog: true }),
         );
-    for (let y = 0; y <= H; y += 48)
-        hud.line(
-            [
-                [0, y],
-                [W, y],
-            ],
-            C.cyan,
-            1,
-            a * (y % 240 === 0 ? 0.14 : 0.05),
-        );
+        ridge.position.z = -(dist as number);
+        scene.add(ridge);
+    });
+
+    // one small light across the water, for the night shot
+    const lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(0.32, 12, 8),
+        new THREE.MeshBasicMaterial({ color: '#ffffff', fog: false }),
+    );
+    lamp.position.set(-5, 0.7, -30);
+    scene.add(lamp);
+    return { scene, water, lamp };
+}
+
+function globe() {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#1c2428');
+    const g = new THREE.Group();
+    scene.add(g);
+    const dots: number[] = [];
+    for (let i = 0; i < 3000; i++) {
+        const y = 1 - (i / 2999) * 2;
+        const rr = Math.sqrt(1 - y * y);
+        const th = i * 2.399963;
+        dots.push(Math.cos(th) * rr * 2, y * 2, Math.sin(th) * rr * 2);
+    }
+    const dg = new THREE.BufferGeometry();
+    dg.setAttribute('position', new THREE.Float32BufferAttribute(dots, 3));
+    g.add(new THREE.Points(dg, new THREE.PointsMaterial({ color: '#5c696f', size: 0.025 })));
+    const r = mulberry32(120);
+    const lights = new THREE.InstancedMesh(
+        new THREE.SphereGeometry(0.035, 8, 6),
+        new THREE.MeshBasicMaterial({ color: '#e6ebe9' }),
+        124,
+    );
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < 124; i++) {
+        // countries cluster on land: bias towards a few bands
+        const lat = (r() - 0.5) * 2.2 + (r() < 0.5 ? 0.5 : -0.2);
+        const lon = r() * Math.PI * 2;
+        const p = new THREE.Vector3(
+            Math.cos(lat) * Math.cos(lon),
+            Math.sin(lat),
+            Math.cos(lat) * Math.sin(lon),
+        ).multiplyScalar(2.01);
+        m.makeTranslation(p.x, p.y, p.z);
+        lights.setMatrixAt(i, m);
+    }
+    lights.count = 0;
+    g.add(lights);
+    return { scene, g, lights };
 }
 
 export const cx52: SceneDef = {
     id: 'cx52',
-    sections: ['cx52', 'rubicon'],
+    sections: ['cx52', 'cryptoag'],
     create(env: Env) {
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color('#050b14');
-        scene.fog = new THREE.FogExp2('#050b14', 0.045);
-        const pmrem = new THREE.PMREMGenerator(env.renderer);
-        scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-        scene.environmentIntensity = 0.35;
-        env.renderer.shadowMap.enabled = true;
-        env.renderer.shadowMap.type = THREE.PCFShadowMap;
+        const mus = museum(env);
+        const lk = lake(env);
+        const gl = globe();
+        const m = mus.m;
+        const cam = new THREE.PerspectiveCamera(30, 16 / 9, 0.05, 1000);
 
-        const cam = new THREE.PerspectiveCamera(30, 16 / 9, 0.05, 100);
-        const m = buildMachine(cipherLetters());
-        scene.add(m.root);
+        // the machine's state at song time t
+        function animate(t: number, caseClose: number) {
+            const e = countUpTo(STEP_T, t) - 1;
+            const snap = e >= 0 ? easeOut(clamp((t - STEP_T[e]) / 0.09), 3) : 0;
+            m.wheels.forEach((g, w) => {
+                const n = e >= 0 ? WHEEL_COUNTS[w][e] : 0;
+                const prev = e >= 1 ? WHEEL_COUNTS[w][e - 1] : 0;
+                g.rotation.x = -((prev + (n - prev) * snap) / WHEEL_PINS[w]) * Math.PI * 2;
+            });
+            const L = countUpTo(LETTER_T, t);
+            const since = L > 0 ? t - LETTER_T[L - 1] : 99;
+            const turn = L > 0 ? L - 1 + easeOut(clamp(since / (BEAT * 0.7)), 2) : 0;
+            m.cage.rotation.x = -turn * Math.PI * 2;
 
-        const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(60, 60),
-            new THREE.MeshStandardMaterial({ color: '#0a1523', roughness: 0.5, metalness: 0.25 }),
-        );
-        floor.rotation.x = -Math.PI / 2;
-        floor.receiveShadow = true;
-        scene.add(floor);
-        const fading = [...m.mats.all, floor.material];
-        for (const mat of fading) mat.transparent = true;
+            // the lever is pulled once per letter, then rests folded to close
+            const pull = since < BEAT ? Math.sin(Math.PI * clamp(since / (BEAT * 0.8))) : 0;
+            m.lever.rotation.x = -0.15 - 0.55 * pull - 1.3 * smooth(caseClose * 3);
 
-        const key = new THREE.DirectionalLight('#d2e6ff', 3.2);
-        key.position.set(-4, 7, 5);
-        key.castShadow = true;
-        key.shadow.mapSize.set(2048, 2048);
-        key.shadow.camera.left = -4;
-        key.shadow.camera.right = 4;
-        key.shadow.camera.top = 4;
-        key.shadow.camera.bottom = -4;
-        key.shadow.bias = -0.0004;
-        key.shadow.normalBias = 0.02;
-        scene.add(key);
-        const rim = new THREE.SpotLight('#4fc8ff', 60, 20, 0.6, 0.5, 1.5);
-        rim.position.set(4, 3.5, -4);
-        rim.target.position.set(0, 1, 0);
-        scene.add(rim, rim.target);
-        const fill = new THREE.HemisphereLight('#28446a', '#04070b', 0.9);
-        scene.add(fill);
-        const sweep = new THREE.PointLight('#8fe9ff', 0, 6, 1.5);
-        scene.add(sweep);
+            const letter = PLAIN.charCodeAt(Math.max(0, L - 1) % PLAIN.length) - 65;
+            const prevL = PLAIN.charCodeAt(Math.max(0, L - 2) % PLAIN.length) - 65;
+            m.indicator.rotation.z =
+                -((prevL + (letter - prevL) * easeOut(clamp(since / 0.25))) / 26) * Math.PI * 2;
 
-        const rubicon = sectionStart('rubicon');
-        const tmp = new THREE.Vector3();
+            const printed = L > 0 ? tapePos(L - 1) + 1 - (1 - easeOut(clamp(since / 0.15))) : 0;
+            const cells = m.tapeLen / TAPE_CELL;
+            m.tapeTex.repeat.set(-cells / m.tapeChars, 1);
+            m.tapeTex.offset.set((printed + 6) / m.tapeChars, 0);
+
+            // open lid rests back at about 94 degrees; closed is 0
+            m.caseLid.rotation.x = -1.62 * (1 - easeInOut(caseClose));
+        }
+
+        function cx52Shot(f: Frame, cap: Hud): Shot {
+            animate(f.t, 0);
+            const u = f.local / (section('cx52').bars * BAR);
+            move(cam, u, [-4.6, 2.5, 4.4], [2.9, 2.8, 5.4], [-0.5, 1.05, 0.2], [0.1, 1.1, 0.1], 30);
+            captions(cap, f.t, CX52_LINES);
+            return {
+                scene: mus.scene,
+                camera: cam,
+                post: {
+                    grain: 0.35,
+                    vignette: 0.7,
+                    white: 1 - smooth(f.local / 2.2),
+                    fade: smooth(span(f.bar, section('cx52').bars - 0.35, section('cx52').bars)),
+                },
+            };
+        }
+
+        function archive(f: Frame, cap: Hud): Shot {
+            const bar = f.bar - section('cx52').bars;
+            const t = f.t;
+            const [s0, s1, kind] =
+                SHOTS.find(([a, b]) => bar >= a && bar < b) ?? SHOTS[SHOTS.length - 1];
+            const u = (bar - s0) / (s1 - s0);
+            const edge = Math.min(smooth((bar - s0) / 0.18), smooth((s1 - bar) / 0.18));
+            let scene: THREE.Scene = mus.scene;
+
+            if (kind === 'lake' || kind === 'night') {
+                lk.water.update(t, 0.35);
+                const night = kind === 'night';
+                move(
+                    cam,
+                    u,
+                    [0, 1.3, 8],
+                    [0, 1.25, 7.2],
+                    [0, 1.5, -60],
+                    [0, 1.45, -60],
+                    night ? 26 : 32,
+                );
+                lk.lamp.visible = night && t < at(ca + 10.3);
+                scene = lk.scene;
+            } else if (kind === 'globe') {
+                gl.g.rotation.y = t * 0.05;
+                gl.g.rotation.x = 0.35;
+                gl.lights.count = Math.round(124 * easeOut(clamp(u * 1.25)));
+                move(cam, u, [0, 0.4, 7.5], [0, 0.3, 6.6], [0, 0, 0], [0, 0, 0], 38);
+                scene = gl.scene;
+            } else {
+                const closing = kind === 'closing' ? span(u, 0.2, 1) : kind === 'closed' ? 1 : 0;
+                animate(kind === 'wheels' ? t : at(cx + 6), closing);
+                if (kind === 'wheels')
+                    move(
+                        cam,
+                        u,
+                        [1.6, 1.55, 2.4],
+                        [1.2, 1.5, 2.1],
+                        [0.1, 1.0, 0.3],
+                        [0.0, 1.0, 0.3],
+                        30,
+                    );
+                else if (kind === 'closing')
+                    move(cam, u, [-3.8, 3.4, 6.2], [-4.2, 3.6, 6.8], [0, 1.1, 0], [0, 1.0, 0], 30);
+                else
+                    move(cam, u, [-5.2, 3.0, 7.4], [-5.3, 3.05, 7.6], [0, 0.9, 0], [0, 0.9, 0], 28);
+                scene = mus.scene;
+            }
+
+            captions(cap, t, CRYPTOAG_LINES);
+            return {
+                scene,
+                camera: cam,
+                post: {
+                    duo: smooth(bar / 0.4),
+                    levels: 4,
+                    cell: 3,
+                    grain: 0.25,
+                    vignette: 0.6,
+                    fade: 1 - edge * (kind === 'night' ? 0.7 : 1),
+                },
+            };
+        }
 
         return {
-            update(f: Frame, hud: Hud) {
-                const t = f.t;
-
-                // Stepping state from the score
-                const e = countUpTo(STEP_T, t) - 1;
-                const sinceStep = e >= 0 ? t - STEP_T[e] : 0;
-                const snap = easeOut(clamp(sinceStep / 0.07), 3);
-                m.wheels.forEach((g, w) => {
-                    const n = e >= 0 ? WHEEL_COUNTS[w][e] : 0;
-                    const prev = e >= 1 ? WHEEL_COUNTS[w][e - 1] : 0;
-                    const pos = prev + (n - prev) * snap;
-                    g.rotation.x = -(pos / WHEEL_PINS[w]) * Math.PI * 2;
-                });
-
-                const L = countUpTo(LETTER_T, t);
-                const sinceLetter = L > 0 ? t - LETTER_T[L - 1] : 0;
-                const turn = L > 0 ? L - 1 + easeOut(clamp(sinceLetter / (BEAT * 0.6)), 2) : 0;
-                m.cage.rotation.x = -turn * Math.PI * 2;
-                m.crank.rotation.x = -turn * Math.PI * 2;
-
-                // Dial points at the plaintext letter being enciphered
-                const letter = PLAIN.charCodeAt((Math.max(0, L - 1) + 0) % PLAIN.length) - 65;
-                const prevLetter = PLAIN.charCodeAt(Math.max(0, L - 2) % PLAIN.length) - 65;
-                const dialTurn =
-                    prevLetter + (letter - prevLetter) * easeOut(clamp(sinceLetter / 0.2));
-                m.dial.rotation.y = (dialTurn / 26) * Math.PI * 2;
-
-                // Tape feeds one cell per printed letter
-                const printed =
-                    L > 0 ? tapePos(L - 1) + 1 - (1 - easeOut(clamp(sinceLetter / 0.12))) : 0;
-                const cells = TAPE_LEN / TAPE_CELL;
-                m.tapeTex.repeat.set(-cells / m.tapeChars, 1);
-                m.tapeTex.offset.set(printed / m.tapeChars, 0);
-
-                // Light: rise from darkness, a cold sweep across the wheels
-                const reveal = smooth(f.bar / 1.5);
-                key.intensity = 3.2 * reveal;
-                rim.intensity = 60 * (0.3 + 0.7 * reveal);
-                sweep.position.set(-2 + ((f.bar * 0.5) % 1) * 5, 1.9, 1.2);
-                sweep.intensity = 0.7 * hold(f.bar, 0.5, 6, 1, 1);
-
-                // Rubicon: fade solids to an x-ray
-                const xr = smooth(span(t, rubicon - BEAT, rubicon + BAR));
-                for (const mat of fading) mat.opacity = 1 - 0.93 * xr;
-                m.mats.edges.opacity = 0.85 * xr;
-                scene.background = new THREE.Color('#050b14').lerp(new THREE.Color('#061426'), xr);
-                (scene.fog as THREE.FogExp2).density = 0.045 * (1 - xr * 0.8);
-
-                fly(cam, KEYS, f.bar, 0.04, t);
-
-                // HUD: caption, callouts, then the Rubicon text
-                const bars = f.bar;
-                const capA = hold(bars, 2.5, 9.6, 0.6, 0.4);
-                if (capA > 0) {
-                    hud.scrim(H - 320, H, 0.85 * capA);
-                    hud.text('CX-52', 120, H - 150, {
-                        face: 'sansBold',
-                        size: 22,
-                        spacing: 8,
-                        alpha: capA,
-                    });
-                    hud.text('1952', 120 + hud.measure('CX-52', 'sansBold', 22, 8) + 24, H - 150, {
-                        face: 'sans',
-                        size: 22,
-                        spacing: 8,
-                        color: C.fog,
-                        alpha: capA,
-                    });
-                    hud.text(
-                        'Six pin wheels, a lug cage, and a key you could set by hand.',
-                        120,
-                        H - 104,
-                        {
-                            face: 'italic',
-                            size: 40,
-                            alpha: capA,
-                        },
-                    );
-                }
-                const co = (a: number, b: number) => hold(bars, a, b, 0.4, 0.3);
-                callout(hud, cam, m.anchors.wheels, 'PIN WHEELS', 180, -140, co(8.1, 9.9));
-                callout(hud, cam, tmp.copy(m.anchors.cage), 'LUG CAGE', 200, -60, co(8.3, 9.9));
-                callout(hud, cam, m.anchors.dial, 'ALPHABET DIAL', -160, 120, co(8.5, 9.9));
-                callout(hud, cam, m.anchors.printer, 'PRINTER', -140, -110, co(8.7, 9.9));
-                callout(hud, cam, m.anchors.crank, 'CRANK', 120, 80, co(8.9, 9.9));
-
-                blueprintGrid(hud, xr);
-                const rb = (t - rubicon) / BAR;
-                const lines: [number, string, 'italic' | 'sans', number, string][] = [
-                    [0, 'The machine was sound.', 'italic', 64, C.ice],
-                    [1, 'The vendor was not.', 'italic', 64, C.ice],
-                    [
-                        2,
-                        'From 1970, Crypto AG was secretly owned by the CIA and the BND.',
-                        'sans',
-                        26,
-                        C.fog,
-                    ],
-                    [
-                        2.5,
-                        'Operation Rubicon. Its machines were sold to more than a hundred countries.',
-                        'sans',
-                        26,
-                        C.fog,
-                    ],
-                ];
-                const y0 = 300;
-                lines.forEach(([at, s, face, size, color], i) => {
-                    const a = hold(rb, at, 3.55, 0.35, 0.3);
-                    hud.text(s, 150, y0 + i * 84 + (i >= 2 ? 30 - (i - 2) * 40 : 0), {
-                        face,
-                        size,
-                        color,
-                        alpha: a,
-                        glow: face === 'italic' ? 12 : 0,
-                    });
-                });
-                const tr = hold(rb, 3, 4.2, 0.2, 0.2);
-                if (tr > 0) {
-                    hud.rect(0, 0, W, H, C.ink, 0.75 * tr);
-                    hud.text('Trust the math, not the vendor.', W / 2, H / 2 + 24, {
-                        face: 'italic',
-                        size: 92,
-                        align: 'center',
-                        alpha: tr,
-                        glow: 16,
-                    });
-                }
-
-                const start = Math.exp(-f.local / 0.3) * 0.5;
-                return {
-                    scene,
-                    camera: cam,
-                    post: {
-                        bloom: 0.35 + 0.25 * xr,
-                        threshold: 0.82 - 0.4 * xr,
-                        scan: 0.1 + 0.25 * xr,
-                        aberr: 0.35 + 0.3 * xr,
-                        grain: 0.3,
-                        dither: 0.1 + 0.15 * xr,
-                        vignette: 0.85,
-                        flash: start,
-                        fade: smooth(span(t, rubicon + BAR * 3.75, rubicon + BAR * 4)),
-                    },
-                };
+            update(f: Frame, _hud: Hud, cap: Hud) {
+                return f.section === 'cx52' ? cx52Shot(f, cap) : archive(f, cap);
             },
         };
     },

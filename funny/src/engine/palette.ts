@@ -1,33 +1,36 @@
-// Cold palette. No warm colour anywhere in the film.
+// Low-saturation cold palette: the sea before morning, and the grey
+// greens of a northern forest. Nothing warm, nothing vivid.
 
 export const C = {
-    ink: '#03060b',
-    night: '#07101b',
-    navy: '#0c1a2b',
-    deep: '#12263c',
-    slate: '#253649',
-    steel: '#5d7187',
-    fog: '#9db0c3',
-    ice: '#dcebf7',
-    white: '#f2f8fd',
-    phosphor: '#8fe9ff',
-    cyan: '#43c6e6',
-    frost: '#b6d6ff',
-    indigo: '#4b5fb4',
-    teal: '#2c8c9a',
-    olive: '#4a5249',
+    ink: '#11171b',
+    night: '#1a2227',
+    deep: '#243039',
+    slate: '#34424b',
+    sea: '#4a5a63',
+    steel: '#6b7a82',
+    mist: '#95a3a8',
+    fog: '#bcc6c7',
+    paper: '#e2e6e3',
+    white: '#f1f3f0',
+    pine: '#2f3a34',
+    moss: '#4c5a51',
+    lichen: '#7d8c83',
+    sage: '#a8b4ac',
 } as const;
 
-// Motif-style window chrome, cooled down
+// Workstation window chrome, cooled to grey blue
 export const MOTIF = {
-    face: '#33445a',
-    light: '#6b7f97',
-    dark: '#161f2b',
-    title: '#3f55a3',
-    titleIdle: '#2b3a4f',
-    text: '#e3eef8',
-    well: '#0a121c',
+    face: '#4a5862',
+    light: '#7f8e96',
+    dark: '#1f282e',
+    title: '#5a6f7c',
+    titleIdle: '#3d4a53',
+    text: '#e3e8e7',
+    well: '#161d22',
 } as const;
+
+// The two tones of the archival dither
+export const DUO = { dark: '#1b2328', light: '#c7cfcd' } as const;
 
 export function hex(c: string): number {
     return parseInt(c.slice(1), 16);

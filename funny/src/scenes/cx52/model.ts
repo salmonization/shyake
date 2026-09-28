@@ -1,145 +1,148 @@
-// A procedural CX-52: hammertone body, six pin wheels, a lug cage,
-// an alphabet dial, a crank, and a paper tape printer. Built from
-// primitives; proportions follow photographs, not drawings.
+// A procedural CX-52, after photographs from several angles. Printer
+// housing on the left with the letter dial on its front and the knobs
+// on its end; six key wheels on a front axle, each with a guide arm
+// in a slot of the tray; the brass cage behind them under a locking
+// bar; the advance lever on the right frame; a hinged hood behind,
+// and the case lid, which can close over everything.
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { C } from '../../engine/palette.ts';
 import { mulberry32 } from '../../engine/rng.ts';
 import { canvas, hammertone, toTexture } from '../../engine/textures.ts';
 
 export const WHEEL_PINS = [47, 43, 42, 41, 38, 37];
-export const WHEEL_X = WHEEL_PINS.map((_, i) => -0.3 + i * 0.3);
-export const AXIS_Y = 1.02;
-export const WHEEL_Z = 0.3;
-export const CAGE_Z = -0.62;
-export const CAGE_BARS = 32;
-export const TAPE_CELL = 0.068;
-export const TAPE_LEN = 2.3;
-
-export interface Materials {
-    body: THREE.MeshPhysicalMaterial;
-    bakelite: THREE.MeshPhysicalMaterial;
-    steel: THREE.MeshStandardMaterial;
-    paper: THREE.MeshStandardMaterial;
-    dial: THREE.MeshStandardMaterial;
-    rims: THREE.MeshPhysicalMaterial[];
-    edges: THREE.LineBasicMaterial;
-    all: THREE.Material[];
-}
+export const WHEEL_X = WHEEL_PINS.map((_, i) => -0.55 + i * 0.25);
+export const WHEEL_Y = 0.92;
+export const WHEEL_Z = 0.42;
+export const WHEEL_R = 0.4;
+export const CAGE_Y = 1.2;
+export const CAGE_Z = -0.45;
+export const CAGE_BARS = 27;
+export const TAPE_CELL = 0.07;
 
 export interface Machine {
     root: THREE.Group;
     wheels: THREE.Group[];
     cage: THREE.Group;
-    crank: THREE.Group;
-    dial: THREE.Mesh;
-    tape: THREE.Mesh;
+    lever: THREE.Group;
+    indicator: THREE.Object3D;
     tapeTex: THREE.CanvasTexture;
     tapeChars: number;
-    lid: THREE.Group;
-    mats: Materials;
+    tapeLen: number;
+    caseLid: THREE.Group;
     anchors: Record<string, THREE.Vector3>;
 }
+
+const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 /* ------------------------------------------------------------------ */
 /* Textures                                                           */
 /* ------------------------------------------------------------------ */
 
-const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
 function rimTexture(pins: number): THREE.CanvasTexture {
-    const [c, ctx] = canvas(2048, 64);
-    ctx.fillStyle = '#0c0f13';
-    ctx.fillRect(0, 0, 2048, 64);
-    ctx.fillStyle = '#c9d6e2';
-    ctx.font = '700 34px "FreeSans"';
+    const [c, ctx] = canvas(2048, 96);
+    ctx.fillStyle = '#101214';
+    ctx.fillRect(0, 0, 2048, 96);
+    ctx.fillStyle = '#d4d8d6';
+    ctx.font = '700 30px "FreeSans"';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const w = 2048 / pins;
     for (let i = 0; i < pins; i++) {
         ctx.save();
-        ctx.translate(i * w + w / 2, 33);
+        ctx.translate(i * w + w / 2, 48);
         ctx.rotate(Math.PI / 2);
-        ctx.fillText(ALPHA[i % 26], 0, 0);
+        ctx.fillText(String(i + 1).padStart(2, '0'), 0, 0);
         ctx.restore();
     }
     return toTexture(c);
 }
 
-function dialTexture(): THREE.CanvasTexture {
+function ringTexture(): THREE.CanvasTexture {
     const S = 1024;
-    const [c, ctx] = canvas(S, S);
     const m = S / 2;
-    ctx.fillStyle = '#10161d';
+    const [c, ctx] = canvas(S, S);
+    ctx.fillStyle = '#6f7470';
     ctx.fillRect(0, 0, S, S);
-    // outer steel-blue ring with letters
     ctx.beginPath();
-    ctx.arc(m, m, 500, 0, Math.PI * 2);
-    ctx.fillStyle = '#1d3350';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(m, m, 372, 0, Math.PI * 2);
-    ctx.fillStyle = '#131c26';
+    ctx.arc(m, m, 505, 0, Math.PI * 2);
+    ctx.fillStyle = '#131517';
     ctx.fill();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 0; i < 26; i++) {
         const a = (i / 26) * Math.PI * 2 - Math.PI / 2;
         ctx.save();
-        ctx.translate(m + Math.cos(a) * 436, m + Math.sin(a) * 436);
+        ctx.translate(m + Math.cos(a) * 440, m + Math.sin(a) * 440);
         ctx.rotate(a + Math.PI / 2);
-        ctx.fillStyle = '#e4eef6';
-        ctx.font = '700 78px "FreeSans"';
+        ctx.fillStyle = '#e1e3df';
+        ctx.font = '700 70px "FreeSans"';
         ctx.fillText(ALPHA[i], 0, 0);
         ctx.restore();
-        ctx.save();
-        ctx.translate(m + Math.cos(a) * 330, m + Math.sin(a) * 330);
-        ctx.rotate(a + Math.PI / 2);
-        ctx.fillStyle = C.cyan;
-        ctx.font = '400 44px "FreeSans"';
-        ctx.fillText(String((i % 10) + 1 === 10 ? 0 : (i % 10) + 1), 0, 0);
-        ctx.restore();
+        if (i < 10) {
+            const b = ((i + 1) / 26) * Math.PI * 2 - Math.PI / 2;
+            ctx.save();
+            ctx.translate(m + Math.cos(b) * 345, m + Math.sin(b) * 345);
+            ctx.rotate(b + Math.PI / 2);
+            ctx.fillStyle = '#8c7775';
+            ctx.font = '400 50px "FreeSans"';
+            ctx.fillText(String((i + 1) % 10), 0, 0);
+            ctx.restore();
+        }
     }
-    // inner plate and pointer
-    const g = ctx.createRadialGradient(m - 60, m - 60, 20, m, m, 290);
-    g.addColorStop(0, '#9aa7b3');
-    g.addColorStop(1, '#46525e');
-    ctx.beginPath();
-    ctx.arc(m, m, 290, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.fillStyle = '#2a333c';
-    ctx.beginPath();
-    ctx.moveTo(m - 26, m);
-    ctx.lineTo(m, m - 270);
-    ctx.lineTo(m + 26, m);
-    ctx.arc(m, m, 26, 0, Math.PI);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(m, m, 18, 0, Math.PI * 2);
-    ctx.fillStyle = '#c3ccd4';
-    ctx.fill();
     return toTexture(c);
 }
 
-// Printed tape: cipher text in five-letter groups
+function indicatorTexture(): THREE.CanvasTexture {
+    const S = 512;
+    const m = S / 2;
+    const [c, ctx] = canvas(S, S);
+    ctx.clearRect(0, 0, S, S);
+    ctx.fillStyle = '#dfe1dd';
+    ctx.beginPath();
+    ctx.arc(m, m, 200, -Math.PI * 0.42, Math.PI * 1.42);
+    ctx.lineTo(m, m - 250);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#8c7775';
+    ctx.fillRect(m - 3, m - 150, 6, 60);
+    return toTexture(c);
+}
+
+function counterTexture(): THREE.CanvasTexture {
+    const [c, ctx] = canvas(256, 96);
+    ctx.fillStyle = '#16181a';
+    ctx.fillRect(0, 0, 256, 96);
+    ctx.fillStyle = '#d9d6c8';
+    ctx.font = '700 64px "FreeMono"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ['1', '2', '5'].forEach((d, i) => ctx.fillText(d, 60 + i * 68, 52));
+    return toTexture(c);
+}
+
+function barTexture(): THREE.CanvasTexture {
+    const [c, ctx] = canvas(1024, 48);
+    ctx.fillStyle = '#b8bebe';
+    ctx.fillRect(0, 0, 1024, 48);
+    ctx.fillStyle = '#2a2e30';
+    ctx.font = '700 30px "FreeSans"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    WHEEL_X.forEach((x, i) => ctx.fillText(String(i + 1), ((x + 0.875) / 1.95) * 1024, 26));
+    return toTexture(c);
+}
+
 function tapeTexture(text: string): [THREE.CanvasTexture, number] {
     const cell = 64;
     const [c, ctx] = canvas(text.length * cell, 128);
-    ctx.fillStyle = '#e3e9ec';
+    ctx.fillStyle = '#e4e5df';
     ctx.fillRect(0, 0, c.width, 128);
-    ctx.fillStyle = '#1b2733';
-    ctx.font = '700 70px "FreeMono"';
+    ctx.fillStyle = '#2b3236';
+    ctx.font = '700 66px "FreeMono"';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 0; i < text.length; i++) ctx.fillText(text[i], i * cell + cell / 2, 68);
-    // perforation-free paper grain
-    const r = mulberry32(77);
-    for (let i = 0; i < 4000; i++) {
-        ctx.fillStyle = `rgba(40,60,80,${r() * 0.05})`;
-        ctx.fillRect(r() * c.width, r() * 128, 2, 2);
-    }
     const t = toTexture(c);
     t.wrapS = THREE.ClampToEdgeWrapping;
     return [t, text.length];
@@ -149,45 +152,113 @@ function tapeTexture(text: string): [THREE.CanvasTexture, number] {
 /* Geometry helpers                                                   */
 /* ------------------------------------------------------------------ */
 
-function withEdges(mesh: THREE.Mesh, mat: THREE.LineBasicMaterial, angle = 25): THREE.Mesh {
-    const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, angle), mat);
-    e.renderOrder = 2;
-    mesh.add(e);
-    return mesh;
-}
-
-function shadow<T extends THREE.Object3D>(o: T): T {
-    o.traverse((x) => {
-        if (x instanceof THREE.Mesh) {
-            x.castShadow = true;
-            x.receiveShadow = true;
-        }
+// Extrude a side profile given as (z, y) points along +x from x0
+function profile(
+    pts: [number, number][],
+    x0: number,
+    depth: number,
+    bevel = 0.03,
+): THREE.BufferGeometry {
+    const shape = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(-z, y)));
+    const g = new THREE.ExtrudeGeometry(shape, {
+        depth: depth - bevel * 2,
+        bevelEnabled: bevel > 0,
+        bevelSize: bevel,
+        bevelThickness: bevel,
+        bevelSegments: 3,
+        curveSegments: 12,
     });
-    return o;
+    g.rotateY(Math.PI / 2);
+    g.translate(x0 + bevel, 0, 0);
+    g.computeVertexNormals();
+    return g;
 }
 
-// Ribbon along a path, for the paper tape
-function ribbon(path: (s: number) => THREE.Vector3, len: number, width: number, segs: number) {
+// A curved sheet: an arc in the y-z plane swept along x
+function shell(
+    x0: number,
+    x1: number,
+    cy: number,
+    cz: number,
+    r: number,
+    a0: number,
+    a1: number,
+): THREE.BufferGeometry {
+    const seg = 48;
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i <= seg; i++) {
+        const a = a0 + ((a1 - a0) * i) / seg;
+        const y = cy + r * Math.sin(a);
+        const z = cz + r * Math.cos(a);
+        pos.push(x0, y, z, x1, y, z);
+        if (i < seg) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+}
+
+// A ribbon along a spline in the x-y plane, width along z
+function ribbon(pts: THREE.Vector3[], width: number, segs: number): [THREE.BufferGeometry, number] {
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const len = curve.getLength();
     const pos: number[] = [];
     const uv: number[] = [];
     const idx: number[] = [];
-    const side = new THREE.Vector3(0, 0, 1);
     for (let i = 0; i <= segs; i++) {
         const u = i / segs;
-        const p = path(u * len);
-        pos.push(p.x, p.y, p.z + (width / 2) * side.z, p.x, p.y, p.z - (width / 2) * side.z);
-        uv.push(u, 0, u, 1);
-        if (i < segs) {
-            const a = i * 2;
-            idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-        }
+        const p = curve.getPointAt(u);
+        pos.push(p.x, p.y, p.z - width / 2, p.x, p.y, p.z + width / 2);
+        uv.push(u, 1, u, 0);
+        if (i < segs) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.setIndex(idx);
     g.computeVertexNormals();
-    return g;
+    return [g, len];
+}
+
+function mesh(
+    g: THREE.BufferGeometry,
+    m: THREE.Material | THREE.Material[],
+    at?: [number, number, number],
+): THREE.Mesh {
+    const o = new THREE.Mesh(g, m);
+    if (at) o.position.set(...at);
+    o.castShadow = true;
+    o.receiveShadow = true;
+    return o;
+}
+
+// A cylinder whose axis runs along x
+function xCyl(
+    r: number,
+    len: number,
+    m: THREE.Material | THREE.Material[],
+    at: [number, number, number],
+    seg = 32,
+) {
+    const g = new THREE.CylinderGeometry(r, r, len, seg);
+    g.rotateZ(Math.PI / 2);
+    return mesh(g, m, at);
+}
+
+// A cylinder whose axis runs along z
+function zCyl(
+    r: number,
+    len: number,
+    m: THREE.Material | THREE.Material[],
+    at: [number, number, number],
+    seg = 48,
+) {
+    const g = new THREE.CylinderGeometry(r, r, len, seg);
+    g.rotateX(Math.PI / 2);
+    return mesh(g, m, at);
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,282 +267,294 @@ function ribbon(path: (s: number) => THREE.Vector3, len: number, width: number, 
 
 export function buildMachine(cipherText: string): Machine {
     const bump = hammertone(1952);
-    bump.repeat.set(2, 2);
+    bump.repeat.set(1.5, 1.5);
     const body = new THREE.MeshPhysicalMaterial({
-        color: '#4c544c',
+        color: '#6d726e',
         roughness: 0.62,
-        metalness: 0.35,
+        metalness: 0.3,
         bumpMap: bump,
-        bumpScale: 1.4,
-        roughnessMap: bump,
-        clearcoat: 0.25,
-        clearcoatRoughness: 0.5,
+        bumpScale: 0.9,
+        clearcoat: 0.12,
+        clearcoatRoughness: 0.6,
     });
+    const bodyDark = body.clone();
+    bodyDark.color.set('#5d625f');
+    bodyDark.side = THREE.DoubleSide;
     const bakelite = new THREE.MeshPhysicalMaterial({
-        color: '#0b0e12',
-        roughness: 0.32,
-        metalness: 0.1,
-        clearcoat: 0.8,
-        clearcoatRoughness: 0.25,
+        color: '#121416',
+        roughness: 0.38,
+        metalness: 0.05,
+        clearcoat: 0.45,
     });
     const steel = new THREE.MeshStandardMaterial({
-        color: '#b9c4ce',
+        color: '#b6bcbd',
         metalness: 1,
-        roughness: 0.28,
+        roughness: 0.32,
     });
-    const paper = new THREE.MeshStandardMaterial({
-        color: '#9fb0bc',
-        roughness: 0.85,
-        side: THREE.DoubleSide,
+    const brass = new THREE.MeshStandardMaterial({
+        color: '#8a8060',
+        metalness: 0.85,
+        roughness: 0.45,
     });
-    const dialTex = dialTexture();
-    const dial = new THREE.MeshStandardMaterial({ map: dialTex, roughness: 0.4, metalness: 0.4 });
-    const rims = WHEEL_PINS.map(
-        (n) =>
-            new THREE.MeshPhysicalMaterial({
-                map: rimTexture(n),
-                roughness: 0.35,
-                metalness: 0.1,
-                clearcoat: 0.6,
-            }),
-    );
-    const edges = new THREE.LineBasicMaterial({ color: C.phosphor, transparent: true, opacity: 0 });
-    const all: THREE.Material[] = [body, bakelite, steel, paper, dial, ...rims];
+    const sheet = new THREE.MeshStandardMaterial({
+        color: '#8d938f',
+        metalness: 0.55,
+        roughness: 0.42,
+    });
+    const dark = new THREE.MeshStandardMaterial({ color: '#0e1012', roughness: 0.9 });
+    const grey = new THREE.MeshStandardMaterial({
+        color: '#a9afad',
+        metalness: 0.4,
+        roughness: 0.5,
+    });
 
     const root = new THREE.Group();
     const anchors: Record<string, THREE.Vector3> = {};
-
-    // Base plate
-    const base = withEdges(
-        new THREE.Mesh(new RoundedBoxGeometry(4.0, 0.34, 2.5, 4, 0.08), body),
-        edges,
-    );
-    base.position.set(0.1, 0.17, 0);
-    root.add(base);
-
-    // Front housing with the dial, printer on top
-    const housing = withEdges(
-        new THREE.Mesh(new RoundedBoxGeometry(1.25, 1.35, 2.1, 5, 0.16), body),
-        edges,
-    );
-    housing.position.set(-1.25, 0.34 + 0.67, 0.05);
-    root.add(housing);
-    const cap = withEdges(
-        new THREE.Mesh(new RoundedBoxGeometry(1.0, 0.3, 1.2, 4, 0.12), body),
-        edges,
-    );
-    cap.position.set(-1.3, 1.78, 0.45);
-    root.add(cap);
-
-    const dialMesh = withEdges(
-        new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.44, 0.06, 96), [steel, dial, steel]),
-        edges,
-    );
-    dialMesh.rotation.x = Math.PI / 2;
-    dialMesh.position.set(-1.12, 1.05, 1.11);
-    root.add(dialMesh);
-    const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.025, 12, 96), steel);
-    bezel.position.set(-1.12, 1.05, 1.12);
-    root.add(bezel);
-    anchors.dial = new THREE.Vector3(-1.12, 1.05, 1.15);
-
-    // Knurled knobs on the front
-    const knobGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.14, 40);
-    const knurl = new THREE.CylinderGeometry(0.105, 0.105, 0.08, 40, 1, true);
-    const knobPos: [number, number, number][] = [
-        [-1.62, 0.62, 1.13],
-        [-1.62, 1.35, 1.13],
-        [-1.45, 0.55, 1.12],
-    ];
-    knobPos.forEach((p, i) => {
-        const k = new THREE.Group();
-        const s = i === 2 ? 1.5 : 1;
-        k.add(new THREE.Mesh(knobGeo, steel));
-        const kn = new THREE.Mesh(knurl, bakelite);
-        kn.position.y = 0.02;
-        k.add(kn);
-        k.scale.setScalar(s);
-        k.rotation.x = Math.PI / 2;
-        k.position.set(...p);
-        root.add(k);
-    });
-
-    // Printer: roller and head
-    const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.3, 32), bakelite);
-    roller.rotation.x = Math.PI / 2;
-    roller.position.set(-1.62, 1.96, 0.45);
-    root.add(roller);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.3), steel);
-    head.position.set(-1.45, 1.97, 0.45);
-    root.add(head);
-    anchors.printer = new THREE.Vector3(-1.62, 2.0, 0.45);
-
-    // Paper tape: out of the head, across, then drooping off the edge
-    const [tapeTex, tapeChars] = tapeTexture(cipherText);
-    const tapePath = (s: number) => {
-        const x = -1.62 - s;
-        const droop = Math.max(0, s - 0.55);
-        const y = 2.02 + 0.08 * Math.sin(Math.min(s, 0.55) * 4) - droop * droop * 0.55;
-        const z = 0.45 + droop * 0.35 + 0.05 * Math.sin(s * 2.5);
-        return new THREE.Vector3(x, y, z);
-    };
-    const tape = new THREE.Mesh(ribbon(tapePath, TAPE_LEN, 0.17, 120), paper);
-    paper.map = tapeTex;
-    root.add(tape);
-
-    // Wheel axle and cage axle
-    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.3, 16), steel);
-    axle.rotation.z = Math.PI / 2;
-    axle.position.set(0.45, AXIS_Y, WHEEL_Z);
-    root.add(axle);
-    const axle2 = axle.clone();
-    axle2.position.z = CAGE_Z;
-    root.add(axle2);
-
-    // Pin wheels
-    const wheels: THREE.Group[] = [];
     const r = mulberry32(52);
+
+    // Tray, with a slot for each guide arm and the alignment holes
+    root.add(mesh(new RoundedBoxGeometry(4.5, 0.36, 2.8, 4, 0.1), body, [0.05, 0.18, 0.05]));
+    for (const x of WHEEL_X)
+        root.add(mesh(new THREE.BoxGeometry(0.05, 0.006, 0.52), dark, [x, 0.362, 1.0]));
+    for (const x of [-1.25, 1.55]) root.add(zCyl(0.045, 0.02, dark, [x, 0.18, 1.455], 20));
+    root.add(mesh(new THREE.BoxGeometry(0.16, 0.05, 0.1), steel, [0.95, 0.39, 1.15]));
+
+    // Printer housing: a faceted block, dial on the front
+    const housing: [number, number][] = [
+        [-0.95, 0.36],
+        [1.2, 0.36],
+        [1.2, 1.2],
+        [1.02, 1.42],
+        [0.55, 1.72],
+        [-0.55, 1.78],
+        [-0.95, 1.6],
+    ];
+    root.add(mesh(profile(housing, -2.05, 1.2, 0.04), body));
+    root.add(mesh(new THREE.BoxGeometry(0.05, 1.25, 1.95), brass, [-0.82, 0.98, 0.12]));
+
+    // Letter ring, fixed, and the indicator plate that turns
+    const ringTex = ringTexture();
+    const ringMat = new THREE.MeshStandardMaterial({
+        map: ringTex,
+        roughness: 0.45,
+        metalness: 0.2,
+    });
+    root.add(zCyl(0.4, 0.04, [bakelite, ringMat, bakelite], [-1.45, 0.84, 1.22], 96));
+    const indicator = mesh(
+        new THREE.CircleGeometry(0.29, 64),
+        new THREE.MeshStandardMaterial({
+            map: indicatorTexture(),
+            transparent: true,
+            roughness: 0.4,
+        }),
+    );
+    indicator.position.set(-1.45, 0.84, 1.247);
+    root.add(indicator);
+    root.add(zCyl(0.025, 0.03, steel, [-1.45, 0.84, 1.255], 16));
+    anchors.dial = new THREE.Vector3(-1.45, 0.84, 1.26);
+
+    // End face: selection knob, mode selector, paper advance, counter
+    const knurl = new THREE.MeshStandardMaterial({
+        color: '#c3c8c8',
+        metalness: 1,
+        roughness: 0.35,
+        bumpMap: stripes(),
+        bumpScale: 3,
+    });
+    root.add(xCyl(0.14, 0.22, knurl, [-2.16, 0.62, 0.55], 48));
+    root.add(xCyl(0.09, 0.05, dark, [-2.28, 0.62, 0.55], 32));
+    root.add(xCyl(0.065, 0.12, knurl, [-2.1, 0.46, 0.93], 32));
+    root.add(xCyl(0.08, 0.14, knurl, [-2.11, 0.98, 0.78], 32));
+    root.add(xCyl(0.07, 0.02, dark, [-2.052, 0.98, 0.3], 32));
+    const counter = mesh(
+        new THREE.PlaneGeometry(0.34, 0.13),
+        new THREE.MeshStandardMaterial({ map: counterTexture(), roughness: 0.5 }),
+    );
+    counter.rotation.y = -Math.PI / 2;
+    counter.position.set(-2.056, 1.42, 0.1);
+    root.add(counter);
+    anchors.knobs = new THREE.Vector3(-2.2, 0.62, 0.55);
+
+    // Printer on top: roller assembly and the bracket over the paper
+    root.add(xCyl(0.06, 0.34, steel, [-1.05, 1.72, 0.62]));
+    root.add(xCyl(0.08, 0.06, knurl, [-0.86, 1.72, 0.62]));
+    const bracket = mesh(new THREE.BoxGeometry(0.46, 0.025, 0.34), steel, [-1.62, 1.86, 0.12]);
+    bracket.rotation.z = 0.08;
+    root.add(bracket);
+
+    // Paper tape: out of the top, over the end, hanging in a loop
+    const [tapeTex, tapeChars] = tapeTexture(cipherText);
+    const [tapeGeo, tapeLen] = ribbon(
+        [
+            [-1.2, 1.8],
+            [-1.7, 1.83],
+            [-2.15, 1.9],
+            [-2.45, 1.76],
+            [-2.56, 1.45],
+            [-2.47, 1.15],
+            [-2.32, 1.0],
+            [-2.36, 0.8],
+            [-2.55, 0.7],
+        ].map(([x, y]) => new THREE.Vector3(x, y, 0.12)),
+        0.3,
+        160,
+    );
+    const paper = new THREE.MeshStandardMaterial({
+        map: tapeTex,
+        roughness: 0.85,
+        side: THREE.DoubleSide,
+    });
+    const tape = mesh(tapeGeo, paper);
+    tape.castShadow = false;
+    root.add(tape);
+    anchors.tape = new THREE.Vector3(-2.2, 1.9, 0.12);
+
+    // Key wheels with numbered rims and toothed edges
+    const wheels: THREE.Group[] = [];
     WHEEL_PINS.forEach((pins, i) => {
         const g = new THREE.Group();
-        g.position.set(WHEEL_X[i], AXIS_Y, WHEEL_Z);
-        const disc = withEdges(
-            new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.13, 96), [
-                rims[i],
-                bakelite,
-                bakelite,
-            ]),
-            edges,
-            40,
+        g.position.set(WHEEL_X[i], WHEEL_Y, WHEEL_Z);
+        const rim = new THREE.MeshPhysicalMaterial({
+            map: rimTexture(pins),
+            roughness: 0.4,
+            clearcoat: 0.4,
+        });
+        const disc = new THREE.CylinderGeometry(WHEEL_R - 0.02, WHEEL_R - 0.02, 0.1, 96);
+        disc.rotateZ(Math.PI / 2);
+        g.add(mesh(disc, [rim, bakelite, bakelite]));
+        g.add(xCyl(0.1, 0.16, steel, [0, 0, 0]));
+        const teeth = new THREE.InstancedMesh(
+            new THREE.BoxGeometry(0.03, 0.035, 0.04),
+            bakelite,
+            pins * 2,
         );
-        disc.rotation.z = Math.PI / 2;
-        g.add(disc);
-        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.17, 32), steel);
-        hub.rotation.z = Math.PI / 2;
-        g.add(hub);
-
-        // pins: active ones pushed to the right face
-        const pin = new THREE.InstancedMesh(new THREE.BoxGeometry(0.05, 0.024, 0.024), steel, pins);
         const m = new THREE.Matrix4();
-        for (let k = 0; k < pins; k++) {
-            const a = (k / pins) * Math.PI * 2;
-            const active = r() < 0.5;
+        for (let k = 0; k < pins * 2; k++) {
+            const a = ((k % pins) / pins) * Math.PI * 2;
             m.makeRotationX(a);
-            m.setPosition(active ? 0.085 : 0.045, Math.cos(a) * 0.44, Math.sin(a) * 0.44);
-            pin.setMatrixAt(k, m);
+            m.setPosition(k < pins ? -0.058 : 0.058, Math.cos(a) * WHEEL_R, Math.sin(a) * WHEEL_R);
+            teeth.setMatrixAt(k, m);
         }
-        g.add(pin);
+        teeth.castShadow = true;
+        g.add(teeth);
         root.add(g);
         wheels.push(g);
-    });
-    anchors.wheels = new THREE.Vector3(WHEEL_X[3], AXIS_Y + 0.5, WHEEL_Z + 0.2);
 
-    // Feeler levers under the wheels
-    WHEEL_X.forEach((x) => {
-        const lever = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.12), body);
-        lever.position.set(x, 0.55, WHEEL_Z + 0.52);
-        lever.rotation.x = -0.35;
-        root.add(lever);
+        // guide arm down into the tray slot
+        const arm = profile(
+            [
+                [0.25, 0.6],
+                [0.55, 0.6],
+                [1.1, 0.37],
+                [0.84, 0.37],
+            ],
+            WHEEL_X[i] - 0.016,
+            0.032,
+            0,
+        );
+        root.add(mesh(arm, sheet));
     });
+    root.add(xCyl(0.03, 1.8, steel, [0.1, WHEEL_Y, WHEEL_Z]));
+    anchors.wheels = new THREE.Vector3(WHEEL_X[2], WHEEL_Y + WHEEL_R, WHEEL_Z + 0.1);
 
-    // Lug cage: bars around a drum, lugs set against wheel positions
+    // Cage: brass slide bars around a drum, lugs set by the key
     const cage = new THREE.Group();
-    cage.position.set(0.45, AXIS_Y, CAGE_Z);
-    const len = 2.0;
+    cage.position.set(0.115, CAGE_Y, CAGE_Z);
+    const len = 1.67;
     const bars = new THREE.InstancedMesh(
-        new THREE.BoxGeometry(len, 0.05, 0.07),
-        bakelite,
+        new THREE.BoxGeometry(len, 0.035, 0.075),
+        brass,
         CAGE_BARS,
     );
     const lugs = new THREE.InstancedMesh(
-        new THREE.BoxGeometry(0.07, 0.07, 0.05),
+        new THREE.BoxGeometry(0.06, 0.06, 0.05),
         steel,
-        CAGE_BARS * 6,
+        CAGE_BARS * 2,
     );
     const m = new THREE.Matrix4();
-    let nl = 0;
     for (let b = 0; b < CAGE_BARS; b++) {
         const a = (b / CAGE_BARS) * Math.PI * 2;
         m.makeRotationX(a);
-        m.setPosition(0, Math.cos(a) * 0.42, Math.sin(a) * 0.42);
+        m.setPosition(0, Math.cos(a) * 0.46, Math.sin(a) * 0.46);
         bars.setMatrixAt(b, m);
-        for (let w = 0; w < 6; w++) {
-            if (r() > 0.28) continue;
+        for (let k = 0; k < 2; k++) {
+            const w = Math.floor(r() * 6);
             m.makeRotationX(a);
-            m.setPosition(WHEEL_X[w] - 0.45, Math.cos(a) * 0.47, Math.sin(a) * 0.47);
-            lugs.setMatrixAt(nl++, m);
+            m.setPosition(WHEEL_X[w] - 0.115, Math.cos(a) * 0.5, Math.sin(a) * 0.5);
+            lugs.setMatrixAt(b * 2 + k, m);
         }
     }
-    lugs.count = nl;
+    bars.castShadow = lugs.castShadow = true;
     cage.add(bars, lugs);
-    for (const x of [-len / 2, len / 2]) {
-        const end = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.04, 64), steel);
-        end.rotation.z = Math.PI / 2;
-        end.position.x = x;
-        cage.add(end);
-    }
+    cage.add(xCyl(0.5, 0.03, steel, [-len / 2 - 0.02, 0, 0], 64));
+    cage.add(xCyl(0.48, 0.04, brass, [len / 2 + 0.02, 0, 0], 64));
+    cage.add(xCyl(0.05, len + 0.3, steel, [0, 0, 0]));
     root.add(cage);
-    anchors.cage = new THREE.Vector3(0.9, AXIS_Y + 0.46, CAGE_Z);
+    anchors.cage = new THREE.Vector3(0.4, CAGE_Y + 0.46, CAGE_Z);
 
-    // Right-hand frame plate
-    const frame = withEdges(
-        new THREE.Mesh(new RoundedBoxGeometry(0.1, 1.55, 2.0, 4, 0.05), body),
-        edges,
-    );
-    frame.position.set(1.55, 0.34 + 0.77, -0.15);
-    root.add(frame);
+    // Locking bar, numbered for the wheels
+    const barMat = new THREE.MeshStandardMaterial({
+        map: barTexture(),
+        metalness: 0.8,
+        roughness: 0.35,
+    });
+    const lock = new THREE.BoxGeometry(1.95, 0.06, 0.08);
+    root.add(mesh(lock, [steel, steel, steel, steel, barMat, steel], [0.1, 1.68, -0.06]));
+    for (const x of [-0.87, 1.02])
+        root.add(mesh(new THREE.BoxGeometry(0.06, 0.2, 0.12), steel, [x, 1.6, -0.1]));
 
-    // Crank on the cage axle
-    const crank = new THREE.Group();
-    crank.position.set(1.66, AXIS_Y, CAGE_Z);
-    const arm = new THREE.Mesh(new RoundedBoxGeometry(0.06, 0.62, 0.12, 2, 0.02), steel);
-    arm.position.y = 0.28;
-    crank.add(arm);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.42, 32), bakelite);
-    handle.rotation.z = Math.PI / 2;
-    handle.position.set(0.24, 0.56, 0);
-    crank.add(handle);
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.1, 24), steel);
-    collar.rotation.z = Math.PI / 2;
-    collar.position.set(0.06, 0.56, 0);
-    crank.add(collar);
-    root.add(crank);
-    anchors.crank = new THREE.Vector3(1.9, AXIS_Y + 0.56, CAGE_Z);
+    // Right frame, spindle and the advance lever
+    const frame: [number, number][] = [
+        [-1.2, 0.36],
+        [1.05, 0.36],
+        [1.05, 0.8],
+        [0.6, 1.5],
+        [0.1, 1.95],
+        [-0.6, 2.0],
+        [-1.05, 1.85],
+        [-1.2, 1.5],
+    ];
+    root.add(mesh(profile(frame, 1.02, 0.1, 0.02), body));
+    root.add(xCyl(0.025, 1.0, steel, [1.6, 0.62, 0.55]));
+    root.add(xCyl(0.07, 0.02, steel, [2.1, 0.62, 0.55], 24));
 
-    // Lid: a curved shell hinged at the back, standing open
-    const lid = new THREE.Group();
-    lid.position.set(0.1, 0.34, -1.25);
-    const shell = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.0, 1.0, 3.9, 64, 1, true, -Math.PI / 2, Math.PI * 0.62),
-        new THREE.MeshPhysicalMaterial({
-            color: '#454c45',
-            roughness: 0.65,
-            metalness: 0.35,
-            bumpMap: bump,
-            bumpScale: 1.4,
-            side: THREE.DoubleSide,
-        }),
-    );
-    all.push(shell.material as THREE.Material);
-    shell.rotation.z = Math.PI / 2;
-    shell.position.set(0, 1.0, -0.05);
-    withEdges(shell, edges, 30);
-    lid.add(shell);
-    lid.rotation.x = -0.25;
-    root.add(lid);
+    const lever = new THREE.Group();
+    lever.position.set(1.2, CAGE_Y, CAGE_Z);
+    lever.add(mesh(new RoundedBoxGeometry(0.08, 1.05, 0.17, 2, 0.03), grey, [0, 0.45, 0]));
+    lever.add(xCyl(0.12, 0.1, grey, [0, 0, 0], 32));
+    lever.add(xCyl(0.1, 0.5, bakelite, [0.33, 0.95, 0], 40));
+    lever.add(xCyl(0.108, 0.08, grey, [0.1, 0.95, 0], 40));
+    root.add(lever);
+    anchors.lever = new THREE.Vector3(1.55, CAGE_Y + 0.95, CAGE_Z);
 
-    shadow(root);
-    tape.castShadow = false;
-    return {
-        root,
-        wheels,
-        cage,
-        crank,
-        dial: dialMesh,
-        tape,
-        tapeTex,
-        tapeChars,
-        lid,
-        mats: { body, bakelite, steel, paper, dial, rims, edges, all },
-        anchors,
-    };
+    // Hinged hood behind the cage, standing open
+    root.add(mesh(shell(-0.85, 1.02, 1.05, -0.35, 1.05, 1.4, 3.1), bodyDark));
+
+    // Case lid, hinged at the back of the tray
+    const caseLid = new THREE.Group();
+    caseLid.position.set(0.05, 0.36, -1.35);
+    const D = 2.35;
+    const L = 2.85;
+    const top = mesh(new RoundedBoxGeometry(4.6, 0.06, L, 2, 0.03), body, [0, D, L / 2]);
+    caseLid.add(top);
+    for (const x of [-2.27, 2.27])
+        caseLid.add(mesh(new THREE.BoxGeometry(0.06, D, L), bodyDark, [x, D / 2, L / 2]));
+    caseLid.add(mesh(new THREE.BoxGeometry(4.6, D, 0.06), bodyDark, [0, D / 2, L - 0.03]));
+    caseLid.add(mesh(new THREE.BoxGeometry(4.6, D, 0.06), bodyDark, [0, D / 2, 0.03]));
+    root.add(caseLid);
+
+    return { root, wheels, cage, lever, indicator, tapeTex, tapeChars, tapeLen, caseLid, anchors };
+}
+
+// Knurling: fine stripes used as a bump map
+function stripes(): THREE.CanvasTexture {
+    const [c, ctx] = canvas(256, 16);
+    for (let x = 0; x < 256; x += 4) {
+        ctx.fillStyle = x % 8 ? '#000' : '#fff';
+        ctx.fillRect(x, 0, 4, 16);
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(6, 1);
+    return t;
 }

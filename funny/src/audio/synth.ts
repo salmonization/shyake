@@ -1,24 +1,23 @@
-// The soundtrack, composed in code. Every note comes from the score,
-// so the picture can be cut to it without any audio analysis.
+// The soundtrack, composed in code: a slow ambient piece in D minor.
+// Pad and sea underneath, a sparse FM piano above, and the few real
+// sounds the picture asks for. Every note comes from the score.
 
+import { BELLS, PAGE_TURNS } from '../engine/lines.ts';
 import {
     at,
     BAR,
     BEAT,
-    CHORDS,
     chordAt,
-    CLAPS,
     CX_STEPS,
     DURATION,
-    HATS,
-    KICKS,
     midiHz,
+    PULSES,
     section,
     sectionStart,
     STEP,
     type SectionId,
 } from '../engine/score.ts';
-import { BOOT_LINES, BOOT_TYPED, TERMINAL_KEYS } from '../engine/script.ts';
+import { BOOT_LINES, PGP_TYPED, TERMINAL_KEYS } from '../engine/script.ts';
 import { Bus, Noise, panGains, pingPong, polyBlep, reverb, SVF } from './dsp.ts';
 
 export const SR = 48000;
@@ -32,8 +31,7 @@ export interface Song {
 interface Ctx {
     sr: number;
     n: number;
-    drums: Bus;
-    music: Bus;
+    dry: Bus;
     pad: Bus;
     verb: Bus;
     echo: Bus;
@@ -80,216 +78,59 @@ function place(
 /* Voices                                                             */
 /* ------------------------------------------------------------------ */
 
-function kick(c: Ctx, t: number, vel: number) {
-    let ph = 0;
-    const nz = new Noise(0x4b1c);
-    place(c, c.drums, t, 0.55, 0, (tau) => {
-        const f = 44 + 110 * Math.exp(-tau / 0.03);
-        ph += (TAU * f) / c.sr;
-        const body = Math.sin(ph) * Math.exp(-tau / 0.24) * Math.min(1, tau / 0.002);
-        const click = nz.next() * Math.exp(-tau / 0.002) * 0.3;
-        return Math.tanh((body * 1.4 + click) * vel) * 0.95;
-    });
-}
-
-// Six detuned squares, the classic metallic hat, then high-passed
-const HAT_F = [263, 400, 421, 474, 587, 845].map((f) => f * 2.6);
-
-function hat(c: Ctx, t: number, open: boolean, vel: number, seed: number) {
-    const hp = new SVF();
-    hp.set(7800, 0.9, c.sr);
-    const nz = new Noise(seed);
-    const decay = open ? 0.11 : 0.028;
-    place(
-        c,
-        c.drums,
-        t,
-        decay * 6,
-        open ? 0.25 : -0.2,
-        (tau) => {
-            let m = 0;
-            for (const f of HAT_F) m += Math.sign(Math.sin(TAU * f * tau));
-            hp.tick(m * 0.12 + nz.next() * 0.35);
-            return hp.high * Math.exp(-tau / decay) * vel * 0.32;
-        },
-        { verb: 0.08 },
-    );
-}
-
-function clap(c: Ctx, t: number, seed: number) {
-    const bp = new SVF();
-    bp.set(1300, 1.4, c.sr);
-    const nz = new Noise(seed);
-    place(
-        c,
-        c.drums,
-        t - 0.02,
-        0.4,
-        0.05,
-        (tau) => {
-            let env = 0;
-            for (const o of [0, 0.011, 0.022]) if (tau >= o) env += Math.exp(-(tau - o) / 0.006);
-            if (tau >= 0.03) env += 0.6 * Math.exp(-(tau - 0.03) / 0.09);
-            bp.tick(nz.next());
-            return bp.band * env * 0.55;
-        },
-        { verb: 0.45 },
-    );
-}
-
-// CX-52: a pin ratchet, and a heavier lug-cage thunk per letter
-function pinClick(c: Ctx, t: number, letter: boolean, i: number) {
-    const nz = new Noise(0x52 + i * 7919);
-    const hp = new SVF();
-    hp.set(2500, 0.7, c.sr);
-    const detune = 1 + ((i * 37) % 11) / 90;
-    const fs = [2870, 4630, 6310].map((f) => f * detune);
-    place(
-        c,
-        c.drums,
-        t,
-        0.12,
-        ((i % 6) - 2.5) / 5,
-        (tau) => {
-            hp.tick(nz.next());
-            let ping = 0;
-            for (let k = 0; k < 3; k++)
-                ping += Math.sin(TAU * fs[k] * tau) * Math.exp(-tau / (0.012 - k * 0.003));
-            const tick = hp.high * Math.exp(-tau / 0.0015);
-            const thunk = letter
-                ? Math.sin(TAU * 170 * tau) * Math.exp(-tau / 0.03) * 0.8 +
-                  Math.sin(TAU * 1210 * tau) * Math.exp(-tau / 0.02) * 0.25
-                : 0;
-            return (tick * 0.7 + ping * 0.2 + thunk) * (letter ? 0.55 : 0.32);
-        },
-        { verb: 0.12 },
-    );
-}
-
-function keyClick(c: Ctx, t: number, i: number, soft: boolean) {
-    const nz = new Noise(0x7e7 + i * 131);
-    const bp = new SVF();
-    bp.set(3200 + ((i * 53) % 900), 2.2, c.sr);
-    place(
-        c,
-        c.drums,
-        t,
-        0.05,
-        -0.35 + ((i * 17) % 7) / 10,
-        (tau) => {
-            bp.tick(nz.next());
-            const ping = Math.sin(TAU * 1850 * tau) * Math.exp(-tau / 0.006);
-            return (bp.band * 1.4 + ping * 0.3) * Math.exp(-tau / 0.008) * (soft ? 0.18 : 0.3);
-        },
-        { verb: 0.05 },
-    );
-}
-
-// Workstation power-on beep
-function beep(c: Ctx, t: number) {
-    const lp = new SVF();
-    lp.set(3000, 0.7, c.sr);
-    place(
-        c,
-        c.music,
-        t,
-        0.9,
-        0,
-        (tau) => {
-            const sq = Math.sin(TAU * 1046.5 * tau) > 0 ? 1 : -1;
-            const env =
-                Math.min(1, tau / 0.004) * (tau < 0.55 ? 1 : Math.exp(-(tau - 0.55) / 0.04));
-            return lp.tick(sq) * env * 0.12;
-        },
-        { verb: 0.3 },
-    );
-}
-
-// Bell 202 FSK chatter under each PROM line
-function modem(c: Ctx, t: number, seed: number) {
-    const nz = new Noise(seed);
-    let ph = 0;
-    let bit = 0;
-    const baud = 1200;
-    const lp = new SVF();
-    lp.set(2600, 0.8, c.sr);
-    place(
-        c,
-        c.music,
-        t,
-        0.09,
-        0.3,
-        (tau, i) => {
-            if (i % Math.round(c.sr / baud) === 0) bit = nz.next() > 0 ? 1 : 0;
-            ph += (TAU * (bit ? 1200 : 2200)) / c.sr;
-            const env = Math.min(1, tau / 0.004) * Math.min(1, (0.09 - tau) / 0.01);
-            return lp.tick(Math.sin(ph)) * env * 0.045;
-        },
-        { echo: 0.3 },
-    );
-}
-
-function bass(c: Ctx, t: number, note: number, dur: number, vel: number) {
+// Soft FM piano: a sine lightly modulated, a hammer, a long decay
+function piano(c: Ctx, t: number, note: number, vel: number, pan = 0) {
     const f = midiHz(note);
-    const dt = f / c.sr;
-    let ph = 0;
-    const lp = new SVF();
-    place(c, c.music, t, dur + 0.05, 0, (tau, i) => {
-        if (i % 16 === 0) lp.set(140 + 1300 * Math.exp(-tau / 0.07) * vel, 1.3, c.sr);
-        ph += dt;
-        if (ph >= 1) ph -= 1;
-        const saw = 2 * ph - 1 - polyBlep(ph, dt);
-        const sub = Math.sin(TAU * ph);
-        const env =
-            Math.min(1, tau / 0.003) * Math.exp(-tau / 0.16) * Math.min(1, (dur - tau) / 0.02 + 1);
-        return (lp.tick(saw) * 0.55 + sub * 0.45) * Math.max(0, env) * 0.42;
-    });
+    let pc = 0;
+    let pm = 0;
+    let pd = 0;
+    const dur = 5;
+    place(
+        c,
+        c.dry,
+        t,
+        dur,
+        pan,
+        (tau) => {
+            pm += (TAU * f) / c.sr;
+            pc += (TAU * f) / c.sr;
+            pd += (TAU * f * 1.0016) / c.sr;
+            const idx = 1.1 * Math.exp(-tau / 0.35) + 0.15;
+            const env =
+                Math.min(1, tau / 0.006) *
+                (0.55 * Math.exp(-tau / 0.5) + 0.45 * Math.exp(-tau / 2.2));
+            const x =
+                Math.sin(pc + idx * Math.sin(pm)) +
+                0.5 * Math.sin(pd + idx * 0.5 * Math.sin(pm * 2));
+            return x * env * vel * 0.13 * Math.min(1, (dur - tau) / 0.2);
+        },
+        { verb: 0.55, echo: 0.22 },
+    );
 }
 
-// FM tone: carrier plus one modulator, index decays
-function fm(
-    c: Ctx,
-    t: number,
-    note: number,
-    opts: {
-        ratio: number;
-        index: number;
-        decay: number;
-        dur: number;
-        gain: number;
-        pan: number;
-        verb?: number;
-        echo?: number;
-        vibrato?: number;
-    },
-) {
+// A low bell under each historical sentence
+function bell(c: Ctx, t: number, note: number) {
     const f = midiHz(note);
     let pc = 0;
     let pm = 0;
     place(
         c,
-        c.music,
+        c.dry,
         t,
-        opts.dur,
-        opts.pan,
+        7,
+        0,
         (tau) => {
-            const vib = opts.vibrato
-                ? 1 + opts.vibrato * Math.sin(TAU * 5.2 * tau) * Math.min(1, tau / 0.4)
-                : 1;
-            pm += (TAU * f * opts.ratio) / c.sr;
-            const idx = opts.index * Math.exp(-tau / (opts.decay * 0.6));
-            pc += (TAU * f * vib) / c.sr;
-            const env =
-                Math.min(1, tau / 0.004) *
-                Math.exp(-tau / opts.decay) *
-                Math.min(1, (opts.dur - tau) / 0.05);
-            return Math.sin(pc + idx * Math.sin(pm)) * env * opts.gain;
+            pm += (TAU * f * 1.41) / c.sr;
+            pc += (TAU * f) / c.sr;
+            const idx = 2.2 * Math.exp(-tau / 1.2);
+            const env = Math.min(1, tau / 0.01) * Math.exp(-tau / 2.4);
+            return Math.sin(pc + idx * Math.sin(pm)) * env * 0.11 * Math.min(1, (7 - tau) / 0.3);
         },
-        { verb: opts.verb ?? 0.3, echo: opts.echo ?? 0 },
+        { verb: 0.7 },
     );
 }
 
-// Pad: two detuned saws and a triangle per chord tone, low-passed
+// Pad: two detuned saws and a triangle per chord tone, kept dark
 function padChord(
     c: Ctx,
     t: number,
@@ -299,17 +140,17 @@ function padChord(
     gain: number,
 ) {
     tones.forEach((note, k) => {
-        const f = midiHz(note + 12);
+        const f = midiHz(note);
         const lp = new SVF();
         let p1 = (k * 0.137) % 1;
         let p2 = (k * 0.311) % 1;
         let p3 = 0;
-        const d1 = (f * Math.pow(2, 7 / 1200)) / c.sr;
-        const d2 = (f * Math.pow(2, -7 / 1200)) / c.sr;
+        const d1 = (f * Math.pow(2, 6 / 1200)) / c.sr;
+        const d2 = (f * Math.pow(2, -6 / 1200)) / c.sr;
         const d3 = f / 2 / c.sr;
-        const pan = k % 2 === 0 ? -0.45 + k * 0.05 : 0.45 - k * 0.05;
-        const attack = 0.9;
-        const release = 1.4;
+        const pan = k % 2 === 0 ? -0.5 + k * 0.06 : 0.5 - k * 0.06;
+        const attack = 2.2;
+        const release = 3;
         place(
             c,
             c.pad,
@@ -317,7 +158,7 @@ function padChord(
             dur + release,
             pan,
             (tau, i) => {
-                if (i % 32 === 0) lp.set(cutoff(t + tau), 0.8, c.sr);
+                if (i % 64 === 0) lp.set(cutoff(t + tau), 0.7, c.sr);
                 p1 += d1;
                 if (p1 >= 1) p1 -= 1;
                 p2 += d2;
@@ -330,315 +171,306 @@ function padChord(
                 const env =
                     Math.min(1, tau / attack) *
                     (tau < dur ? 1 : Math.exp(-(tau - dur) / (release / 3)));
-                return lp.tick((s1 + s2) * 0.5 + tri * 0.4) * env * gain;
+                return lp.tick((s1 + s2) * 0.4 + tri * 0.6) * env * gain;
             },
-            { verb: 0.55 },
+            { verb: 0.6 },
         );
     });
 }
 
-// Filtered noise rising into a downbeat
-function riser(c: Ctx, tEnd: number, dur: number, seed: number) {
-    const nz = new Noise(seed);
-    const bp = new SVF();
+// The sea: two bands of noise that swell and fall with the waves
+function sea(c: Ctx, t0: number, t1: number, level: (t: number) => number, seed: number) {
+    const nl = new Noise(seed);
+    const nr = new Noise(seed * 7 + 1);
+    const lpL = new SVF();
+    const lpR = new SVF();
+    const [s0, s1] = range(c, t0, t1 - t0);
+    for (let s = s0; s < s1; s++) {
+        const t = s / c.sr;
+        const swellL = 0.5 + 0.5 * Math.sin((t / (BAR * 1.5)) * TAU);
+        const swellR = 0.5 + 0.5 * Math.sin((t / (BAR * 1.5)) * TAU + 1.9);
+        if (s % 64 === 0) {
+            lpL.set(300 + 1400 * swellL * swellL, 0.6, c.sr);
+            lpR.set(300 + 1400 * swellR * swellR, 0.6, c.sr);
+        }
+        const edge = Math.min(1, (t - t0) / 3, (t1 - t) / 3);
+        const g = level(t) * Math.max(0, edge) * 0.35;
+        const l = lpL.tick(nl.next()) * (0.3 + 0.7 * swellL) * g;
+        const r = lpR.tick(nr.next()) * (0.3 + 0.7 * swellR) * g;
+        c.dry.l[s] += l;
+        c.dry.r[s] += r;
+        c.verb.l[s] += l * 0.2;
+        c.verb.r[s] += r * 0.2;
+    }
+}
+
+// Tape hiss for the archive
+function hiss(c: Ctx, t0: number, t1: number, seed: number) {
+    const n = new Noise(seed);
+    const hp = new SVF();
+    hp.set(5000, 0.7, c.sr);
+    place(c, c.dry, t0, t1 - t0, 0, (tau) => {
+        hp.tick(n.next());
+        const edge = Math.min(1, tau / 2, (t1 - t0 - tau) / 2);
+        return hp.high * 0.012 * Math.max(0, edge);
+    });
+}
+
+// CX-52: a pin ratchet, and a softer lug-cage thunk per letter
+function pinClick(c: Ctx, t: number, letter: boolean, i: number) {
+    const nz = new Noise(0x52 + i * 7919);
+    const hp = new SVF();
+    hp.set(2200, 0.7, c.sr);
+    const detune = 1 + ((i * 37) % 11) / 90;
+    const fs = [2470, 3930, 5310].map((f) => f * detune);
     place(
         c,
-        c.music,
-        tEnd - dur,
-        dur + 0.05,
-        0,
-        (tau, i) => {
-            const x = tau / dur;
-            if (i % 32 === 0) bp.set(300 + 7000 * x * x, 2.5, c.sr);
-            bp.tick(nz.next());
-            return bp.band * x * x * 0.3 * Math.min(1, (dur + 0.05 - tau) / 0.03);
+        c.dry,
+        t,
+        0.15,
+        ((i % 6) - 2.5) / 8,
+        (tau) => {
+            hp.tick(nz.next());
+            let ping = 0;
+            for (let k = 0; k < 3; k++)
+                ping += Math.sin(TAU * fs[k] * tau) * Math.exp(-tau / (0.012 - k * 0.003));
+            const tick = hp.high * Math.exp(-tau / 0.0015);
+            const thunk = letter
+                ? Math.sin(TAU * 150 * tau) * Math.exp(-tau / 0.035) * 0.7 +
+                  Math.sin(TAU * 980 * tau) * Math.exp(-tau / 0.02) * 0.2
+                : 0;
+            return (tick * 0.6 + ping * 0.15 + thunk) * (letter ? 0.28 : 0.16);
         },
-        { verb: 0.5 },
+        { verb: 0.25 },
     );
 }
 
-// Low boom at a section start
-function impact(c: Ctx, t: number) {
-    let ph = 0;
+function keyClick(c: Ctx, t: number, i: number, soft: boolean) {
+    const nz = new Noise(0x7e7 + i * 131);
+    const bp = new SVF();
+    bp.set(2600 + ((i * 53) % 700), 2, c.sr);
     place(
         c,
-        c.drums,
+        c.dry,
         t,
-        2.5,
+        0.05,
+        -0.2 + ((i * 17) % 5) / 10,
+        (tau) => {
+            bp.tick(nz.next());
+            return bp.band * Math.exp(-tau / 0.007) * (soft ? 0.08 : 0.14);
+        },
+        { verb: 0.1 },
+    );
+}
+
+// Workstation self-test beep, soft
+function beep(c: Ctx, t: number) {
+    place(
+        c,
+        c.dry,
+        t,
+        0.6,
         0,
         (tau) => {
-            ph += (TAU * (30 + 40 * Math.exp(-tau / 0.15))) / c.sr;
-            return Math.sin(ph) * Math.exp(-tau / 0.9) * 0.55;
+            const env = Math.min(1, tau / 0.01) * (tau < 0.3 ? 1 : Math.exp(-(tau - 0.3) / 0.05));
+            return Math.sin(TAU * 880 * tau) * env * 0.05;
         },
         { verb: 0.4 },
     );
+}
+
+// A disk seek, a dull tick
+function seek(c: Ctx, t: number, i: number) {
+    const nz = new Noise(0xd15c + i);
+    const bp = new SVF();
+    bp.set(900, 3, c.sr);
+    place(c, c.dry, t, 0.06, 0.3, (tau) => {
+        bp.tick(nz.next());
+        return bp.band * Math.exp(-tau / 0.012) * 0.12;
+    });
+}
+
+// A page turning: a swell of filtered air
+function page(c: Ctx, t: number, i: number) {
+    const nz = new Noise(0x9a9e + i);
+    const bp = new SVF();
+    const dur = 0.9;
+    place(
+        c,
+        c.dry,
+        t,
+        dur,
+        -0.2 + i * 0.1,
+        (tau, k) => {
+            const x = tau / dur;
+            if (k % 32 === 0) bp.set(1200 + 2500 * x, 0.9, c.sr);
+            bp.tick(nz.next());
+            return bp.band * Math.sin(Math.PI * x) ** 2 * 0.1;
+        },
+        { verb: 0.3 },
+    );
+}
+
+// Heartbeat: a soft low thump
+function thump(c: Ctx, t: number, strong: boolean) {
+    let ph = 0;
+    place(c, c.dry, t, 0.5, 0, (tau) => {
+        ph += (TAU * (46 + 30 * Math.exp(-tau / 0.03))) / c.sr;
+        return (
+            Math.sin(ph) * Math.exp(-tau / 0.13) * Math.min(1, tau / 0.004) * (strong ? 0.28 : 0.17)
+        );
+    });
 }
 
 /* ------------------------------------------------------------------ */
 /* Arrangement                                                        */
 /* ------------------------------------------------------------------ */
 
-const s = (id: SectionId) => section(id);
+const sec = (id: SectionId) => section(id);
 
-// Pad filter per section, with the boot opening up and the outro closing
+// Pad brightness through the film
 function padCutoff(t: number): number {
     const bar = t / BAR;
-    const pts: [number, number][] = [
-        [s('boot').bar + 1, 220],
-        [s('boot').bar + 8, 1300],
-        [s('cx52').bar + 10, 1500],
-        [s('rubicon').bar, 650],
-        [s('rubicon').bar + 4, 900],
-        [s('lattice').bar, 1900],
-        [s('chacha').bar, 1600],
-        [s('sign').bar, 1800],
-        [s('federation').bar, 2800],
-        [s('terminal').bar, 1300],
-        [s('outro').bar, 1700],
-        [s('outro').bar + 6, 300],
+    const pts: [SectionId, number, number][] = [
+        ['sea', 0, 380],
+        ['boot', 0, 620],
+        ['cx52', 0, 760],
+        ['cryptoag', 0, 420],
+        ['pgp', 8, 480],
+        ['tide', 0, 1000],
+        ['river', 0, 1300],
+        ['desk', 0, 780],
+        ['title', 0, 900],
+        ['title', 4, 500],
     ];
-    if (bar <= pts[0][0]) return pts[0][1];
-    for (let i = 1; i < pts.length; i++) {
-        const [b1, v1] = pts[i];
-        const [b0, v0] = pts[i - 1];
-        if (bar <= b1) {
-            const x = (bar - b0) / (b1 - b0);
-            return v0 * Math.pow(v1 / v0, x);
-        }
+    const xs = pts.map(([id, off, v]) => [sec(id).bar + off, v] as const);
+    if (bar <= xs[0][0]) return xs[0][1];
+    for (let i = 1; i < xs.length; i++) {
+        const [b1, v1] = xs[i];
+        const [b0, v0] = xs[i - 1];
+        if (bar <= b1) return v0 * Math.pow(v1 / v0, (bar - b0) / (b1 - b0));
     }
-    return pts[pts.length - 1][1];
+    return xs[xs.length - 1][1];
+}
+
+// A short phrase for the piano, in beats and notes
+const MOTIF: [number, number][] = [
+    [0, 74],
+    [1.5, 69],
+    [2, 72],
+    [4, 65],
+    [6, 67],
+    [7, 69],
+];
+
+function motif(c: Ctx, bar: number, transpose: number, vel: number) {
+    MOTIF.forEach(([beat, note], i) =>
+        piano(
+            c,
+            at(bar) + beat * BEAT,
+            note + transpose,
+            vel * (i === 0 ? 1 : 0.8),
+            (i % 2) * 0.4 - 0.2,
+        ),
+    );
 }
 
 function arrange(c: Ctx) {
-    // Drums
-    KICKS.forEach((t) => kick(c, t, 1));
-    HATS.forEach((h, i) => hat(c, h.t, h.open, h.vel, 0x1a7 + i));
-    CLAPS.forEach((t, i) => clap(c, t, 0xc1a9 + i));
-    CX_STEPS.forEach((st, i) => pinClick(c, st.t, st.letter, i));
+    const end = sec('title').bar + sec('title').bars;
 
-    // Boot: power-on beep, modem chatter, typed command
-    beep(c, 0.3);
-    BOOT_LINES.forEach((l, i) => modem(c, l.t, 0x3d + i));
-    BOOT_TYPED.forEach((k, i) => keyClick(c, k.t, i, k.ch === ' '));
-    TERMINAL_KEYS.forEach((k, i) => keyClick(c, k.t, i + 100, k.ch === ' '));
-
-    // Pad: one chord per bar, from bar 1 to the end of the outro
-    const last = s('outro').bar + s('outro').bars;
-    for (let b = 1; b < last; b++) {
-        const inRubicon = b >= s('rubicon').bar && b < s('lattice').bar;
-        const gain = b < s('boot').bar + 3 ? 0.05 : inRubicon ? 0.075 : 0.06;
-        const tones = inRubicon ? CHORDS[b % 2 === 0 ? 0 : 2].tones : chordAt(b).tones;
-        padChord(c, at(b), BAR, tones, padCutoff, gain);
+    // Pad: two bars per chord, all the way through
+    for (let b = 0; b < end; b += 2) {
+        const quiet = b >= sec('pgp').bar + 9 && b < sec('tide').bar;
+        padChord(c, at(b), BAR * 2, chordAt(b).tones, padCutoff, quiet ? 0.03 : 0.045);
     }
 
-    // Bass: offbeat sixteenths on the root, octave on the last one
-    const bassBars: [SectionId, number][] = [
-        ['cx52', 4],
-        ['lattice', 0],
-        ['chacha', 0],
-        ['sign', 0],
-        ['server', 0],
-        ['federation', 0],
-        ['terminal', 2],
-    ];
-    for (const [id, head] of bassBars) {
-        const sec = s(id);
-        for (let b = sec.bar + head; b < sec.bar + sec.bars; b++) {
-            const root = chordAt(b).root;
-            for (let beat = 0; beat < 4; beat++)
-                for (const st of [1, 2, 3]) {
-                    const note = st === 3 && beat % 2 === 1 ? root + 12 : root;
-                    bass(c, at(b, beat, st), note, STEP * 0.8, st === 2 ? 1 : 0.6);
-                }
-        }
-    }
-
-    // Arpeggio: FM glass, sixteenths over chord tones
-    const ARP = [0, 2, 4, 1, 3, 5, 2, 4, 0, 3, 5, 1, 4, 2, 5, 3];
-    const arpBars: [SectionId, number, number][] = [
-        ['lattice', 2, 0.055],
-        ['sign', 0, 0.04],
-        ['federation', 0, 0.06],
-    ];
-    for (const [id, head, gain] of arpBars) {
-        const sec = s(id);
-        for (let b = sec.bar + head; b < sec.bar + sec.bars; b++) {
-            const tones = chordAt(b).tones;
-            for (let st = 0; st < 16; st++) {
-                const k = ARP[(st + b * 3) % 16];
-                const note = k < 5 ? tones[k] + 12 : tones[0] + 24;
-                fm(c, at(b, 0, st), note, {
-                    ratio: 3.5,
-                    index: 1.6,
-                    decay: 0.22,
-                    dur: 0.5,
-                    gain: gain * (st % 4 === 0 ? 1 : 0.7),
-                    pan: st % 2 === 0 ? -0.5 : 0.5,
-                    verb: 0.25,
-                    echo: 0.35,
-                });
-            }
-        }
-    }
-
-    // ChaCha20: one rising tick per round, twenty rounds
-    const scale = [62, 64, 65, 67, 69, 70, 72, 74, 76, 77];
-    for (let r = 0; r < 20; r++) {
-        const t = at(s('chacha').bar, r);
-        fm(c, t, scale[r % 10] + (r >= 10 ? 12 : 0), {
-            ratio: 1.5,
-            index: 2.2,
-            decay: 0.18,
-            dur: 0.35,
-            gain: 0.09,
-            pan: r % 2 === 0 ? -0.3 : 0.3,
-            echo: 0.25,
-        });
-    }
-
-    // Rubicon: a low bell on each downbeat, a line of text each
-    for (let b = 0; b < 4; b++)
-        fm(c, at(s('rubicon').bar + b), [38, 41, 43, 45][b], {
-            ratio: 1.41,
-            index: 3,
-            decay: 1.6,
-            dur: 3,
-            gain: 0.16,
-            pan: 0,
-            verb: 0.7,
-        });
-
-    // Signature: a stamp every two bars
-    for (let b = 2; b < 8; b += 2) {
-        const t = at(s('sign').bar + b);
-        fm(c, t, 38, { ratio: 2.76, index: 4, decay: 0.3, dur: 0.8, gain: 0.2, pan: 0, verb: 0.5 });
-    }
-
-    // Federation lead: slow melody over the climax
-    const LEAD: [number, number, number][] = [
-        [0, 74, 1.5],
-        [1.5, 77, 0.5],
-        [2, 76, 2],
-        [4, 74, 1.5],
-        [5.5, 72, 0.5],
-        [6, 69, 2],
-        [8, 70, 1.5],
-        [9.5, 74, 0.5],
-        [10, 72, 2],
-        [12, 69, 3],
-        [15, 64, 1],
-        [16, 74, 1.5],
-        [17.5, 77, 0.5],
-        [18, 79, 2],
-        [20, 77, 1.5],
-        [21.5, 76, 0.5],
-        [22, 74, 2],
-        [24, 70, 1.5],
-        [25.5, 72, 0.5],
-        [26, 74, 2],
-        [28, 69, 4],
-    ];
-    for (const [beat, note, len] of LEAD)
-        fm(c, sectionStart('federation') + beat * BEAT, note, {
-            ratio: 1,
-            index: 1.1,
-            decay: len * BEAT * 0.9,
-            dur: len * BEAT + 0.4,
-            gain: 0.11,
-            pan: 0,
-            verb: 0.4,
-            echo: 0.3,
-            vibrato: 0.004,
-        });
-
-    // Outro: sparse bells over the last chords, and a final beep
-    const o = s('outro').bar;
-    [74, 69, 72, 65, 69, 62].forEach((n, i) =>
-        fm(c, at(o + i), n, {
-            ratio: 3.5,
-            index: 1.2,
-            decay: 1.2,
-            dur: 2.4,
-            gain: 0.07,
-            pan: i % 2 === 0 ? -0.4 : 0.4,
-            verb: 0.5,
-            echo: 0.4,
-        }),
+    // Sea wherever the sea is in the picture
+    sea(c, 0, sectionStart('boot') + BAR, () => 1, 0x5ea);
+    sea(
+        c,
+        at(sec('pgp').bar + 8.5),
+        sectionStart('river') + BAR,
+        (t) => (t < sectionStart('tide') ? 0.5 : 0.8),
+        0x5eb,
     );
+    sea(c, sectionStart('river'), sectionStart('desk') + 1, () => 0.6, 0x5ec);
+    hiss(c, sectionStart('cryptoag'), at(sec('pgp').bar + 9), 0x415);
 
-    // Transitions
-    riser(c, sectionStart('cx52'), BAR * 2, 0x11);
-    riser(c, sectionStart('lattice'), BAR * 2, 0x22);
-    riser(c, sectionStart('federation'), BAR, 0x33);
-    impact(c, sectionStart('lattice'));
-    impact(c, sectionStart('federation'));
-    impact(c, sectionStart('cx52'));
-}
+    // Piano: the phrase, sparsely, and single notes in between
+    motif(c, sec('sea').bar + 2, 0, 0.7);
+    motif(c, sec('cx52').bar + 2, -5, 0.6);
+    motif(c, sec('tide').bar + 1, 0, 0.8);
+    motif(c, sec('tide').bar + 5, 3, 0.7);
+    motif(c, sec('river').bar + 1, 0, 0.9);
+    motif(c, sec('river').bar + 3, 5, 0.8);
+    for (const [b, n] of [
+        [sec('boot').bar + 4, 69],
+        [sec('pgp').bar + 4, 62],
+        [sec('pgp').bar + 6, 65],
+        [sec('desk').bar + 1, 74],
+        [sec('desk').bar + 3, 72],
+    ] as const)
+        piano(c, at(b), n, 0.6);
 
-// Master low-pass: the server's view is heard through a wall
-function masterCutoff(t: number): number {
-    const a = sectionStart('server');
-    const b = sectionStart('federation');
-    const edge = BEAT;
-    if (t < a - edge || t > b) return 20000;
-    if (t < a) return 20000 * Math.pow(500 / 20000, (t - (a - edge)) / edge);
-    if (t > b - edge * 2) return 500 * Math.pow(20000 / 500, (t - (b - edge * 2)) / (edge * 2));
-    return 500;
+    // Boot: the self-test beep and the disk
+    beep(c, at(sec('boot').bar, 2));
+    BOOT_LINES.forEach((l, i) => seek(c, l.t, i));
+
+    // CX-52
+    CX_STEPS.forEach((s, i) => pinClick(c, s.t, s.letter, i));
+
+    // History: a bell under each sentence, keys and pages for PGP
+    const bellNotes = [38, 41, 36, 43, 38, 45, 41];
+    BELLS.forEach((t, i) => bell(c, t, bellNotes[i % bellNotes.length]));
+    PGP_TYPED.forEach((k, i) => keyClick(c, k.t, i, k.ch === ' '));
+    PAGE_TURNS.forEach((t, i) => page(c, t, i));
+
+    // Tide: slow glass, one note an eighth
+    const ARP = [0, 2, 4, 1, 3, 2, 4, 0];
+    for (let b = sec('tide').bar + 2; b < sec('river').bar; b++) {
+        const tones = chordAt(b).tones;
+        for (let e = 0; e < 8; e++)
+            if ((e + b) % 3 !== 2)
+                piano(c, at(b, 0, e * 2), tones[ARP[e]] + 12, 0.28, e % 2 ? 0.5 : -0.5);
+    }
+
+    // River: a heartbeat
+    PULSES.forEach((t, i) => thump(c, t, i % 2 === 0));
+
+    // Desk: typing
+    TERMINAL_KEYS.forEach((k, i) => keyClick(c, k.t, i + 200, k.ch === ' '));
+
+    // Title, and the mark
+    bell(c, sectionStart('title'), 38);
+    [62, 65, 69, 74].forEach((n, i) =>
+        piano(c, sectionStart('title') + i * STEP * 1.5, n, 0.5, i * 0.2 - 0.3),
+    );
+    piano(c, at(sec('title').bar + 1.75), 81, 0.45);
 }
 
 export function renderSong(sr = SR): Song {
     const n = Math.ceil(DURATION * sr);
-    const c: Ctx = {
-        sr,
-        n,
-        drums: new Bus(n),
-        music: new Bus(n),
-        pad: new Bus(n),
-        verb: new Bus(n),
-        echo: new Bus(n),
-    };
+    const c: Ctx = { sr, n, dry: new Bus(n), pad: new Bus(n), verb: new Bus(n), echo: new Bus(n) };
     arrange(c);
-
-    // Sidechain the pad against the kick
-    const duck = new Float32Array(n).fill(1);
-    for (const t of KICKS) {
-        const [s0, s1] = range(c, t, 0.45);
-        for (let i = s0; i < s1; i++) {
-            const tau = (i - s0) / sr;
-            duck[i] = Math.min(
-                duck[i],
-                1 - 0.65 * Math.exp(-tau / 0.12) * Math.min(1, tau / 0.004 + 0.3),
-            );
-        }
-    }
 
     const out = new Bus(n);
     for (let i = 0; i < n; i++) {
-        out.l[i] = c.drums.l[i] + c.music.l[i] + c.pad.l[i] * duck[i];
-        out.r[i] = c.drums.r[i] + c.music.r[i] + c.pad.r[i] * duck[i];
+        out.l[i] = c.dry.l[i] + c.pad.l[i];
+        out.r[i] = c.dry.r[i] + c.pad.r[i];
     }
-    reverb(c.verb, out, sr, { room: 0.86, damp: 0.35, wet: 0.9 });
-    pingPong(c.echo, out, sr, { time: BEAT * 0.75, feedback: 0.45, tone: 0.25, wet: 0.5 });
+    reverb(c.verb, out, sr, { room: 0.9, damp: 0.45, wet: 0.9 });
+    pingPong(c.echo, out, sr, { time: BEAT * 0.75, feedback: 0.4, tone: 0.2, wet: 0.35 });
 
-    // Master bus: low-pass automation, soft clip, fade, normalize
-    const lpL = new SVF();
-    const lpR = new SVF();
+    // Master: soft clip, a short fade at the very end, normalize
     let peak = 0;
     for (let i = 0; i < n; i++) {
         const t = i / sr;
-        if (i % 32 === 0) {
-            const fc = masterCutoff(t);
-            lpL.set(fc, 0.9, sr);
-            lpR.set(fc, 0.9, sr);
-        }
-        const fade = Math.min(1, (DURATION - t) / 1.5);
-        const l = Math.tanh(lpL.tick(out.l[i]) * 1.1) * fade;
-        const r = Math.tanh(lpR.tick(out.r[i]) * 1.1) * fade;
-        out.l[i] = l;
-        out.r[i] = r;
-        peak = Math.max(peak, Math.abs(l), Math.abs(r));
+        const fade = Math.min(1, (DURATION - t) / 0.6, t / 0.05);
+        out.l[i] = Math.tanh(out.l[i] * 1.2) * fade;
+        out.r[i] = Math.tanh(out.r[i] * 1.2) * fade;
+        peak = Math.max(peak, Math.abs(out.l[i]), Math.abs(out.r[i]));
     }
-    const g = peak > 0 ? 0.9 / peak : 1;
+    const g = peak > 0 ? 0.8 / peak : 1;
     for (let i = 0; i < n; i++) {
         out.l[i] *= g;
         out.r[i] *= g;

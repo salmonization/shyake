@@ -17,6 +17,7 @@ interface Slot {
 export class Director {
     renderer: THREE.WebGLRenderer;
     hud: Hud;
+    cap: Hud;
     pipe: Pipeline;
     slots: Slot[];
 
@@ -34,7 +35,8 @@ export class Director {
         this.renderer.toneMapping = THREE.NeutralToneMapping;
         this.renderer.toneMappingExposure = 1;
         this.hud = new Hud(scale);
-        this.pipe = new Pipeline(this.renderer, this.hud.canvas, w, h);
+        this.cap = new Hud(scale);
+        this.pipe = new Pipeline(this.renderer, this.hud.canvas, this.cap.canvas, w, h, scale);
         const env: Env = { renderer: this.renderer };
         this.slots = defs.map((def) => {
             const first = section(def.sections[0]);
@@ -43,17 +45,22 @@ export class Director {
         });
     }
 
-    slotAt(t: number): Slot {
+    slotAt(t: number): Slot | undefined {
         const id = sectionAt(t).id;
-        const s = this.slots.find((x) => x.def.sections.includes(id));
-        if (!s) throw new Error(`no scene for ${id}`);
-        return s;
+        return this.slots.find((x) => x.def.sections.includes(id));
     }
 
     frame(t: number) {
         const slot = this.slotAt(t);
+        if (!slot) {
+            this.hud.clear();
+            this.cap.clear();
+            this.pipe.draw(undefined, undefined, {}, t);
+            return;
+        }
         const local = t - slot.start;
         this.hud.clear();
+        this.cap.clear();
         const shot = slot.inst.update(
             {
                 t,
@@ -64,6 +71,7 @@ export class Director {
                 section: sectionAt(t).id,
             },
             this.hud,
+            this.cap,
         );
         this.pipe.draw(shot.scene, shot.camera, shot.post ?? {}, t);
     }

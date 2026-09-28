@@ -22,7 +22,8 @@ export interface Shot {
 }
 
 export interface SceneInstance {
-    update(f: Frame, hud: Hud): Shot;
+    // hud may be printed with the picture; cap is always laid on top
+    update(f: Frame, hud: Hud, cap: Hud): Shot;
 }
 
 export interface Env {

@@ -3,7 +3,7 @@
 import type { Song } from './audio/synth.ts';
 import { Director } from './engine/director.ts';
 import { loadFonts } from './engine/fonts.ts';
-import { DURATION, SECTIONS, sectionAt } from './engine/score.ts';
+import { BAR, DURATION, SECTIONS, sectionAt } from './engine/score.ts';
 import { SCENES } from './scenes/index.ts';
 
 declare global {
@@ -109,17 +109,16 @@ function player(director: Director) {
     play.addEventListener('click', () => (playing ? stop() : start()));
     scrub.addEventListener('input', () => seek((Number(scrub.value) / 1000) * DURATION));
     addEventListener('keydown', (e) => {
-        const bar = (60 / 112) * 4;
         if (e.key === ' ') {
             e.preventDefault();
             overlay.hidden = true;
             if (playing) stop();
             else start();
-        } else if (e.key === 'ArrowRight') seek(now() + bar);
-        else if (e.key === 'ArrowLeft') seek(now() - bar);
+        } else if (e.key === 'ArrowRight') seek(now() + BAR);
+        else if (e.key === 'ArrowLeft') seek(now() - BAR);
         else if (/^[0-9]$/.test(e.key)) {
             const s = SECTIONS[Number(e.key)];
-            if (s) seek(s.bar * bar);
+            if (s) seek(s.bar * BAR);
         }
     });
 

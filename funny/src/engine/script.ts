@@ -1,58 +1,70 @@
-// What gets typed and printed, and when. Keystrokes here also drive
+// What gets printed and typed, and when. Keystrokes here also drive
 // the key clicks in the soundtrack.
 
-import { at, BEAT, section, STEP, typeOn, type Keystroke } from './score.ts';
-
-const boot = section('boot').bar;
-const term = section('terminal').bar;
-const FAST = STEP / 2;
+import { at, BEAT, section, sectionStart, STEP, typeOn, type Keystroke } from './score.ts';
 
 /* ------------------------------------------------------------------ */
-/* Boot PROM                                                          */
+/* Boot PROM, after the old white-screen consoles                     */
 /* ------------------------------------------------------------------ */
 
 export interface PrintLine {
     t: number;
     text: string;
-    typed?: Keystroke[];
-    dim?: boolean;
+    // indented beside the vendor mark
+    banner?: boolean;
+    // dots that fill in before "Completed."
+    progress?: [number, number];
 }
 
-function lines(t0: number, every: number, texts: string[], dim = false): PrintLine[] {
-    return texts.map((text, i) => ({ t: t0 + i * every, text, dim }));
-}
-
-const PROMPT_CMD = 'boot net:shyake';
-
-export const BOOT_TYPED = typeOn(PROMPT_CMD, at(boot + 2, 0, 2));
+const b = section('boot').bar;
 
 export const BOOT_LINES: PrintLine[] = [
-    ...lines(at(boot, 1), BEAT / 2, [
-        'Shyake Workstation 52, No Keyboard',
-        'PROM Rev 3.52, 3 x 256 coefficients mod 3329',
-        'Ethernet address 0:19:52:c:x:52, Host ID 19520052.',
-    ]),
-    { t: at(boot + 2), text: 'ok ', typed: BOOT_TYPED },
-    ...lines(
-        at(boot + 3, 1),
-        BEAT / 2,
-        [
-            'Boot device: /net   File and args: shyake',
-            'libshyake: liboqs (static), libcurl, libcrypto, cJSON',
-            'kem0:   ML-KEM-768         pk 1184   sk 2400   ct 1088',
-            'sig0:   ML-DSA-65          pk 1952   sig 3309',
-            'aead0:  ChaCha20-Poly1305  key 32   nonce 12   tag 16',
-            'kdf0:   scrypt             N 65536   r 8   p 1',
-            'pow0:   hashcash           20 bits   sha-1',
-            'net0:   relays synchronous, queue none',
-            'store0: ciphertext and public keys only',
-        ],
-        false,
-    ),
-    { t: at(boot + 5, 3), text: 'shyake: plaintext never leaves this machine.' },
+    { t: at(b, 2), text: 'Selftest Completed.' },
+    { t: at(b + 1), text: 'Shyake Workstation, Model 52.', banner: true },
+    { t: at(b + 1, 0, 2), text: 'No Keyboard.', banner: true },
+    {
+        t: at(b + 1, 1),
+        text: 'ROM Rev 3.52, 3329 KB memory installed, Serial #1952.',
+        banner: true,
+    },
+    {
+        t: at(b + 1, 1, 2),
+        text: 'Ethernet address 8:0:19:52:c:52, Host ID 19520052.',
+        banner: true,
+    },
+    {
+        t: at(b + 1, 3),
+        text: 'Testing 3329 Kilobytes of Memory ... Completed.',
+        progress: [at(b + 1, 3), at(b + 2, 2)],
+    },
+    { t: at(b + 2, 3), text: 'Auto-boot in progress...' },
+    { t: at(b + 3, 1), text: 'Boot device: le(0,0,0)   File and args: shyake' },
+    { t: at(b + 3, 2), text: 'kem0 at mainbus0: ML-KEM-768, pk 1184, ct 1088' },
+    { t: at(b + 3, 3), text: 'sig0 at mainbus0: ML-DSA-65, pk 1952, sig 3309' },
+    { t: at(b + 4), text: 'aead0 at mainbus0: ChaCha20-Poly1305' },
+    { t: at(b + 4, 1), text: 'store0: ciphertext and public keys only' },
+    { t: at(b + 4, 2, 2), text: 'shyake: plaintext never leaves this machine.' },
 ];
 
-export const BOOT_CLEAR = at(boot + 6);
+/* ------------------------------------------------------------------ */
+/* PGP in a terminal, 1994                                            */
+/* ------------------------------------------------------------------ */
+
+const p = sectionStart('pgp');
+
+export const PGP_TYPED = typeOn('pgp -eat letter.txt', p + BEAT * 2, STEP);
+
+export const PGP_LINES: { t: number; text: string }[] = [
+    {
+        t: p + BEAT * 8,
+        text: 'Pretty Good Privacy(tm) 2.6.2 - Public-key encryption for the masses.',
+    },
+    { t: p + BEAT * 8.5, text: "(c) 1990-1994 Philip Zimmermann, Phil's Pretty Good Software." },
+    {
+        t: p + BEAT * 9.5,
+        text: 'Export of this software may be restricted by the U.S. government.',
+    },
+];
 
 /* ------------------------------------------------------------------ */
 /* Terminal session                                                   */
@@ -70,23 +82,26 @@ export interface Command {
     key: 'whoami' | 'send' | 'inbox' | 'fetch' | 'fingerprint';
 }
 
+const d = sectionStart('desk');
+const TYPE = STEP / 3;
+
 function command(pane: Pane, key: Command['key'], cmd: string, t0: number, outAt: number): Command {
-    return { pane, key, cmd, typed: typeOn(cmd, t0, FAST), out: outAt };
+    return { pane, key, cmd, typed: typeOn(cmd, d + t0, TYPE), out: d + outAt };
 }
 
 export function terminalScript(mailId: string): Command[] {
     return [
-        command('left', 'whoami', 'shyake whoami', at(term, 0, 1), at(term, 2)),
+        command('left', 'whoami', 'shyake whoami', 0.4, 1.9),
         command(
             'left',
             'send',
             'shyake send -t flat_white -s "Where the wheels turn" < note.txt',
-            at(term + 1, 0, 0),
-            at(term + 3),
+            2.6,
+            7.3,
         ),
-        command('right', 'inbox', 'shyake check inbox', at(term + 3, 2), at(term + 4)),
-        command('right', 'fetch', `shyake fetch ${mailId}`, at(term + 4, 2), at(term + 5, 2)),
-        command('left', 'fingerprint', 'shyake fingerprint flat_white', at(term + 5), at(term + 6)),
+        command('right', 'inbox', 'shyake check inbox', 7.7, 9.2),
+        command('right', 'fetch', `shyake fetch ${mailId}`, 9.7, 11.5),
+        command('left', 'fingerprint', 'shyake fingerprint flat_white', 12.0, 14.3),
     ];
 }
 

@@ -65,7 +65,7 @@ export class Hud {
         const c = this.ctx;
         c.save();
         this.font(o.face ?? 'sans', o.size ?? 24, o.weight);
-        c.fillStyle = o.color ?? C.ice;
+        c.fillStyle = o.color ?? C.paper;
         c.globalAlpha = o.alpha ?? 1;
         c.textAlign = o.align ?? 'left';
         c.textBaseline = o.baseline ?? 'alphabetic';
@@ -98,7 +98,7 @@ export class Hud {
     }
 
     // Dark gradient behind text, fading out towards `from`
-    scrim(from: number, to: number, alpha = 0.8, color = '3,6,11') {
+    scrim(from: number, to: number, alpha = 0.8, color = '17,23,27') {
         const c = this.ctx;
         const g = c.createLinearGradient(0, from, 0, to);
         g.addColorStop(0, `rgba(${color},0)`);

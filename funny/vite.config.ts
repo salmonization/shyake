@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
-    server: { port: 5173, host: '127.0.0.1' },
+    server: { port: 5173, host: '127.0.0.1', fs: { allow: ['..'] } },
     build: { target: 'es2022', chunkSizeWarningLimit: 2048 },
     test: { include: ['src/**/*.test.ts'] },
     lint: {
