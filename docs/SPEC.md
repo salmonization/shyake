@@ -932,7 +932,10 @@ Release assets:
 | Asset | Contents |
 |---|---|
 | `shyake-<os>-<arch>.tar.gz` | The client |
-| `shyake-server-linux-<arch>.tar.gz` | The Go server (`amd64`, `arm64`), its systemd unit, and an env example |
+| `shyake-server-linux-<arch>.tar.gz` | The Go server (`x86_64`, `aarch64`), its systemd unit, and an env example |
+
+`<arch>` is what `uname -m` prints on that machine. Releases up to
+v0.4.0-indev.1 named the server builds `amd64` and `arm64`.
 
 A release that contains only server assets is never offered to
 clients (§5.1).

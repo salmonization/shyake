@@ -113,12 +113,7 @@ Go 服务端运行在你自己的机器上。它是单个静态二进制文件 `
 
 ```sh
 CHANNEL=stable          # or: preview
-case "$(uname -m)" in
-x86_64) ARCH=amd64 ;;
-aarch64 | arm64) ARCH=arm64 ;;
-*) echo "$(uname -m) 没有发布版构建，请从源码构建" >&2 ;;
-esac
-ASSET=shyake-server-linux-$ARCH.tar.gz
+ASSET=shyake-server-linux-$(uname -m).tar.gz
 TAG='v[0-9]+[.][0-9]+[.][0-9]+'
 [ "$CHANNEL" = preview ] && TAG='v[^/]+'
 
@@ -129,7 +124,7 @@ set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?
         /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
     tr -d '",')
 URL=$1 SUM=${2#sha256:}
-echo "$URL"
+[ -n "$URL" ] || echo "$(uname -m) 没有发布版构建，请从源码构建" >&2
 
 curl -fLO "$URL"
 echo "$SUM  $ASSET" | sha256sum -c -
@@ -138,7 +133,7 @@ cd "${ASSET%.tar.gz}"
 ./shyake-server -version
 ```
 
-如果 `sha256sum` 没有输出 `OK`，请停止。压缩包里有二进制文件、`shyake-server.service` 和 `shyake.env.example`。发布版构建只提供 `amd64` 和 `arm64` 的 Linux 版本，其他平台请从源码构建。你也可以在 [Releases 页面](https://github.com/salmonization/shyake/releases)手动选择发布。
+如果 `sha256sum` 没有输出 `OK`，请停止。压缩包里有二进制文件、`shyake-server.service` 和 `shyake.env.example`。发布版构建只提供 `x86_64` 和 `aarch64` 的 Linux 版本，文件名与 `uname -m` 的输出一致；其他平台请从源码构建。你也可以在 [Releases 页面](https://github.com/salmonization/shyake/releases)手动选择发布。
 
 **从源码构建。** 需要 Go 1.26 或更新版本。先切换到最新的正式版：`main` 上可能有尚未发布的改动。要构建预发布版本，请改为切换到它的 tag。
 

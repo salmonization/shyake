@@ -647,6 +647,8 @@ Go 服务端在启动时自动执行数据库迁移。
 | 产物 | 内容 |
 |---|---|
 | `shyake-<os>-<arch>.tar.gz` | 客户端 |
-| `shyake-server-linux-<arch>.tar.gz` | Go 服务端（`amd64`、`arm64`）、systemd unit 和配置样例 |
+| `shyake-server-linux-<arch>.tar.gz` | Go 服务端（`x86_64`、`aarch64`）、systemd unit 和配置样例 |
+
+`<arch>` 即该机器上 `uname -m` 的输出。v0.4.0-indev.1 及之前的发布中，服务端构建命名为 `amd64` 和 `arm64`。
 
 只含服务端产物的发布不会推送给客户端（§5.1）。

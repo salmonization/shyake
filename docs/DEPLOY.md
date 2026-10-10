@@ -172,12 +172,7 @@ too; with `stable`, they are skipped.
 
 ```sh
 CHANNEL=stable          # or: preview
-case "$(uname -m)" in
-x86_64) ARCH=amd64 ;;
-aarch64 | arm64) ARCH=arm64 ;;
-*) echo "no release build for $(uname -m): build from source" >&2 ;;
-esac
-ASSET=shyake-server-linux-$ARCH.tar.gz
+ASSET=shyake-server-linux-$(uname -m).tar.gz
 TAG='v[0-9]+[.][0-9]+[.][0-9]+'
 [ "$CHANNEL" = preview ] && TAG='v[^/]+'
 
@@ -188,7 +183,7 @@ set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?
         /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
     tr -d '",')
 URL=$1 SUM=${2#sha256:}
-echo "$URL"
+[ -n "$URL" ] || echo "no release build for $(uname -m): build from source" >&2
 
 curl -fLO "$URL"
 echo "$SUM  $ASSET" | sha256sum -c -
@@ -199,8 +194,8 @@ cd "${ASSET%.tar.gz}"
 
 Stop if `sha256sum` does not print `OK`. The archive contains the
 binary, `shyake-server.service`, and `shyake.env.example`. The
-builds are for Linux on `amd64` and `arm64`. On anything else, build
-from source. You can also pick a release by hand on the [releases
+builds are for Linux on `x86_64` and `aarch64`, named as `uname -m`
+prints them. On anything else, build from source. You can also pick a release by hand on the [releases
 page](https://github.com/salmonization/shyake/releases).
 
 **Build from source.** You need Go 1.26 or newer. Check out the

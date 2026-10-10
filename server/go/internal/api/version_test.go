@@ -15,10 +15,10 @@ import (
 func TestSummarizeSkipsServerOnlyReleases(t *testing.T) {
 	var releases []ghRelease
 	json.Unmarshal([]byte(`[
-		{"tag_name":"v0.3.1","assets":[{"name":"shyake-server-linux-amd64.tar.gz","digest":"sha256:aa"}]},
+		{"tag_name":"v0.3.1","assets":[{"name":"shyake-server-linux-x86_64.tar.gz","digest":"sha256:aa"}]},
 		{"tag_name":"v0.3.1-rc.1","prerelease":true,"assets":[]},
 		{"tag_name":"v0.3.0","assets":[{"name":"shyake-linux-x86_64.tar.gz","digest":"sha256:bb"},
-			{"name":"shyake-server-linux-amd64.tar.gz","digest":"sha256:cc"}]},
+			{"name":"shyake-server-linux-x86_64.tar.gz","digest":"sha256:cc"}]},
 		{"tag_name":"v0.3.0-rc.1","prerelease":true,"assets":[{"name":"shyake-darwin-arm64.tar.gz","digest":"sha256:dd"}]}
 	]`), &releases)
 	got := summarize(releases)

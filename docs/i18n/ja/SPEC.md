@@ -647,6 +647,8 @@ Go サーバーは起動時にデータベースのマイグレーションを�
 | アセット | 内容 |
 |---|---|
 | `shyake-<os>-<arch>.tar.gz` | クライアント |
-| `shyake-server-linux-<arch>.tar.gz` | Go サーバー（`amd64`、`arm64`）、その systemd unit、設定例 |
+| `shyake-server-linux-<arch>.tar.gz` | Go サーバー（`x86_64`、`aarch64`）、その systemd unit、設定例 |
+
+`<arch>` はそのマシンで `uname -m` が出力する値である。v0.4.0-indev.1 までのリリースでは、サーバービルドは `amd64` と `arm64` という名前だった。
 
 サーバーのアセットしか含まないリリースは、クライアントに提示されない（§5.1）。

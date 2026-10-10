@@ -113,12 +113,7 @@ Go サーバーは自分のマシン上で動作します。単一の静的バ�
 
 ```sh
 CHANNEL=stable          # or: preview
-case "$(uname -m)" in
-x86_64) ARCH=amd64 ;;
-aarch64 | arm64) ARCH=arm64 ;;
-*) echo "$(uname -m) 向けのリリースビルドはありません。ソースからビルドしてください" >&2 ;;
-esac
-ASSET=shyake-server-linux-$ARCH.tar.gz
+ASSET=shyake-server-linux-$(uname -m).tar.gz
 TAG='v[0-9]+[.][0-9]+[.][0-9]+'
 [ "$CHANNEL" = preview ] && TAG='v[^/]+'
 
@@ -129,7 +124,7 @@ set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?
         /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
     tr -d '",')
 URL=$1 SUM=${2#sha256:}
-echo "$URL"
+[ -n "$URL" ] || echo "$(uname -m) 向けのリリースビルドはありません。ソースからビルドしてください" >&2
 
 curl -fLO "$URL"
 echo "$SUM  $ASSET" | sha256sum -c -
@@ -138,7 +133,7 @@ cd "${ASSET%.tar.gz}"
 ./shyake-server -version
 ```
 
-`sha256sum` が `OK` と表示しなければ、そこで中止してください。アーカイブにはバイナリ、`shyake-server.service`、`shyake.env.example` が入っています。リリースビルドは Linux の `amd64` と `arm64` 向けだけです。それ以外の環境ではソースからビルドしてください。[リリースページ](https://github.com/salmonization/shyake/releases)から手動でリリースを選ぶこともできます。
+`sha256sum` が `OK` と表示しなければ、そこで中止してください。アーカイブにはバイナリ、`shyake-server.service`、`shyake.env.example` が入っています。リリースビルドは Linux の `x86_64` と `aarch64` 向けだけで、ファイル名は `uname -m` の出力と同じです。それ以外の環境ではソースからビルドしてください。[リリースページ](https://github.com/salmonization/shyake/releases)から手動でリリースを選ぶこともできます。
 
 **ソースからビルドする。** Go 1.26 以降が必要です。先に最新の正式リリースに切り替えます。`main` には未リリースの変更が含まれることがあるためです。プレリリースをビルドする場合は、そのタグに切り替えてください。
 

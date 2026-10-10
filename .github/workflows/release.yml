@@ -96,8 +96,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # arch is what `uname -m` prints, the same names as the client
       matrix:
-        arch: [amd64, arm64]
+        include:
+          - arch: x86_64
+            goarch: amd64
+          - arch: aarch64
+            goarch: arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +113,7 @@ jobs:
           cache-dependency-path: server/go/go.sum
 
       - name: Test
-        if: matrix.arch == 'amd64'
+        if: matrix.arch == 'x86_64'
         working-directory: server/go
         run: go test ./...
 
@@ -118,7 +123,7 @@ jobs:
         env:
           CGO_ENABLED: '0'
           GOOS: linux
-          GOARCH: ${{ matrix.arch }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           go build -trimpath \
               -ldflags "-s -w -X main.version=${{ github.event.release.tag_name }}" \
