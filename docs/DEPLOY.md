@@ -150,35 +150,68 @@ Prerequisites:
 
 - A machine that stays online. The examples below assume Linux with
   systemd.
-- Go 1.26 or newer to build the binary, or Docker.
+- `curl`, `tar` and `sha256sum` to download a release build, Go
+  1.26 or newer to build the binary, or Docker.
 - For federation: a public domain name that points at the machine,
   and a reverse proxy with a valid TLS certificate (step 4).
 
 Steps:
 
 1. **Get the binary**. Download a release build, or build it from
-source.
+source. Building it yourself is the safer choice: you run code you
+can read, and you do not have to trust the build machine or the
+GitHub account that published the release. A release build is
+quicker to set up.
 
-To download: a release that changes the server has the assets
-`shyake-server-linux-amd64.tar.gz` and
-`shyake-server-linux-arm64.tar.gz` on the [releases
-page](https://github.com/salmonization/shyake/releases). A release
-that changes only the client does not have them. Use the newest
-release that has them.
+**Download a release build.** Not every release has server builds: a
+release that changes only the client has none. These commands find
+the newest release that has a build for your machine, download it,
+and check its SHA-256 against the digest GitHub reports for it. Set
+`CHANNEL=preview` to take pre-releases (such as `v0.4.0-indev.1`)
+too; with `stable`, they are skipped.
 
 ```sh
-tar -xzf shyake-server-linux-amd64.tar.gz
-cd shyake-server-linux-amd64
+CHANNEL=stable          # or: preview
+case "$(uname -m)" in
+x86_64) ARCH=amd64 ;;
+aarch64 | arm64) ARCH=arm64 ;;
+*) echo "no release build for $(uname -m): build from source" >&2 ;;
+esac
+ASSET=shyake-server-linux-$ARCH.tar.gz
+TAG='v[0-9]+[.][0-9]+[.][0-9]+'
+[ "$CHANNEL" = preview ] && TAG='v[^/]+'
+
+# newest matching release: download URL and SHA-256
+set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?per_page=100' |
+    awk -v re="/download/$TAG/$ASSET\"" '
+        /"digest":/ { d = $2 }
+        /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
+    tr -d '",')
+URL=$1 SUM=${2#sha256:}
+echo "$URL"
+
+curl -fLO "$URL"
+echo "$SUM  $ASSET" | sha256sum -c -
+tar -xzf "$ASSET"
+cd "${ASSET%.tar.gz}"
+./shyake-server -version
 ```
 
-The archive contains the binary, `shyake-server.service`, and
-`shyake.env.example`.
+Stop if `sha256sum` does not print `OK`. The archive contains the
+binary, `shyake-server.service`, and `shyake.env.example`. The
+builds are for Linux on `amd64` and `arm64`. On anything else, build
+from source. You can also pick a release by hand on the [releases
+page](https://github.com/salmonization/shyake/releases).
 
-To build from source:
+**Build from source.** You need Go 1.26 or newer. Check out the
+newest release first: `main` can hold changes that are not released
+yet. To build a pre-release, check out its tag instead.
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server/go
+cd shyake
+git checkout "$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
+cd server/go
 CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server
 ```
@@ -273,9 +306,18 @@ set `SHYAKE_TRUSTED_PROXIES` to the bridge network, as above.
 
 #### Upgrading
 
-Install the new binary, from a newer release archive or a new build.
-To build, check out the newest release (`vX.Y.Z`, pre-releases
-skipped) first:
+Install the new binary, then restart the service. With release
+builds, run the download commands from step 1 again in a new
+directory, then:
+
+```sh
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo systemctl restart shyake-server
+curl http://127.0.0.1:8787/api/version
+```
+
+When you build from source, check out the newest release
+(`vX.Y.Z`, pre-releases skipped) and build it again:
 
 ```sh
 cd shyake

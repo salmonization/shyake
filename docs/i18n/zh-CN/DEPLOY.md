@@ -102,27 +102,51 @@ Go 服务端运行在你自己的机器上。它是单个静态二进制文件 `
 前提条件：
 
 - 一台保持在线的机器。下面的示例假设是带 systemd 的 Linux。
-- 用于构建的 Go 1.26 或更新版本，或者 Docker。
+- 下载发布版构建需要 `curl`、`tar` 和 `sha256sum`；从源码构建需要 Go 1.26 或更新版本；或者使用 Docker。
 - 若要参与联邦网络：一个指向该机器的公网域名，以及一个带有效 TLS 证书的反向代理（第 4 步）。
 
 步骤：
 
-1. **获取二进制文件**。可以下载发布版，也可以从源码构建。
+1. **获取二进制文件**。可以下载发布版构建，也可以从源码构建。自行构建更稳妥：你运行的是自己能读到的代码，不必信任构建机器和发布这个版本的 GitHub 账户。下载发布版构建则更省事。
 
-下载：改动了服务端的发布会在 [Releases 页面](https://github.com/salmonization/shyake/releases)附带 `shyake-server-linux-amd64.tar.gz` 和 `shyake-server-linux-arm64.tar.gz`；只改动客户端的发布没有这两个文件。请使用带有它们的最新发布。
+**下载发布版构建。** 并不是每个发布都有服务端构建：只改动客户端的发布没有。下面的命令会找到带有你这台机器对应构建的最新发布，下载它，并用 GitHub 给出的摘要校验其 SHA-256。设置 `CHANNEL=preview` 会把预发布版本（例如 `v0.4.0-indev.1`）也包括进来；`stable` 则跳过它们。
 
 ```sh
-tar -xzf shyake-server-linux-amd64.tar.gz
-cd shyake-server-linux-amd64
+CHANNEL=stable          # or: preview
+case "$(uname -m)" in
+x86_64) ARCH=amd64 ;;
+aarch64 | arm64) ARCH=arm64 ;;
+*) echo "$(uname -m) 没有发布版构建，请从源码构建" >&2 ;;
+esac
+ASSET=shyake-server-linux-$ARCH.tar.gz
+TAG='v[0-9]+[.][0-9]+[.][0-9]+'
+[ "$CHANNEL" = preview ] && TAG='v[^/]+'
+
+# 最新的匹配发布：下载地址和 SHA-256
+set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?per_page=100' |
+    awk -v re="/download/$TAG/$ASSET\"" '
+        /"digest":/ { d = $2 }
+        /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
+    tr -d '",')
+URL=$1 SUM=${2#sha256:}
+echo "$URL"
+
+curl -fLO "$URL"
+echo "$SUM  $ASSET" | sha256sum -c -
+tar -xzf "$ASSET"
+cd "${ASSET%.tar.gz}"
+./shyake-server -version
 ```
 
-压缩包里有二进制文件、`shyake-server.service` 和 `shyake.env.example`。
+如果 `sha256sum` 没有输出 `OK`，请停止。压缩包里有二进制文件、`shyake-server.service` 和 `shyake.env.example`。发布版构建只提供 `amd64` 和 `arm64` 的 Linux 版本，其他平台请从源码构建。你也可以在 [Releases 页面](https://github.com/salmonization/shyake/releases)手动选择发布。
 
-从源码构建：
+**从源码构建。** 需要 Go 1.26 或更新版本。先切换到最新的正式版：`main` 上可能有尚未发布的改动。要构建预发布版本，请改为切换到它的 tag。
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server/go
+cd shyake
+git checkout "$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
+cd server/go
 CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server
 ```
@@ -191,7 +215,15 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### 升级
 
-从更新的发布版压缩包或重新构建中安装新的二进制文件。自行构建时，先切换到最新的正式版（`vX.Y.Z`，跳过预发布版本）：
+安装新的二进制文件，然后重启服务。使用发布版构建时，在一个新目录中再次运行第 1 步的下载命令，然后：
+
+```sh
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo systemctl restart shyake-server
+curl http://127.0.0.1:8787/api/version
+```
+
+从源码构建时，切换到最新的正式版（`vX.Y.Z`，跳过预发布版本）并重新构建：
 
 ```sh
 cd shyake

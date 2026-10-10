@@ -102,27 +102,51 @@ Go サーバーは自分のマシン上で動作します。単一の静的バ�
 前提条件：
 
 - 常時オンラインのマシン。以下の例は systemd を備えた Linux を想定しています。
-- ビルド用の Go 1.26 以降、または Docker。
+- リリースビルドのダウンロードには `curl`、`tar`、`sha256sum`、ビルドには Go 1.26 以降が必要です。Docker も使えます。
 - フェデレーションに参加する場合：そのマシンを指す公開ドメイン名と、有効な TLS 証明書を持つリバースプロキシ（手順 4）。
 
 手順：
 
-1. **バイナリを入手**します。リリース版をダウンロードするか、ソースからビルドします。
+1. **バイナリを入手**します。リリースビルドをダウンロードするか、ソースからビルドします。自分でビルドするほうが安全です。自分で読めるコードを動かすことになり、ビルドマシンやリリースを公開した GitHub アカウントを信頼する必要がありません。リリースビルドのほうが手軽に用意できます。
 
-ダウンロードする場合：サーバーを変更したリリースには、[リリースページ](https://github.com/salmonization/shyake/releases)に `shyake-server-linux-amd64.tar.gz` と `shyake-server-linux-arm64.tar.gz` があります。クライアントだけを変更したリリースにはありません。これらを含む最新のリリースを使ってください。
+**リリースビルドをダウンロードする。** すべてのリリースにサーバービルドがあるわけではありません。クライアントだけを変更したリリースにはありません。以下のコマンドは、このマシン向けのビルドを含む最新のリリースを見つけてダウンロードし、GitHub が示すダイジェストで SHA-256 を検証します。`CHANNEL=preview` にするとプレリリース（`v0.4.0-indev.1` など）も対象になり、`stable` ではスキップします。
 
 ```sh
-tar -xzf shyake-server-linux-amd64.tar.gz
-cd shyake-server-linux-amd64
+CHANNEL=stable          # or: preview
+case "$(uname -m)" in
+x86_64) ARCH=amd64 ;;
+aarch64 | arm64) ARCH=arm64 ;;
+*) echo "$(uname -m) 向けのリリースビルドはありません。ソースからビルドしてください" >&2 ;;
+esac
+ASSET=shyake-server-linux-$ARCH.tar.gz
+TAG='v[0-9]+[.][0-9]+[.][0-9]+'
+[ "$CHANNEL" = preview ] && TAG='v[^/]+'
+
+# 条件に合う最新のリリース：ダウンロード URL と SHA-256
+set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?per_page=100' |
+    awk -v re="/download/$TAG/$ASSET\"" '
+        /"digest":/ { d = $2 }
+        /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
+    tr -d '",')
+URL=$1 SUM=${2#sha256:}
+echo "$URL"
+
+curl -fLO "$URL"
+echo "$SUM  $ASSET" | sha256sum -c -
+tar -xzf "$ASSET"
+cd "${ASSET%.tar.gz}"
+./shyake-server -version
 ```
 
-アーカイブにはバイナリ、`shyake-server.service`、`shyake.env.example` が入っています。
+`sha256sum` が `OK` と表示しなければ、そこで中止してください。アーカイブにはバイナリ、`shyake-server.service`、`shyake.env.example` が入っています。リリースビルドは Linux の `amd64` と `arm64` 向けだけです。それ以外の環境ではソースからビルドしてください。[リリースページ](https://github.com/salmonization/shyake/releases)から手動でリリースを選ぶこともできます。
 
-ソースからビルドする場合：
+**ソースからビルドする。** Go 1.26 以降が必要です。先に最新の正式リリースに切り替えます。`main` には未リリースの変更が含まれることがあるためです。プレリリースをビルドする場合は、そのタグに切り替えてください。
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
-cd shyake/server/go
+cd shyake
+git checkout "$(git tag -l --sort=-v:refname 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
+cd server/go
 CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server
 ```
@@ -191,7 +215,15 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### アップグレード
 
-新しいリリースのアーカイブ、または新しいビルドから新しいバイナリをインストールします。ビルドする場合は、先に最新の正式リリース（`vX.Y.Z`、プレリリースは除く）に切り替えます：
+新しいバイナリをインストールしてから、サービスを再起動します。リリースビルドを使う場合は、新しいディレクトリで手順 1 のダウンロードコマンドをもう一度実行してから、次を実行します：
+
+```sh
+sudo install -m 755 shyake-server /usr/local/bin/
+sudo systemctl restart shyake-server
+curl http://127.0.0.1:8787/api/version
+```
+
+ソースからビルドする場合は、最新の正式リリース（`vX.Y.Z`、プレリリースは除く）に切り替えてビルドし直します：
 
 ```sh
 cd shyake
