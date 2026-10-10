@@ -153,17 +153,38 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **reply コマンド**：
 
-`reply` はメールに返信します。返信は相手方に送られます。受け取ったメールなら送信者に、自分が送ったメールなら受信者に送られます。自分自身に送ったメールへの返信は自分自身に送られます。件名は既定で `Re: <元の件名>` になり、`-s` で変更できます。
+`reply` はメールへの返信を書きます。エディタで返信の下書きを開き、返信先のメールも一緒に表示します。`vim` と `nvim` では、元のメールが左側のウィンドウに読み取り専用で表示され、右側で返信を書きます。その他のエディタでは、元のメールがファイルの先頭、`>8` の行より上に表示されます。保存時、クライアントはこの行とそれより上をすべて捨てます。
+
+```sh
+shyake reply fQBjZnvJ56
+```
+
+```
+FROM:  salmon
+TO:    flat_white
+DATE:  2026-10-10 09:30
+SUBJ:  Coffee tomorrow?
+
+The usual place?
+
+# ------------- >8 ------- Everything above this line is ignored -------------
+Subject: Re: Coffee tomorrow?
+---
+Sure, at ten.
+```
+
+結果は `compose` と同じ暗号化された下書きになり、`shyake send -d <id>` で送信します。返信は相手方に送られます。受け取ったメールなら送信者に、自分が送ったメールなら受信者に送られます。自分自身に送ったメールへの返信は自分自身に送られます。返信の下書きには `To:` 行がなく、宛先は変更できません。件名は既定で `Re: <元の件名>` になり、`-s` で変更できます。
+
+書き終えた下書きを返信に変えるには：
+
+```sh
+shyake reply fQBjZnvJ56 -d 3
+```
+
+`send` と同様に、ファイルや stdin から本文を渡すとすぐに送信します：
 
 ```sh
 shyake reply fQBjZnvJ56 < answer.txt
-shyake reply fQBjZnvJ56 -s "Another subject" < answer.txt
-```
-
-`save` で保存したメールに返信するには（元のメールが焼却された後でも）：
-
-```sh
-shyake reply saved fQBjZnvJ56 < answer.txt
 ```
 
 `check <id>`、`fetch`、`read` は、返信がどのメールに答えているかを `RE:` 行に表示します。ローカルに保存したコピーしか残っていない場合は ID の後に `(saved)`、メールがもう存在しない場合は `(unavailable)` と表示します。
@@ -172,11 +193,11 @@ shyake reply saved fQBjZnvJ56 < answer.txt
 FROM:  flat_white
 TO:    salmon
 RE:    fQBjZnvJ56
-DATE:  2026-10-10 09:30
+DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?
 ```
 
-返信がどのメールに答えているかをサーバーは読めません。クライアントがその情報をメールと一緒に暗号化するためです。自分のインスタンスと受信者のインスタンスの両方で、サーバー v0.4.0 以降が動作している必要があります。返信に失敗した場合は `send` と同様に下書きとして保存され、`shyake send -d <id>` で送信しても返信のままです。
+返信がどのメールに答えているかをサーバーは読めません。クライアントがその情報をメールと一緒に暗号化するためです。自分のインスタンスと受信者のインスタンスの両方で、サーバー v0.4.0 以降が動作している必要があります。
 
 **compose コマンド**：
 

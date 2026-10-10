@@ -152,17 +152,38 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **reply 命令**：
 
-`reply` 用于回复邮件。回复发给对方：收到的邮件回复给发件人，你发出的邮件回复给收件人。你发给自己的邮件，回复也发给自己。主题默认为 `Re: <原主题>`，可用 `-s` 修改。
+`reply` 用于回复邮件。它会打开编辑器编写回复草稿，并把被回复的邮件一并显示出来。在 `vim` 和 `nvim` 中，原信以只读方式显示在左侧窗口，你在右侧编写。其他编辑器会把原信放在文件顶部、`>8` 这一行的上方；保存时，客户端会丢弃这一行及其上方的全部内容。
+
+```sh
+shyake reply fQBjZnvJ56
+```
+
+```
+FROM:  salmon
+TO:    flat_white
+DATE:  2026-10-10 09:30
+SUBJ:  Coffee tomorrow?
+
+The usual place?
+
+# ------------- >8 ------- Everything above this line is ignored -------------
+Subject: Re: Coffee tomorrow?
+---
+Sure, at ten.
+```
+
+结果是一份加密草稿，和 `compose` 写出的草稿一样，用 `shyake send -d <id>` 发送。回复发给对方：收到的邮件回复给发件人，你发出的邮件回复给收件人。你发给自己的邮件，回复也发给自己。回复草稿没有 `To:` 行，收件人不能更改。主题默认为 `Re: <原主题>`，可用 `-s` 修改。
+
+把已经写好的草稿变成回复：
+
+```sh
+shyake reply fQBjZnvJ56 -d 3
+```
+
+与 `send` 一样，来自文件或 stdin 的正文会直接发送：
 
 ```sh
 shyake reply fQBjZnvJ56 < answer.txt
-shyake reply fQBjZnvJ56 -s "Another subject" < answer.txt
-```
-
-回复用 `save` 保存过的邮件（即使原邮件已被焚毁）：
-
-```sh
-shyake reply saved fQBjZnvJ56 < answer.txt
 ```
 
 `check <id>`、`fetch` 和 `read` 会在 `RE:` 行显示回复所对应的邮件。只剩你本地保存的副本时，ID 后会显示 `(saved)`；邮件已不存在时显示 `(unavailable)`。
@@ -171,11 +192,11 @@ shyake reply saved fQBjZnvJ56 < answer.txt
 FROM:  flat_white
 TO:    salmon
 RE:    fQBjZnvJ56
-DATE:  2026-10-10 09:30
+DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?
 ```
 
-服务器无法读取回复对应的是哪封邮件：客户端会把这一信息随邮件一起加密。你的实例和收件人的实例都必须运行 v0.4.0 或更新的服务端。回复失败时，与 `send` 一样会保存为草稿；用 `shyake send -d <id>` 发送时，它仍然是一封回复。
+服务器无法读取回复对应的是哪封邮件：客户端会把这一信息随邮件一起加密。你的实例和收件人的实例都必须运行 v0.4.0 或更新的服务端。
 
 **compose 命令**：
 

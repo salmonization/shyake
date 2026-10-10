@@ -171,20 +171,47 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **Reply command**:
 
-`reply` answers a piece of mail. The reply goes to the other party:
-the sender of a mail you received, or the recipient of a mail you
-sent. A mail you sent to yourself is answered to yourself. The
-subject defaults to `Re: <subject>`; use `-s` to change it.
+`reply` writes a reply to a piece of mail. It opens your editor on
+a reply draft, beside the mail you answer. In `vim` and `nvim`, the
+mail sits read-only in a window on the left and you write on the
+right. Other editors show the mail at the top of the file, above a
+`>8` line; the client drops everything above that line.
+
+```sh
+shyake reply fQBjZnvJ56
+```
+
+```
+FROM:  salmon
+TO:    flat_white
+DATE:  2026-10-10 09:30
+SUBJ:  Coffee tomorrow?
+
+The usual place?
+
+# ------------- >8 ------- Everything above this line is ignored -------------
+Subject: Re: Coffee tomorrow?
+---
+Sure, at ten.
+```
+
+The result is an encrypted draft, like one from `compose`. Send it
+with `shyake send -d <id>`. The reply goes to the other party: the
+sender of a mail you received, or the recipient of a mail you sent.
+A mail you sent to yourself is answered to yourself. A reply has no
+`To:` line, and its recipient cannot be changed. The subject
+defaults to `Re: <subject>`; use `-s` to change it.
+
+To turn a draft you already wrote into a reply:
+
+```sh
+shyake reply fQBjZnvJ56 -d 3
+```
+
+As with `send`, a body from a file or from stdin is sent at once:
 
 ```sh
 shyake reply fQBjZnvJ56 < answer.txt
-shyake reply fQBjZnvJ56 -s "Another subject" < answer.txt
-```
-
-To answer a mail you saved with `save`, even after it is burned:
-
-```sh
-shyake reply saved fQBjZnvJ56 < answer.txt
 ```
 
 `check <id>`, `fetch`, and `read` show which mail a reply answers on
@@ -195,15 +222,13 @@ copy is left, and `(unavailable)` when the mail is gone.
 FROM:  flat_white
 TO:    salmon
 RE:    fQBjZnvJ56
-DATE:  2026-10-10 09:30
+DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?
 ```
 
 The server cannot read which mail a reply answers: the client
 encrypts that with the mail. Both your instance and the recipient's
-must run server v0.4.0 or later. A reply that fails is kept as a
-draft, as with `send`, and stays a reply when you send it with
-`shyake send -d <id>`.
+must run server v0.4.0 or later.
 
 **Compose command**:
 

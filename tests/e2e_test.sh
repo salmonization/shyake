@@ -460,7 +460,7 @@ out=$(echo "note 2" | sh_run "$DIR_A" reply "$SELF_ID" 2>&1)
 assert_contains "reply to a self mail: goes to yourself" \
     "Replying to $USER_A" "$out"
 
-# a saved original still resolves, and can be answered, once burned
+# a saved original still resolves once burned
 sh_run "$DIR_B" save "$ORIG_ID" > /dev/null 2>&1
 sh_run "$DIR_B" burn "$ORIG_ID" > /dev/null 2>&1
 out=$(sh_run "$DIR_B" check "$REPLY_ID" 2>&1)
@@ -469,11 +469,6 @@ assert_contains "RE: a burned original found in saved" \
 out=$(sh_run "$DIR_A" check "$REPLY_ID" 2>&1)
 assert_contains "RE: a burned original is unavailable" \
     "RE:   (unavailable)" "$out"
-out=$(sh_run "$DIR_B" read "$ORIG_ID" 2>&1)
-assert_exit "read saved original exits 0" 0 "$?"
-out=$(echo "From the archive" | sh_run "$DIR_B" reply saved "$ORIG_ID" 2>&1)
-rc=$?; assert_exit "reply saved <id> exits 0" 0 "$rc" "$out"
-assert_contains "reply saved: goes to the sender" "Replying to $USER_A" "$out"
 
 out=$(echo "x" | sh_run "$DIR_B" reply "$ORIG_ID" 2>&1)
 rc=$?; assert_exit "reply to a burned mail fails" 1 "$rc"
@@ -495,6 +490,67 @@ out=$(sh_run "$DIR_B" send -d "$RE_DRAFT" 2>&1)
 rc=$?; assert_exit "reply draft: send -d exits 0" 0 "$rc" "$out"
 out=$(sh_run "$DIR_A" check "$(id_of "$DIR_A" inbox "Kept")" 2>&1)
 assert_contains "reply draft: sent as a reply" "RE:   $REPLY_ID" "$out"
+
+# reply in the editor: the mail above a >8 line, saved as a draft
+# (script(1) gives the client a terminal, so it does not read stdin)
+on_tty() {
+    script -qec "$*" /dev/null < /dev/null | tr -d '\r'
+}
+FAKE_ED_REPLY="$TMPDIR_ROOT/fake_editor_reply.sh"
+cat > "$FAKE_ED_REPLY" <<'EOF2'
+#!/bin/sh
+cp "$1" "$1.seen"
+sed -i '/^---$/a Answer written in the editor' "$1"
+EOF2
+chmod +x "$FAKE_ED_REPLY"
+out=$(EDITOR="$FAKE_ED_REPLY" VISUAL="$FAKE_ED_REPLY" \
+    on_tty "'$SHYAKE' --no-color -c '$DIR_B' reply '$REPLY_ID'")
+rc=$?; assert_exit "reply in the editor exits 0" 0 "$rc" "$out"
+assert_contains "reply in the editor: saved as a draft" \
+    "Send it with: shyake send -d" "$out"
+ED_DRAFT=$(echo "$out" | sed -n 's/^Draft \([0-9]*\) saved.*/\1/p')
+assert_contains "reply in the editor: template has the subject" \
+    "Subject: Re: Thread start" "$(cat "$TMPDIR_ROOT"/acct_b/.compose-*.seen)"
+assert_contains "reply in the editor: the mail is shown above" \
+    "First answer" "$(sed -n '1,/^# ------------- >8/p' \
+    "$TMPDIR_ROOT"/acct_b/.compose-*.seen)"
+rm -f "$TMPDIR_ROOT"/acct_b/.compose-*.seen
+out=$(sh_run "$DIR_B" check drafts "$ED_DRAFT" 2>&1)
+assert_contains "editor reply draft: goes to the other party" \
+    "TO:   $USER_A" "$out"
+assert_contains "editor reply draft: RE line" "RE:   $REPLY_ID" "$out"
+out=$(sh_run "$DIR_B" read drafts "$ED_DRAFT" 2>&1)
+assert_contains "editor reply draft: body kept" \
+    "Answer written in the editor" "$out"
+assert_not_contains "editor reply draft: scissors part dropped" \
+    "First answer" "$out"
+
+# a deleted >8 line keeps everything, with a warning
+FAKE_ED_NOCUT="$TMPDIR_ROOT/fake_editor_nocut.sh"
+cat > "$FAKE_ED_NOCUT" <<'EOF2'
+#!/bin/sh
+sed -i -e '/^# ------------- >8/d' -e '/^---$/a Uncut answer' "$1"
+EOF2
+chmod +x "$FAKE_ED_NOCUT"
+out=$(EDITOR="$FAKE_ED_NOCUT" VISUAL="$FAKE_ED_NOCUT" \
+    on_tty "'$SHYAKE' --no-color -c '$DIR_B' reply '$REPLY_ID'")
+assert_contains "deleted >8 line: warning" "The >8 line is gone" "$out"
+assert_contains "deleted >8 line: still saved" "Send it with" "$out"
+
+# reply -d turns an existing draft into a reply
+FAKE_ED_PLAIN="$TMPDIR_ROOT/fake_editor_plain.sh"
+printf '#!/bin/sh\nprintf "To: \\nSubject: \\n---\\nPlain body\\n" > "$1"\n' \
+    > "$FAKE_ED_PLAIN"
+chmod +x "$FAKE_ED_PLAIN"
+out=$(EDITOR="$FAKE_ED_PLAIN" VISUAL="$FAKE_ED_PLAIN" sh_run "$DIR_B" compose 2>&1)
+PLAIN_DRAFT=$(echo "$out" | sed -n 's/^Draft \([0-9]*\) saved.*/\1/p')
+out=$(sh_run "$DIR_B" reply "$REPLY_ID" -d "$PLAIN_DRAFT" 2>&1)
+rc=$?; assert_exit "reply -d exits 0" 0 "$rc" "$out"
+assert_contains "reply -d: now a reply" \
+    "Draft $PLAIN_DRAFT is now a reply to $REPLY_ID" "$out"
+out=$(sh_run "$DIR_B" check drafts "$PLAIN_DRAFT" 2>&1)
+assert_contains "reply -d: recipient set" "TO:   $USER_A" "$out"
+assert_contains "reply -d: RE line" "RE:   $REPLY_ID" "$out"
 
 # ------------------------------------------------------------------ #
 section "12. rotate"

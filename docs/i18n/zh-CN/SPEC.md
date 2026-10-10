@@ -546,7 +546,9 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `whoami` | 打印当前配置文件（无网络请求） |
 | `send -t <to> [-s <subj>] [file]` | 发送邮件（仅文本）；失败时存为草稿 |
 | `send --draft <id> [-t <to>] [-s <subj>]` | 发送已存草稿（成功后删除） |
-| `reply [saved] <id> [-s <subj>] [file]` | 回复邮件（§3.2）；失败时存为草稿 |
+| `reply <id> [-s <subj>]` | 在编辑器中对照原信编写回复草稿（§3.2） |
+| `reply <id> -d <draft>` | 把草稿变成对 `<id>` 的回复 |
+| `reply <id> [-s <subj>] <file>` | 直接发送回复（也可从 stdin 读取）；失败时存为草稿 |
 | `compose [<id>]` | 撰写或编辑加密草稿（§3.8） |
 | `check inbox\|sent [opts]` | 列出邮件箱元数据 |
 | `check <id>` | 查看单封邮件的邮件头 |
@@ -569,7 +571,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `man [<command>]` | 显示文档 |
 | `version` | 打印版本字符串 |
 
-`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。对于回复，`check <id>`、`fetch` 和 `read` 会打印一行 `RE:`，显示被回复邮件的 ID；只剩本地保存的副本时显示 `<id> (saved)`，邮件已不存在时显示 `(unavailable)`。`reply` 的主题默认为 `Re: <subject>`。`send --draft` 不能更改回复草稿的收件人。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
+`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。对于回复，`check <id>`、`fetch` 和 `read` 会打印一行 `RE:`，显示被回复邮件的 ID；只剩本地保存的副本时显示 `<id> (saved)`，邮件已不存在时显示 `(unavailable)`。`reply` 的主题默认为 `Re: <subject>`。回复草稿没有 `To:` 行，`compose` 和 `send --draft` 都会保留它的收件人。在编辑器中，`vim` 和 `nvim` 以分屏方式只读显示原信；其他编辑器则把原信放在一行以 `# ------------- >8` 开头的分隔线上方，客户端会丢弃这一行及其上方的全部内容。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
 
 ---
 

@@ -422,40 +422,6 @@ static const char *resolve_editor(const app_config *cfg)
 	return "ed";
 }
 
-/* run editor on path; vim gets swap/viminfo disabled */
-static int launch_editor(const char *editor, const char *path)
-{
-	const char *base = strrchr(editor, '/');
-	base = base ? base + 1 : editor;
-	const char *flags = "";
-	if (strcmp(base, "vim") == 0 || strcmp(base, "nvim") == 0 ||
-	    strcmp(base, "vim.tiny") == 0)
-		flags = " -n -i NONE";
-
-	char cmd[1024];
-	snprintf(cmd, sizeof(cmd), "%s%s '%s'", editor, flags, path);
-	int status = system(cmd);
-	if (status == -1 || !WIFEXITED(status))
-		return -1;
-	return WEXITSTATUS(status);
-}
-
-/* zero-overwrite and remove a plaintext temp file */
-static void shred_and_unlink(const char *path)
-{
-	FILE *f = fopen(path, "r+");
-	if (f) {
-		fseek(f, 0, SEEK_END);
-		long len = ftell(f);
-		fseek(f, 0, SEEK_SET);
-		for (long i = 0; i < len; i++)
-			fputc(0, f);
-		fflush(f);
-		fclose(f);
-	}
-	unlink(path);
-}
-
 /* parse To:/Subject:/---/body template in place */
 static int parse_compose_buffer(char *buf, char **to, char **subject,
 				char **body)
@@ -481,6 +447,269 @@ static int parse_compose_buffer(char *buf, char **to, char **subject,
 		line = next;
 	}
 	return -1;
+}
+
+/* vim and nvim: split windows, hardening options */
+static int is_vim(const char *editor)
+{
+	const char *base = strrchr(editor, '/');
+	base = base ? base + 1 : editor;
+	return strcmp(base, "vim") == 0 || strcmp(base, "nvim") == 0;
+}
+
+/*
+ * Run editor on path. vim keeps no swap, viminfo, undo or backup
+ * file; with beside, it shows that file read-only on the left.
+ */
+static int launch_editor(const char *editor, const char *path,
+			 const char *beside)
+{
+	const char *base = strrchr(editor, '/');
+	base = base ? base + 1 : editor;
+
+	char cmd[2048];
+	if (is_vim(editor) && beside)
+		snprintf(cmd, sizeof(cmd),
+			 "%s -n -i NONE --cmd 'set noundofile nobackup "
+			 "nowritebackup' -O '%s' '%s' -c 'setlocal readonly "
+			 "nomodifiable' -c 'wincmd l'",
+			 editor, beside, path);
+	else if (is_vim(editor))
+		snprintf(cmd, sizeof(cmd),
+			 "%s -n -i NONE --cmd 'set noundofile nobackup "
+			 "nowritebackup' '%s'",
+			 editor, path);
+	else if (strcmp(base, "vim.tiny") == 0)
+		snprintf(cmd, sizeof(cmd), "%s -n -i NONE '%s'", editor, path);
+	else
+		snprintf(cmd, sizeof(cmd), "%s '%s'", editor, path);
+	int status = system(cmd);
+	if (status == -1 || !WIFEXITED(status))
+		return -1;
+	return WEXITSTATUS(status);
+}
+
+/* zero-overwrite and remove a plaintext temp file */
+static void shred_and_unlink(const char *path)
+{
+	FILE *f = fopen(path, "r+");
+	if (f) {
+		fseek(f, 0, SEEK_END);
+		long len = ftell(f);
+		fseek(f, 0, SEEK_SET);
+		for (long i = 0; i < len; i++)
+			fputc(0, f);
+		fflush(f);
+		fclose(f);
+	}
+	unlink(path);
+}
+
+/* private temp file inside the config dir (not /tmp) */
+static int write_temp(const char *config_dir, const char *name,
+		      const char *text, char *path, usize path_len)
+{
+	snprintf(path, path_len, "%s/.%s-XXXXXX", config_dir, name);
+	int fd = mkstemp(path);
+	if (fd < 0)
+		return -1;
+	FILE *f = fdopen(fd, "w");
+	if (!f) {
+		close(fd);
+		unlink(path);
+		return -1;
+	}
+	fputs(text, f);
+	fclose(f);
+	return 0;
+}
+
+/* whole file as a NUL-terminated string */
+static char *read_text(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f)
+		return NULL;
+	usize len = 0;
+	char *buf = (char *)read_all_bytes(f, &len);
+	fclose(f);
+	if (!buf)
+		return NULL;
+	char *nbuf = realloc(buf, len + 1);
+	if (!nbuf) {
+		free(buf);
+		return NULL;
+	}
+	nbuf[len] = '\0';
+	return nbuf;
+}
+
+/* everything up to and including this line is dropped */
+#define SCISSORS                                                            \
+	"# ------------- >8 ------- Everything above this line is ignored " \
+	"-------------"
+#define SCISSORS_HEAD "# ------------- >8"
+
+/* the mail answered, as fetch shows it, for the editor */
+static char *format_original(const shyake_mail_detail *d, const app_config *cfg)
+{
+	char date[64];
+	cli_format_timestamp(d->timestamp, cfg->tz_hours, cfg->time_format,
+			     cfg->time_format_recent, date, sizeof(date));
+	const char *sub = d->subject ? d->subject : "(decryption failed)";
+	const char *body = d->body ? d->body : "(decryption failed)";
+	usize n = strlen(d->sender) + strlen(d->recipient) + strlen(date) +
+		  strlen(sub) + strlen(body) + 64;
+	char *s = malloc(n);
+	if (s)
+		snprintf(s, n,
+			 "FROM:  %s\nTO:    %s\nDATE:  %s\nSUBJ:  %s\n\n%s",
+			 d->sender, d->recipient, date, sub, body);
+	return s;
+}
+
+/* the original, a scissors line, then the template */
+static char *with_scissors(const char *initial, const char *orig)
+{
+	usize n = strlen(orig) + strlen(SCISSORS) + strlen(initial) + 8;
+	for (const char *p = orig; *p; p++)
+		n += *p == '\n';
+	char *s = malloc(n);
+	if (!s)
+		return NULL;
+	char *w = s;
+	/* a scissors line inside the mail must not cut there */
+	for (const char *line = orig; *line;) {
+		const char *nl = strchr(line, '\n');
+		usize len = nl ? (usize)(nl - line) : strlen(line);
+		if (strncmp(line, SCISSORS_HEAD, strlen(SCISSORS_HEAD)) == 0)
+			*w++ = ' ';
+		memcpy(w, line, len);
+		w += len;
+		*w++ = '\n';
+		line += len + (nl ? 1 : 0);
+	}
+	w += snprintf(w, n - (usize)(w - s), "\n%s\n%s", SCISSORS, initial);
+	return s;
+}
+
+/* text after the scissors line, or NULL when it is gone */
+static const char *after_scissors(const char *buf)
+{
+	for (const char *line = buf; line && *line;) {
+		const char *nl = strchr(line, '\n');
+		if (strncmp(line, SCISSORS_HEAD, strlen(SCISSORS_HEAD)) == 0)
+			return nl ? nl + 1 : line + strlen(line);
+		line = nl ? nl + 1 : NULL;
+	}
+	return NULL;
+}
+
+/*
+ * Let the user edit a draft template. orig, the mail answered, is
+ * shown beside it in vim/nvim and above a scissors line elsewhere.
+ * Returns the edited text without the scissors part, or NULL when
+ * the edit is aborted (the reason is printed).
+ */
+static char *edit_draft(const app_config *cfg, const char *config_dir,
+			const char *initial, const char *orig)
+{
+	const char *editor = resolve_editor(cfg);
+	int split = orig && is_vim(editor);
+	char *full = orig && !split ? with_scissors(initial, orig) :
+				      strdup(initial);
+	char draft_path[640], orig_path[640];
+	if (!full || write_temp(config_dir, "compose", full, draft_path,
+				sizeof(draft_path)) != 0) {
+		fprintf(stderr, "Edit failed. Cannot create a temporary "
+				"file.\n");
+		free(full);
+		return NULL;
+	}
+	if (split && write_temp(config_dir, "original", orig, orig_path,
+				sizeof(orig_path)) != 0)
+		split = 0;
+
+	int est = launch_editor(editor, draft_path, split ? orig_path : NULL);
+	char *buf = est == 0 ? read_text(draft_path) : NULL;
+	shred_and_unlink(draft_path);
+	if (split)
+		shred_and_unlink(orig_path);
+
+	if (est != 0) {
+		fprintf(stderr,
+			"Editor '%s' exited with status %d. Draft aborted.\n",
+			editor, est);
+	} else if (!buf || strcmp(buf, full) == 0) {
+		fprintf(stderr, "Draft aborted.\n");
+	} else if (orig && !split) {
+		const char *rest = after_scissors(buf);
+		if (rest)
+			memmove(buf, rest, strlen(rest) + 1);
+		else
+			fprintf(stderr,
+				"WARNING: The >8 line is gone. The quoted mail "
+				"stays in the draft; fix it with 'shyake "
+				"compose <id>'.\n");
+	}
+	free(full);
+	if (est == 0 && buf && buf[0] == '\0')
+		fprintf(stderr, "Draft aborted.\n");
+	if (est != 0 || (buf && buf[0] == '\0')) {
+		free(buf);
+		return NULL;
+	}
+	return buf;
+}
+
+/*
+ * Parse an edited template and store it as a draft. A reply's
+ * draft keeps reply_to as its recipient, whatever the template says.
+ * Returns an exit status.
+ */
+static int save_edited_draft(shyake_ctx *ctx, const char *config_dir, char *buf,
+			     const char *reply_ref, const char *reply_to,
+			     const char *draft_id)
+{
+	char *to, *subject, *body;
+	if (parse_compose_buffer(buf, &to, &subject, &body) != 0) {
+		fprintf(stderr, "Missing '---' separator. Draft aborted.\n");
+		return EXIT_FAILURE;
+	}
+	while (*body == '\n' || *body == '\r')
+		body++;
+	int has_content = 0;
+	for (const char *p = body; *p && !has_content; p++)
+		has_content = !isspace((unsigned char)*p);
+	if (!has_content) {
+		fprintf(stderr, "Draft aborted (empty body).\n");
+		return EXIT_FAILURE;
+	}
+
+	if (subject && strlen(subject) > 128)
+		fprintf(stderr, "WARNING: The subject exceeds 128 bytes. "
+				"Sending will fail.\n");
+	if (reply_to) {
+		if (to && to[0] && strcmp(to, reply_to) != 0)
+			fprintf(stderr, "A reply keeps its recipient: %s.\n",
+				reply_to);
+		to = (char *)reply_to;
+	}
+
+	char *new_id = NULL;
+	shyake_err ret = cli_save_draft(ctx, config_dir, to, subject, reply_ref,
+					(const u8 *)body, strlen(body),
+					draft_id, &new_id);
+	const char *id = new_id ? new_id : draft_id;
+	if (ret != SHYAKE_OK)
+		print_drafts_error("Draft save failed.");
+	else if (reply_ref)
+		printf("Draft %s saved. Send it with: shyake send -d %s\n", id,
+		       id);
+	else
+		printf("Draft %s saved.\n", id);
+	free(new_id);
+	return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 int main(int argc, char *argv[])
@@ -962,28 +1191,28 @@ int main(int argc, char *argv[])
 
 	if (strcmp(cmd, "reply") == 0) {
 		char *subject = NULL;
+		const char *draft_id = NULL;
 
 		static struct option long_options[] = {
-			{ "subject", required_argument, 0, 's' }, { 0, 0, 0, 0 }
+			{ "subject", required_argument, 0, 's' },
+			{ "draft", required_argument, 0, 'd' },
+			{ 0, 0, 0, 0 }
 		};
 
 		int opt, option_index = 0;
 		optind = 2;
-		while ((opt = getopt_long(argc, argv, "s:", long_options,
+		while ((opt = getopt_long(argc, argv, "s:d:", long_options,
 					  &option_index)) != -1) {
 			if (opt == 's')
 				subject = optarg;
+			else if (opt == 'd')
+				draft_id = optarg;
 		}
 
-		/* reply [saved] <id> [<file>] */
-		int from_saved = optind < argc &&
-				 strcmp(argv[optind], "saved") == 0;
-		if (from_saved)
-			optind++;
 		if (optind >= argc) {
 			fprintf(stderr, "A mail ID is required.\n"
-					"Usage: shyake reply [saved] <id> "
-					"[-s <subject>] [<file>]\n");
+					"Usage: shyake reply <id> "
+					"[-s <subject>] [-d <draft>]\n");
 			free_app_config(app_cfg);
 			free(config_dir);
 			return EXIT_FAILURE;
@@ -1007,8 +1236,11 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 
+		/* legacy: a body from a file or a pipe is sent at once */
+		int direct = !draft_id &&
+			     (optind < argc || !isatty(STDIN_FILENO));
 		FILE *in_file = stdin;
-		if (optind < argc) {
+		if (direct && optind < argc) {
 			in_file = fopen(argv[optind], "rb");
 			if (!in_file) {
 				fprintf(stderr,
@@ -1019,16 +1251,19 @@ int main(int argc, char *argv[])
 				return EXIT_FAILURE;
 			}
 		}
-		usize body_len;
-		u8 *body = read_all_bytes(in_file, &body_len);
-		if (in_file != stdin)
-			fclose(in_file);
-		if (!body) {
-			fprintf(stderr,
-				"Reply failed. Cannot read the body.\n");
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
+		usize body_len = 0;
+		u8 *body = NULL;
+		if (direct) {
+			body = read_all_bytes(in_file, &body_len);
+			if (in_file != stdin)
+				fclose(in_file);
+			if (!body) {
+				fprintf(stderr,
+					"Reply failed. Cannot read the body.\n");
+				free_app_config(app_cfg);
+				free(config_dir);
+				return EXIT_FAILURE;
+			}
 		}
 
 		shyake_config cfg = { .config_dir = config_dir,
@@ -1048,57 +1283,118 @@ int main(int argc, char *argv[])
 		}
 
 		/* the mail answered gives recipient, reference, subject */
-		shyake_mail_detail *orig =
-			from_saved ? shyake_check_saved_one(ctx, mail_id) :
-				     shyake_check_one(ctx, mail_id);
+		shyake_mail_detail *orig = shyake_fetch(ctx, mail_id);
 		const char *recipient =
 			orig ? shyake_reply_recipient(ctx, orig) : NULL;
-		char *re_subject = NULL;
-		shyake_err ret = SHYAKE_ERR;
+		int status = EXIT_FAILURE;
 		if (!orig) {
 			print_lib_error(ctx, "Reply failed.");
-		} else if (!orig->ref || !recipient) {
-			fprintf(stderr,
-				"Reply failed. Mail %s cannot be "
-				"answered.\n",
-				mail_id);
-		} else if (!subject && !orig->subject) {
-			fprintf(stderr,
-				"Reply failed. The subject of mail %s "
-				"cannot be decrypted. "
-				"Use -s <subject>.\n",
-				mail_id);
-		} else {
-			if (!subject) {
-				re_subject = reply_subject(orig->subject);
-				subject = re_subject;
-			}
-			fprintf(stderr, "Replying to %s... ", recipient);
-			fflush(stderr);
-			ret = shyake_send_reply(ctx, recipient, orig->ref,
-						subject, body, body_len);
-			if (ret == SHYAKE_OK) {
-				fprintf(stderr, "done.\n");
-				printf("Mail sent.\n");
-			} else {
-				fprintf(stderr, "\n");
-				print_send_error(ctx, ret, recipient);
-				rescue_draft(
-					ctx, config_dir, recipient, subject,
-					orig->ref, body, body_len,
-					ret != SHYAKE_ERR_BLOCKED &&
-						ret != SHYAKE_ERR_GONE &&
-						ret != SHYAKE_ERR_NOT_FOUND);
-			}
+			goto reply_done;
 		}
+		if (!orig->ref || !recipient) {
+			fprintf(stderr,
+				"Reply failed. Mail %s cannot be answered.\n",
+				mail_id);
+			goto reply_done;
+		}
+		char *re_subject =
+			orig->subject ? reply_subject(orig->subject) : NULL;
+		if (!subject)
+			subject = re_subject;
 
+		if (draft_id) {
+			/* turn a stored draft into this reply */
+			shyake_mail_detail *d = cli_read_draft(
+				ctx, config_dir, app_cfg->username, draft_id);
+			if (!d || !d->body) {
+				print_drafts_error("Draft read failed.");
+			} else {
+				if (d->recipient && d->recipient[0] &&
+				    strcmp(d->recipient, recipient) != 0)
+					fprintf(stderr,
+						"Draft %s now goes to %s.\n",
+						draft_id, recipient);
+				const char *sub =
+					d->subject && d->subject[0] &&
+							!subject_problem(
+								d->subject) ?
+						d->subject :
+						subject;
+				if (cli_save_draft(ctx, config_dir, recipient,
+						   sub, orig->ref,
+						   (const u8 *)d->body,
+						   strlen(d->body), draft_id,
+						   NULL) == SHYAKE_OK) {
+					printf("Draft %s is now a reply to "
+					       "%s. Send it with: shyake send "
+					       "-d %s\n",
+					       draft_id, mail_id, draft_id);
+					status = EXIT_SUCCESS;
+				} else {
+					print_drafts_error(
+						"Draft save failed.");
+				}
+			}
+			shyake_free_mail_detail(d);
+		} else if (direct) {
+			if (!subject) {
+				fprintf(stderr,
+					"Reply failed. The subject of mail %s "
+					"cannot be decrypted. "
+					"Use -s <subject>.\n",
+					mail_id);
+			} else {
+				fprintf(stderr, "Replying to %s... ",
+					recipient);
+				fflush(stderr);
+				shyake_err ret = shyake_send_reply(
+					ctx, recipient, orig->ref, subject,
+					body, body_len);
+				if (ret == SHYAKE_OK) {
+					fprintf(stderr, "done.\n");
+					printf("Mail sent.\n");
+					status = EXIT_SUCCESS;
+				} else {
+					fprintf(stderr, "\n");
+					print_send_error(ctx, ret, recipient);
+					rescue_draft(
+						ctx, config_dir, recipient,
+						subject, orig->ref, body,
+						body_len,
+						ret != SHYAKE_ERR_BLOCKED &&
+							ret != SHYAKE_ERR_GONE &&
+							ret != SHYAKE_ERR_NOT_FOUND);
+				}
+			}
+		} else {
+			/* write the reply in the editor, beside the mail */
+			const char *sub = subject ? subject : "";
+			usize n = strlen(sub) + 32;
+			char *initial = malloc(n);
+			char *shown = format_original(orig, app_cfg);
+			char *buf = NULL;
+			if (initial && shown) {
+				snprintf(initial, n, "Subject: %s\n---\n", sub);
+				buf = edit_draft(app_cfg, config_dir, initial,
+						 shown);
+			}
+			if (buf)
+				status = save_edited_draft(ctx, config_dir, buf,
+							   orig->ref, recipient,
+							   NULL);
+			free(buf);
+			free(initial);
+			free(shown);
+		}
 		free(re_subject);
+
+reply_done:
 		shyake_free_mail_detail(orig);
 		free(body);
 		shyake_free_ctx(ctx);
 		free_app_config(app_cfg);
 		free(config_dir);
-		return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
+		return status;
 	}
 
 	if (strcmp(cmd, "compose") == 0) {
@@ -1118,7 +1414,7 @@ int main(int argc, char *argv[])
 		shyake_ctx *ctx = shyake_init_ctx(&cfg);
 
 		/* build template; editing decrypts the existing draft */
-		char *initial = NULL;
+		char *initial = NULL, *shown = NULL;
 		char *reply_ref = NULL, *reply_to = NULL;
 		if (draft_id) {
 			if (prompt_passphrase(ctx, config_dir) != 0) {
@@ -1139,155 +1435,54 @@ int main(int argc, char *argv[])
 			}
 			const char *to = d->recipient ? d->recipient : "";
 			const char *sub = d->subject ? d->subject : "";
-			if (d->reply_ref) {
-				reply_ref = strdup(d->reply_ref);
-				reply_to = strdup(to);
-			}
 			usize sz =
 				strlen(to) + strlen(sub) + strlen(d->body) + 32;
 			initial = malloc(sz);
-			if (initial)
+			if (d->reply_ref) {
+				/* a reply: fixed recipient, the mail beside */
+				reply_ref = strdup(d->reply_ref);
+				reply_to = strdup(to);
+				if (initial)
+					snprintf(initial, sz,
+						 "Subject: %s\n---\n%s", sub,
+						 d->body);
+				int saved = 0;
+				char *oid =
+					shyake_find_ref(ctx, reply_ref, &saved);
+				shyake_mail_detail *o =
+					!oid  ? NULL :
+					saved ? shyake_read_saved(ctx, oid) :
+						shyake_fetch(ctx, oid);
+				if (o)
+					shown = format_original(o, app_cfg);
+				shyake_free_mail_detail(o);
+				free(oid);
+			} else if (initial) {
 				snprintf(initial, sz,
 					 "To: %s\nSubject: %s\n---\n%s", to,
 					 sub, d->body);
+			}
 			shyake_free_mail_detail(d);
 		} else {
 			initial = strdup("To: \nSubject: \n---\n");
 		}
 
-		/* private temp file inside the config dir (not /tmp) */
-		char tmp_path[640];
-		snprintf(tmp_path, sizeof(tmp_path), "%s/.compose-XXXXXX",
-			 config_dir);
-		int fd = mkstemp(tmp_path);
-		if (fd < 0) {
-			fprintf(stderr,
-				"Edit failed. Cannot create a temporary "
-				"file.\n");
-			free(initial);
-			free(reply_ref);
-			free(reply_to);
-			shyake_free_ctx(ctx);
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
-		}
-		FILE *tf = fdopen(fd, "w");
-		fputs(initial, tf);
-		fclose(tf);
-
-		const char *editor = resolve_editor(app_cfg);
-		int est = launch_editor(editor, tmp_path);
-		if (est != 0) {
-			fprintf(stderr,
-				"Editor '%s' exited with status %d. "
-				"Draft aborted.\n",
-				editor, est);
-			shred_and_unlink(tmp_path);
-			free(initial);
-			free(reply_ref);
-			free(reply_to);
-			shyake_free_ctx(ctx);
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
-		}
-
-		/* read edited content back and wipe the plaintext */
-		FILE *rf = fopen(tmp_path, "rb");
-		char *buf = NULL;
-		usize buf_len = 0;
-		if (rf) {
-			buf = (char *)read_all_bytes(rf, &buf_len);
-			fclose(rf);
-		}
-		shred_and_unlink(tmp_path);
-		if (buf) {
-			char *nbuf = realloc(buf, buf_len + 1);
-			if (!nbuf) {
-				free(buf);
-				buf = NULL;
-			} else {
-				buf = nbuf;
-				buf[buf_len] = '\0';
-			}
-		}
-
-		if (!buf || strcmp(buf, initial) == 0) {
-			fprintf(stderr, "Draft aborted.\n");
-			free(buf);
-			free(initial);
-			free(reply_ref);
-			free(reply_to);
-			shyake_free_ctx(ctx);
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
-		}
+		char *buf = initial ? edit_draft(app_cfg, config_dir, initial,
+						 shown) :
+				      NULL;
+		int status = buf ? save_edited_draft(ctx, config_dir, buf,
+						     reply_ref, reply_to,
+						     draft_id) :
+				   EXIT_FAILURE;
+		free(buf);
 		free(initial);
-
-		char *to, *subject, *body;
-		if (parse_compose_buffer(buf, &to, &subject, &body) != 0) {
-			fprintf(stderr, "Missing '---' separator. "
-					"Draft aborted.\n");
-			free(buf);
-			free(reply_ref);
-			free(reply_to);
-			shyake_free_ctx(ctx);
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
-		}
-
-		while (*body == '\n' || *body == '\r')
-			body++;
-		int has_content = 0;
-		for (const char *p = body; *p; p++) {
-			if (!isspace((unsigned char)*p)) {
-				has_content = 1;
-				break;
-			}
-		}
-		if (!has_content) {
-			fprintf(stderr, "Draft aborted (empty body).\n");
-			free(buf);
-			free(reply_ref);
-			free(reply_to);
-			shyake_free_ctx(ctx);
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
-		}
-
-		if (subject && strlen(subject) > 128)
-			fprintf(stderr,
-				"WARNING: The subject exceeds 128 bytes. "
-				"Sending will fail.\n");
-		if (reply_to && (!to || strcmp(to, reply_to) != 0)) {
-			fprintf(stderr, "A reply keeps its recipient: %s.\n",
-				reply_to);
-			to = reply_to;
-		}
-
-		char *new_id = NULL;
-		shyake_err ret = cli_save_draft(ctx, config_dir, to, subject,
-						reply_ref, (const u8 *)body,
-						strlen(body), draft_id,
-						&new_id);
+		free(shown);
 		free(reply_ref);
 		free(reply_to);
-		if (ret == SHYAKE_OK) {
-			printf("Draft %s saved.\n", new_id ? new_id : draft_id);
-		} else {
-			print_drafts_error("Draft save failed.");
-		}
-
-		free(new_id);
-		free(buf);
 		shyake_free_ctx(ctx);
 		free_app_config(app_cfg);
 		free(config_dir);
-		return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
+		return status;
 	}
 
 	if (strcmp(cmd, "check") == 0) {

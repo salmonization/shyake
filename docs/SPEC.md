@@ -794,7 +794,9 @@ Recognized environment variables:
 | `whoami` | Print current profile (no network) |
 | `send -t <to> [-s <subj>] [file]` | Send a mail (text only). Saves as a draft if it fails |
 | `send --draft <id> [-t <to>] [-s <subj>]` | Send a stored draft (deleted on success) |
-| `reply [saved] <id> [-s <subj>] [file]` | Reply to a mail (§3.2). Saves as a draft if it fails |
+| `reply <id> [-s <subj>]` | Write a reply draft in the editor, beside the mail (§3.2) |
+| `reply <id> -d <draft>` | Turn a draft into a reply to `<id>` |
+| `reply <id> [-s <subj>] <file>` | Send a reply at once (also from stdin). Saves as a draft if it fails |
 | `compose [<id>]` | Compose or edit an encrypted draft (§3.8) |
 | `check inbox\|sent [opts]` | List mailbox metadata |
 | `check <id>` | Inspect a single mail header |
@@ -822,7 +824,11 @@ Recognized environment variables:
 an `RE:` line with the ID of the mail it answers. They print
 `<id> (saved)` when only a saved copy is left, and `(unavailable)`
 when the mail is gone. `reply` subjects default to `Re: <subject>`.
-`send --draft` cannot change the recipient of a reply's draft. `send` recipients may be local (`username`) or remote
+A reply's draft has no `To:` line: `compose` and `send --draft`
+keep its recipient. In the editor, `vim` and `nvim` show the mail
+read-only in a split window. Other editors get the mail above a
+line starting with `# ------------- >8`, and the client drops that
+line and everything above it. `send` recipients may be local (`username`) or remote
 (`username@instance`). The caller must base64-encode binary data.
 Use `enc` and `dec` for debugging and testing.
 
