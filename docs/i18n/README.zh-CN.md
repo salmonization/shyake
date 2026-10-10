@@ -152,24 +152,28 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **reply 命令**：
 
-`reply` 用于回复邮件。它会打开编辑器编写回复草稿，并把被回复的邮件一并显示出来。在 `vim` 和 `nvim` 中，原信以只读方式显示在左侧窗口，你在右侧编写。其他编辑器会把原信放在文件顶部、`>8` 这一行的上方；保存时，客户端会丢弃这一行及其上方的全部内容。
+`reply` 用于回复邮件。它会打开编辑器编写回复草稿，并把被回复的邮件一并显示出来。在 `vim` 和 `nvim` 中，原信以只读方式显示在左侧窗口，你在右侧编写。其他编辑器会把原信放在文件顶部、剪刀线（`>8`）的上方；保存时，客户端会丢弃剪刀线及其上方的全部内容。编辑器打开时，光标直接位于写回复的位置。
 
 ```sh
 shyake reply fQBjZnvJ56
 ```
 
 ```
-FROM:  salmon
-TO:    flat_white
+FROM:  flat_white
+TO:    salmon
 DATE:  2026-10-10 09:30
 SUBJ:  Coffee tomorrow?
 
-The usual place?
+Coffee tomorrow?
 
-# ------------- >8 ------- Everything above this line is ignored -------------
+# Do not modify or remove the scissors line.
+# Everything above it will be ignored.
+# ------------------------ >8 ------------------------
 Subject: Re: Coffee tomorrow?
 ---
-Sure, at ten.
+content...
+content...
+content...
 ```
 
 结果是一份加密草稿，和 `compose` 写出的草稿一样，用 `shyake send -d <id>` 发送。回复发给对方：收到的邮件回复给发件人，你发出的邮件回复给收件人。你发给自己的邮件，回复也发给自己。回复草稿没有 `To:` 行，收件人不能更改。主题默认为 `Re: <原主题>`，可用 `-s` 修改。
@@ -189,8 +193,8 @@ shyake reply fQBjZnvJ56 < answer.txt
 `check <id>`、`fetch` 和 `read` 会在 `RE:` 行显示回复所对应的邮件。只剩你本地保存的副本时，ID 后会显示 `(saved)`；邮件已不存在时显示 `(unavailable)`。
 
 ```
-FROM:  flat_white
-TO:    salmon
+FROM:  salmon
+TO:    flat_white
 RE:    fQBjZnvJ56
 DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?

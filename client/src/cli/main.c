@@ -457,32 +457,49 @@ static int is_vim(const char *editor)
 	return strcmp(base, "vim") == 0 || strcmp(base, "nvim") == 0;
 }
 
+/* editors that open a file at a line with "+<line> <file>" */
+static int takes_plus_line(const char *base)
+{
+	static const char *const names[] = { "vi",    "vim.tiny", "nano",
+					     "pico",  "emacs",	  "mg",
+					     "micro", "joe" };
+	for (usize i = 0; i < sizeof(names) / sizeof(*names); i++)
+		if (strcmp(base, names[i]) == 0)
+			return 1;
+	return 0;
+}
+
 /*
- * Run editor on path. vim keeps no swap, viminfo, undo or backup
- * file; with beside, it shows that file read-only on the left.
+ * Run editor on path, with the cursor on line when it is not 0.
+ * vim keeps no swap, viminfo, undo or backup file; with beside, it
+ * shows that file read-only on the left.
  */
 static int launch_editor(const char *editor, const char *path,
-			 const char *beside)
+			 const char *beside, int line)
 {
 	const char *base = strrchr(editor, '/');
 	base = base ? base + 1 : editor;
+	char at[32] = "";
+	if (line > 0 && (is_vim(editor) || takes_plus_line(base)))
+		snprintf(at, sizeof(at), " +%d", line);
 
 	char cmd[2048];
 	if (is_vim(editor) && beside)
 		snprintf(cmd, sizeof(cmd),
 			 "%s -n -i NONE --cmd 'set noundofile nobackup "
 			 "nowritebackup' -O '%s' '%s' -c 'setlocal readonly "
-			 "nomodifiable' -c 'wincmd l'",
-			 editor, beside, path);
+			 "nomodifiable' -c 'wincmd l' -c 'call cursor(%d, 1)'",
+			 editor, beside, path, line > 0 ? line : 1);
 	else if (is_vim(editor))
 		snprintf(cmd, sizeof(cmd),
 			 "%s -n -i NONE --cmd 'set noundofile nobackup "
-			 "nowritebackup' '%s'",
-			 editor, path);
+			 "nowritebackup'%s '%s'",
+			 editor, at, path);
 	else if (strcmp(base, "vim.tiny") == 0)
-		snprintf(cmd, sizeof(cmd), "%s -n -i NONE '%s'", editor, path);
+		snprintf(cmd, sizeof(cmd), "%s -n -i NONE%s '%s'", editor, at,
+			 path);
 	else
-		snprintf(cmd, sizeof(cmd), "%s '%s'", editor, path);
+		snprintf(cmd, sizeof(cmd), "%s%s '%s'", editor, at, path);
 	int status = system(cmd);
 	if (status == -1 || !WIFEXITED(status))
 		return -1;
@@ -544,11 +561,11 @@ static char *read_text(const char *path)
 	return nbuf;
 }
 
-/* everything up to and including this line is dropped */
-#define SCISSORS                                                            \
-	"# ------------- >8 ------- Everything above this line is ignored " \
-	"-------------"
-#define SCISSORS_HEAD "# ------------- >8"
+/* this line and everything above it are dropped */
+#define SCISSORS "# ------------------------ >8 ------------------------"
+#define SCISSORS_NOTE                                    \
+	"# Do not modify or remove the scissors line.\n" \
+	"# Everything above it will be ignored.\n"
 
 /* the mail answered, as fetch shows it, for the editor */
 static char *format_original(const shyake_mail_detail *d, const app_config *cfg)
@@ -571,7 +588,8 @@ static char *format_original(const shyake_mail_detail *d, const app_config *cfg)
 /* the original, a scissors line, then the template */
 static char *with_scissors(const char *initial, const char *orig)
 {
-	usize n = strlen(orig) + strlen(SCISSORS) + strlen(initial) + 8;
+	usize n = strlen(orig) + strlen(SCISSORS_NOTE) + strlen(SCISSORS) +
+		  strlen(initial) + 8;
 	for (const char *p = orig; *p; p++)
 		n += *p == '\n';
 	char *s = malloc(n);
@@ -582,14 +600,15 @@ static char *with_scissors(const char *initial, const char *orig)
 	for (const char *line = orig; *line;) {
 		const char *nl = strchr(line, '\n');
 		usize len = nl ? (usize)(nl - line) : strlen(line);
-		if (strncmp(line, SCISSORS_HEAD, strlen(SCISSORS_HEAD)) == 0)
+		if (strncmp(line, SCISSORS, strlen(SCISSORS)) == 0)
 			*w++ = ' ';
 		memcpy(w, line, len);
 		w += len;
 		*w++ = '\n';
 		line += len + (nl ? 1 : 0);
 	}
-	w += snprintf(w, n - (usize)(w - s), "\n%s\n%s", SCISSORS, initial);
+	snprintf(w, n - (usize)(w - s), "\n%s%s\n%s", SCISSORS_NOTE, SCISSORS,
+		 initial);
 	return s;
 }
 
@@ -598,11 +617,30 @@ static const char *after_scissors(const char *buf)
 {
 	for (const char *line = buf; line && *line;) {
 		const char *nl = strchr(line, '\n');
-		if (strncmp(line, SCISSORS_HEAD, strlen(SCISSORS_HEAD)) == 0)
+		if (strncmp(line, SCISSORS, strlen(SCISSORS)) == 0)
 			return nl ? nl + 1 : line + strlen(line);
 		line = nl ? nl + 1 : NULL;
 	}
 	return NULL;
+}
+
+/* line number of the body: the line after the first "---" */
+static int body_line(const char *text)
+{
+	const char *start = after_scissors(text);
+	if (!start)
+		start = text;
+	int n = 1;
+	for (const char *p = text; p < start; p++)
+		n += *p == '\n';
+	for (const char *line = start; line && *line; n++) {
+		const char *nl = strchr(line, '\n');
+		usize len = nl ? (usize)(nl - line) : strlen(line);
+		if (len == 3 && strncmp(line, "---", 3) == 0)
+			return n + 1;
+		line = nl ? nl + 1 : NULL;
+	}
+	return 0;
 }
 
 /*
@@ -630,7 +668,8 @@ static char *edit_draft(const app_config *cfg, const char *config_dir,
 				sizeof(orig_path)) != 0)
 		split = 0;
 
-	int est = launch_editor(editor, draft_path, split ? orig_path : NULL);
+	int est = launch_editor(editor, draft_path, split ? orig_path : NULL,
+				orig ? body_line(full) : 0);
 	char *buf = est == 0 ? read_text(draft_path) : NULL;
 	shred_and_unlink(draft_path);
 	if (split)
@@ -642,20 +681,22 @@ static char *edit_draft(const app_config *cfg, const char *config_dir,
 			editor, est);
 	} else if (!buf || strcmp(buf, full) == 0) {
 		fprintf(stderr, "Draft aborted.\n");
+		free(buf);
+		buf = NULL;
 	} else if (orig && !split) {
 		const char *rest = after_scissors(buf);
 		if (rest)
 			memmove(buf, rest, strlen(rest) + 1);
 		else
 			fprintf(stderr,
-				"WARNING: The >8 line is gone. The quoted mail "
-				"stays in the draft; fix it with 'shyake "
+				"WARNING: The scissors line is gone. The quoted "
+				"mail stays in the draft; fix it with 'shyake "
 				"compose <id>'.\n");
 	}
 	free(full);
 	if (est == 0 && buf && buf[0] == '\0')
 		fprintf(stderr, "Draft aborted.\n");
-	if (est != 0 || (buf && buf[0] == '\0')) {
+	if (est != 0 || !buf || buf[0] == '\0') {
 		free(buf);
 		return NULL;
 	}
@@ -1374,7 +1415,8 @@ int main(int argc, char *argv[])
 			char *shown = format_original(orig, app_cfg);
 			char *buf = NULL;
 			if (initial && shown) {
-				snprintf(initial, n, "Subject: %s\n---\n", sub);
+				snprintf(initial, n, "Subject: %s\n---\n\n",
+					 sub);
 				buf = edit_draft(app_cfg, config_dir, initial,
 						 shown);
 			}

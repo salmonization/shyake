@@ -273,7 +273,7 @@ signature or does any database work. The server rejects a token when:
 - the first 20 bits of its SHA-1 hash are not all zero.
 
 The resource of a federated sender can contain a colon
-(`alice@host:8787`). The server therefore takes the three leading
+(`flat_white@host:8787`). The server therefore takes the three leading
 fields and the three trailing fields by position. The resource is
 everything between them.
 
@@ -393,7 +393,7 @@ are common to both. The Go server adds:
 
 Usernames are unique **case-insensitively**. The server rejects
 registration with HTTP 409 when a name differs from an existing one
-only by case, so `Alice` cannot register alongside `alice`. Lookups
+only by case, so `Salmon` cannot register alongside `salmon`. Lookups
 elsewhere use exact matches, so the two names are never confused.
 
 On `destroy`, the server sets `kem_pubkey` and `sig_pubkey` to empty
@@ -433,8 +433,8 @@ rows where the user is sender or recipient.
 The server **normalizes** addresses before it stores or matches
 them. It strips the `@<INSTANCE_DOMAIN>` suffix. It lowercases the
 domain part of a remote address or a bare domain. A local user is
-therefore always `bob`. A remote one is always
-`mallory@evil.example`.
+therefore always `salmon`. A remote one is always
+`flat_white@shyake.example.com`.
 
 On mail submission, if the recipient has blocked the sender's
 normalized address or domain, the server rejects the send with HTTP
@@ -680,10 +680,10 @@ Callers cannot see them. The library never writes to stdout or
 stderr. On failure, it records the reason and returns a semantic
 error code. Callers get the reason with `shyake_last_error(ctx)`. The
 reason is one or more full sentences that say why the call failed,
-not what failed, for example `You are blocked by bob.` The client
+not what failed, for example `You are blocked by flat_white.` The client
 adds its own action in front of it. The CLI prints
 `<Action> failed. <reason>`, for example
-`Send failed. You are blocked by bob.` A changed recipient key is
+`Send failed. You are blocked by flat_white.` A changed recipient key is
 the one exception: the CLI prints it as `FATAL: <reason>` (§7).
 Each call clears the reason. It stays valid until the next call on the same context.
 Error codes are a typed enum
@@ -826,9 +826,12 @@ an `RE:` line with the ID of the mail it answers. They print
 when the mail is gone. `reply` subjects default to `Re: <subject>`.
 A reply's draft has no `To:` line: `compose` and `send --draft`
 keep its recipient. In the editor, `vim` and `nvim` show the mail
-read-only in a split window. Other editors get the mail above a
-line starting with `# ------------- >8`, and the client drops that
-line and everything above it. `send` recipients may be local (`username`) or remote
+read-only in a split window. Other editors get the mail above the
+scissors line `# ------------------------ >8 ------------------------`,
+and the client drops that line and everything above it. A line of
+the mail that starts with it gets a leading space, so it cannot cut
+there. The editor opens on the first body line (`+<line>` for
+editors that take it). `send` recipients may be local (`username`) or remote
 (`username@instance`). The caller must base64-encode binary data.
 Use `enc` and `dec` for debugging and testing.
 

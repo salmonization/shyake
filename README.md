@@ -175,24 +175,30 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 a reply draft, beside the mail you answer. In `vim` and `nvim`, the
 mail sits read-only in a window on the left and you write on the
 right. Other editors show the mail at the top of the file, above a
-`>8` line; the client drops everything above that line.
+scissors line (`>8`); the client drops that line and everything
+above it. The editor opens with the cursor where you write the
+reply.
 
 ```sh
 shyake reply fQBjZnvJ56
 ```
 
 ```
-FROM:  salmon
-TO:    flat_white
+FROM:  flat_white
+TO:    salmon
 DATE:  2026-10-10 09:30
 SUBJ:  Coffee tomorrow?
 
-The usual place?
+Coffee tomorrow?
 
-# ------------- >8 ------- Everything above this line is ignored -------------
+# Do not modify or remove the scissors line.
+# Everything above it will be ignored.
+# ------------------------ >8 ------------------------
 Subject: Re: Coffee tomorrow?
 ---
-Sure, at ten.
+content...
+content...
+content...
 ```
 
 The result is an encrypted draft, like one from `compose`. Send it
@@ -219,8 +225,8 @@ an `RE:` line. It shows `(saved)` after the ID when only your saved
 copy is left, and `(unavailable)` when the mail is gone.
 
 ```
-FROM:  flat_white
-TO:    salmon
+FROM:  salmon
+TO:    flat_white
 RE:    fQBjZnvJ56
 DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?

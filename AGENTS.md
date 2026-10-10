@@ -177,8 +177,8 @@ Architecture notes:
   goes through `set_error()` and is read by the client via
   `shyake_last_error(ctx)`. The client decides how to present it.
 - `set_error()` records only the reason, as full sentences ("You are
-  blocked by bob."), never the action or an HTTP status. The CLI
-  prints every failure as `<Action> failed. <reason>`, with no
+  blocked by flat_white."), never the action or an HTTP status. The
+  CLI prints every failure as `<Action> failed. <reason>`, with no
   `Error:` prefix; only a changed recipient key prints as
   `FATAL: <reason>`.
 - The CLI links against `libshyake.a` and talks to the library only

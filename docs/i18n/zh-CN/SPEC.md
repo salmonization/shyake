@@ -198,7 +198,7 @@ Go 服务端还会记住每个已接受的签名，重复使用同一签名的�
 - 日期与服务器日期（UTC）相差超过一天；
 - SHA-1 哈希的前 20 位不全为零。
 
-联邦网络发件人的 resource 可能含有冒号（`alice@host:8787`），因此服务器按位置取前三个字段和后三个字段，两者之间的部分即为 resource。
+联邦网络发件人的 resource 可能含有冒号（`flat_white@host:8787`），因此服务器按位置取前三个字段和后三个字段，两者之间的部分即为 resource。
 
 Go 服务端还会拒绝已经接受过的令牌，因此每个令牌只能用于一次请求。
 
@@ -279,7 +279,7 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 | `sig_pubkey` | TEXT | Base64 编码的 ML-DSA-65 公钥 |
 | `created_at` | INTEGER | UNIX 时间戳 |
 
-用户名在**忽略大小写**的意义上唯一：当一个名字与已有用户名只有大小写差异时，注册会被以 HTTP 409 拒绝，因此 `Alice` 不能与 `alice` 并存。其他地方的查找都是精确匹配，两者不会被混淆。
+用户名在**忽略大小写**的意义上唯一：当一个名字与已有用户名只有大小写差异时，注册会被以 HTTP 409 拒绝，因此 `Salmon` 不能与 `salmon` 并存。其他地方的查找都是精确匹配，两者不会被混淆。
 
 执行 `destroy` 时，`kem_pubkey` 和 `sig_pubkey` 被置为空字符串，所有与该用户相关的邮件和屏蔽记录都会被删除。用户行本身**被保留**以永久锁定该用户名。
 
@@ -310,7 +310,7 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 | `created_at` | INTEGER | UNIX 时间戳 |
 | PK | | `(blocker, blocked)` 复合主键 |
 
-地址在存储和匹配前会先**归一化**：去掉 `@<INSTANCE_DOMAIN>` 后缀，远端地址的域名部分与裸域名都会转为小写。因此本地用户始终是 `bob`，远端用户始终是 `mallory@evil.example`。
+地址在存储和匹配前会先**归一化**：去掉 `@<INSTANCE_DOMAIN>` 后缀，远端地址的域名部分与裸域名都会转为小写。因此本地用户始终是 `salmon`，远端用户始终是 `flat_white@shyake.example.com`。
 
 提交邮件时，如果收件人屏蔽了发件人的归一化地址或发件人的域名，服务器将以 HTTP 403 拒绝发送。双方都会先归一化，这正是该检查在转发邮件上仍然有效的原因——转发时收件人是以全限定形式到达的。
 
@@ -462,7 +462,7 @@ void shyake_set_new_passphrase(shyake_ctx *ctx, const char *pp);
 const char* shyake_last_error(shyake_ctx *ctx);
 ```
 
-内部结构体定义位于 `src/lib/lib_internal.h`，不对调用者暴露。库从不向 stdout/stderr 写入任何内容：失败时它会记录失败原因（通过 `shyake_last_error(ctx)` 获取），并返回语义化错误码。原因是一到多句完整的句子，只说明为什么失败，不说明哪个操作失败，例如 `You are blocked by bob.`。操作名由客户端加在前面：CLI 打印 `<Action> failed. <reason>`，例如 `Send failed. You are blocked by bob.`。唯一的例外是收件人公钥变化，CLI 会打印 `FATAL: <reason>`（§7）。每次调用都会先清空原因，原因在同一上下文的下一次调用前有效。错误码以类型化枚举（`shyake_err`）返回，其中 `SHYAKE_OK = 0` 以保持向后兼容：
+内部结构体定义位于 `src/lib/lib_internal.h`，不对调用者暴露。库从不向 stdout/stderr 写入任何内容：失败时它会记录失败原因（通过 `shyake_last_error(ctx)` 获取），并返回语义化错误码。原因是一到多句完整的句子，只说明为什么失败，不说明哪个操作失败，例如 `You are blocked by flat_white.`。操作名由客户端加在前面：CLI 打印 `<Action> failed. <reason>`，例如 `Send failed. You are blocked by flat_white.`。唯一的例外是收件人公钥变化，CLI 会打印 `FATAL: <reason>`（§7）。每次调用都会先清空原因，原因在同一上下文的下一次调用前有效。错误码以类型化枚举（`shyake_err`）返回，其中 `SHYAKE_OK = 0` 以保持向后兼容：
 
 | 错误码 | 含义 |
 |---|---|
@@ -571,7 +571,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `man [<command>]` | 显示文档 |
 | `version` | 打印版本字符串 |
 
-`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。对于回复，`check <id>`、`fetch` 和 `read` 会打印一行 `RE:`，显示被回复邮件的 ID；只剩本地保存的副本时显示 `<id> (saved)`，邮件已不存在时显示 `(unavailable)`。`reply` 的主题默认为 `Re: <subject>`。回复草稿没有 `To:` 行，`compose` 和 `send --draft` 都会保留它的收件人。在编辑器中，`vim` 和 `nvim` 以分屏方式只读显示原信；其他编辑器则把原信放在一行以 `# ------------- >8` 开头的分隔线上方，客户端会丢弃这一行及其上方的全部内容。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
+`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。对于回复，`check <id>`、`fetch` 和 `read` 会打印一行 `RE:`，显示被回复邮件的 ID；只剩本地保存的副本时显示 `<id> (saved)`，邮件已不存在时显示 `(unavailable)`。`reply` 的主题默认为 `Re: <subject>`。回复草稿没有 `To:` 行，`compose` 和 `send --draft` 都会保留它的收件人。在编辑器中，`vim` 和 `nvim` 以分屏方式只读显示原信；其他编辑器则把原信放在剪刀线 `# ------------------------ >8 ------------------------` 上方，客户端会丢弃剪刀线及其上方的全部内容。原信中以剪刀线开头的行会被加上一个前导空格，因此不会在那里截断。编辑器打开时光标位于正文第一行（支持 `+<行号>` 的编辑器）。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
 
 ---
 

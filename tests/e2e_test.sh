@@ -512,7 +512,7 @@ ED_DRAFT=$(echo "$out" | sed -n 's/^Draft \([0-9]*\) saved.*/\1/p')
 assert_contains "reply in the editor: template has the subject" \
     "Subject: Re: Thread start" "$(cat "$TMPDIR_ROOT"/acct_b/.compose-*.seen)"
 assert_contains "reply in the editor: the mail is shown above" \
-    "First answer" "$(sed -n '1,/^# ------------- >8/p' \
+    "First answer" "$(sed -n '1,/^# ------------------------ >8/p' \
     "$TMPDIR_ROOT"/acct_b/.compose-*.seen)"
 rm -f "$TMPDIR_ROOT"/acct_b/.compose-*.seen
 out=$(sh_run "$DIR_B" check drafts "$ED_DRAFT" 2>&1)
@@ -525,16 +525,49 @@ assert_contains "editor reply draft: body kept" \
 assert_not_contains "editor reply draft: scissors part dropped" \
     "First answer" "$out"
 
+# an editor that takes +<line> opens on the body line
+FAKE_NANO_DIR="$TMPDIR_ROOT/fakebin"
+mkdir -p "$FAKE_NANO_DIR"
+cat > "$FAKE_NANO_DIR/nano" <<'EOF2'
+#!/bin/sh
+line=${1#+}
+sed -n "$((line - 1))p" "$2" > "$2.prev"
+sed -i "${line}s/^\$/Answer at the cursor/" "$2"
+EOF2
+chmod +x "$FAKE_NANO_DIR/nano"
+out=$(EDITOR="$FAKE_NANO_DIR/nano" VISUAL="$FAKE_NANO_DIR/nano" \
+    on_tty "'$SHYAKE' --no-color -c '$DIR_B' reply '$REPLY_ID'")
+assert_exit "cursor: the line above it is ---" 0 \
+    "$([ "$(cat "$TMPDIR_ROOT"/acct_b/.compose-*.prev)" = "---" ] \
+    && echo 0 || echo 1)"
+rm -f "$TMPDIR_ROOT"/acct_b/.compose-*.prev
+NANO_DRAFT=$(echo "$out" | sed -n 's/^Draft \([0-9]*\) saved.*/\1/p')
+out=$(sh_run "$DIR_B" read drafts "$NANO_DRAFT" 2>&1)
+assert_contains "cursor: text written there is the body" \
+    "Answer at the cursor" "$out"
+
+# an unchanged reply aborts, even when the mail holds a --- line
+printf 'Thread note\n---\nafter the rule\n' | sh_run "$DIR_A" send \
+    -t "$USER_B" -s "Ruled" > /dev/null 2>&1
+RULED_ID=$(id_of "$DIR_B" inbox "Ruled")
+n_before=$(ls "$DIR_B/drafts" | wc -l)
+out=$(EDITOR=true VISUAL=true \
+    on_tty "'$SHYAKE' --no-color -c '$DIR_B' reply '$RULED_ID'")
+rc=$?; assert_exit "unchanged reply exits non-zero" 1 "$rc"
+assert_contains "unchanged reply: aborted" "Draft aborted." "$out"
+assert_exit "unchanged reply: no draft" 0 \
+    "$([ "$n_before" = "$(ls "$DIR_B/drafts" | wc -l)" ] && echo 0 || echo 1)"
+
 # a deleted >8 line keeps everything, with a warning
 FAKE_ED_NOCUT="$TMPDIR_ROOT/fake_editor_nocut.sh"
 cat > "$FAKE_ED_NOCUT" <<'EOF2'
 #!/bin/sh
-sed -i -e '/^# ------------- >8/d' -e '/^---$/a Uncut answer' "$1"
+sed -i -e '/^# ------------------------ >8/d' -e '/^---$/a Uncut answer' "$1"
 EOF2
 chmod +x "$FAKE_ED_NOCUT"
 out=$(EDITOR="$FAKE_ED_NOCUT" VISUAL="$FAKE_ED_NOCUT" \
     on_tty "'$SHYAKE' --no-color -c '$DIR_B' reply '$REPLY_ID'")
-assert_contains "deleted >8 line: warning" "The >8 line is gone" "$out"
+assert_contains "deleted >8 line: warning" "The scissors line is gone" "$out"
 assert_contains "deleted >8 line: still saved" "Send it with" "$out"
 
 # reply -d turns an existing draft into a reply

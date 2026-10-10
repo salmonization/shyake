@@ -153,24 +153,28 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **reply コマンド**：
 
-`reply` はメールへの返信を書きます。エディタで返信の下書きを開き、返信先のメールも一緒に表示します。`vim` と `nvim` では、元のメールが左側のウィンドウに読み取り専用で表示され、右側で返信を書きます。その他のエディタでは、元のメールがファイルの先頭、`>8` の行より上に表示されます。保存時、クライアントはこの行とそれより上をすべて捨てます。
+`reply` はメールへの返信を書きます。エディタで返信の下書きを開き、返信先のメールも一緒に表示します。`vim` と `nvim` では、元のメールが左側のウィンドウに読み取り専用で表示され、右側で返信を書きます。その他のエディタでは、元のメールがファイルの先頭、切り取り線（`>8`）より上に表示されます。保存時、クライアントは切り取り線とそれより上をすべて捨てます。エディタはカーソルを返信を書く位置に置いて開きます。
 
 ```sh
 shyake reply fQBjZnvJ56
 ```
 
 ```
-FROM:  salmon
-TO:    flat_white
+FROM:  flat_white
+TO:    salmon
 DATE:  2026-10-10 09:30
 SUBJ:  Coffee tomorrow?
 
-The usual place?
+Coffee tomorrow?
 
-# ------------- >8 ------- Everything above this line is ignored -------------
+# Do not modify or remove the scissors line.
+# Everything above it will be ignored.
+# ------------------------ >8 ------------------------
 Subject: Re: Coffee tomorrow?
 ---
-Sure, at ten.
+content...
+content...
+content...
 ```
 
 結果は `compose` と同じ暗号化された下書きになり、`shyake send -d <id>` で送信します。返信は相手方に送られます。受け取ったメールなら送信者に、自分が送ったメールなら受信者に送られます。自分自身に送ったメールへの返信は自分自身に送られます。返信の下書きには `To:` 行がなく、宛先は変更できません。件名は既定で `Re: <元の件名>` になり、`-s` で変更できます。
@@ -190,8 +194,8 @@ shyake reply fQBjZnvJ56 < answer.txt
 `check <id>`、`fetch`、`read` は、返信がどのメールに答えているかを `RE:` 行に表示します。ローカルに保存したコピーしか残っていない場合は ID の後に `(saved)`、メールがもう存在しない場合は `(unavailable)` と表示します。
 
 ```
-FROM:  flat_white
-TO:    salmon
+FROM:  salmon
+TO:    flat_white
 RE:    fQBjZnvJ56
 DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?
