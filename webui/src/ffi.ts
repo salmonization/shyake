@@ -37,6 +37,10 @@ const lib = dlopen(LIB_PATH, {
     shyake_generate_keys: { args: [P], returns: I32 },
     shyake_register: { args: [P, FFIType.cstring], returns: I32 },
     shyake_send: { args: [P, FFIType.cstring, FFIType.cstring, P, FFIType.u64], returns: I32 },
+    shyake_send_reply: {
+        args: [P, FFIType.cstring, FFIType.cstring, FFIType.cstring, P, FFIType.u64],
+        returns: I32,
+    },
     shyake_check: { args: [P, FFIType.cstring], returns: P },
     shyake_free_mail_list: { args: [P], returns: FFIType.void },
     shyake_fetch: { args: [P, FFIType.cstring], returns: P },
@@ -67,7 +71,7 @@ function i64(addr: number, off: number): number {
 }
 
 /* struct offsets (LP64) */
-const MAIL_ENTRY_SIZE = 56;   /* 3 ptrs, i32, pad, 2 i64, i32, pad */
+const MAIL_ENTRY_SIZE = 64;   /* 3 ptrs, i32, pad, 2 i64, i32, pad, ptr */
 const SAVED_ENTRY_SIZE = 56;  /* 4 ptrs, 2 i64, i32, pad */
 const BLOCK_ENTRY_SIZE = 16;  /* ptr, i64 */
 
@@ -86,6 +90,7 @@ export interface MailEntryOut {
     size: number;
     timestamp: number;
     is_sent: boolean;
+    ref: string | null;
 }
 
 export interface MailDetailOut {
@@ -96,6 +101,8 @@ export interface MailDetailOut {
     body: string | null;
     timestamp: number;
     size: number;
+    ref: string | null;
+    reply_ref: string | null;
 }
 
 export class Session {
@@ -189,6 +196,16 @@ export class Session {
         });
     }
 
+    /** Reply to a mail: recipient is its other party, replyRef its ref. */
+    sendReply(recipient: string, replyRef: string, subject: string, body: string): Promise<void> {
+        return this.run(() => {
+            const data = Buffer.from(body, "utf8");
+            const ret = lib.symbols.shyake_send_reply(
+                this.ctx, recipient, replyRef, subject, ptr(data), data.length);
+            if (ret !== SHYAKE_OK) this.fail(ret);
+        });
+    }
+
     check(box: "inbox" | "sent"): Promise<MailEntryOut[]> {
         return this.run(() => {
             const lst = lib.symbols.shyake_check(this.ctx, box);
@@ -206,6 +223,7 @@ export class Session {
                         size: read.i32(e, 24),
                         timestamp: i64(e, 32),
                         is_sent: read.i32(e, 48) !== 0,
+                        ref: cstr(read.ptr(e, 56)),
                     });
                 }
                 return out;
@@ -224,6 +242,8 @@ export class Session {
             body: cstr(read.ptr(d, 32)),
             timestamp: i64(d, 40),
             size: read.i32(d, 56),
+            ref: cstr(read.ptr(d, 64)),
+            reply_ref: cstr(read.ptr(d, 72)),
         };
     }
 
@@ -268,6 +288,7 @@ export class Session {
                         size: read.i32(e, 48),
                         timestamp: i64(e, 32),
                         is_sent: false,
+                        ref: null,
                     });
                 }
                 return out;

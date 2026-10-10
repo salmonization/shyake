@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -212,11 +213,11 @@ func (db *DB) InsertMail(ctx context.Context, m store.Mail) (string, bool, error
 		_, err := db.w.ExecContext(ctx,
 			`INSERT INTO mail (mail_id, sender, recipient, enc_key_sender,
 				   enc_key_recipient, enc_subject, enc_body, size, signature,
-				   timestamp, sig_hash)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				   timestamp, sig_hash, enc_reply_to)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			m.ID, m.Sender, m.Recipient, m.EncKeySender, m.EncKeyRecipient,
 			m.EncSubject, m.EncBody, m.Size, m.Signature, m.Timestamp,
-			sigHash(m.Signature))
+			sigHash(m.Signature), m.EncReplyTo)
 		if err == nil {
 			return m.ID, false, nil
 		}
@@ -240,7 +241,7 @@ func (db *DB) MailIDBySignature(ctx context.Context, signature string) (string, 
 
 func (db *DB) ListMail(ctx context.Context, username string, sent bool) ([]store.Mail, error) {
 	q := `SELECT mail_id, sender, recipient, enc_key_sender, enc_key_recipient,
-	        enc_subject, size, timestamp
+	        enc_subject, size, timestamp, sig_hash
 	      FROM mail WHERE recipient = ? ORDER BY timestamp DESC`
 	if sent {
 		q = strings.Replace(q, "WHERE recipient", "WHERE sender", 1)
@@ -253,10 +254,12 @@ func (db *DB) ListMail(ctx context.Context, username string, sent bool) ([]store
 	out := []store.Mail{}
 	for rows.Next() {
 		var m store.Mail
+		var ref []byte
 		if err := rows.Scan(&m.ID, &m.Sender, &m.Recipient, &m.EncKeySender,
-			&m.EncKeyRecipient, &m.EncSubject, &m.Size, &m.Timestamp); err != nil {
+			&m.EncKeyRecipient, &m.EncSubject, &m.Size, &m.Timestamp, &ref); err != nil {
 			return nil, err
 		}
+		m.Ref = hex.EncodeToString(ref)
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -266,11 +269,11 @@ func (db *DB) GetMail(ctx context.Context, id, username string) (store.Mail, err
 	var m store.Mail
 	err := db.r.QueryRowContext(ctx,
 		`SELECT mail_id, sender, recipient, enc_key_sender, enc_key_recipient,
-		   enc_subject, enc_body, size, signature, timestamp
+		   enc_subject, enc_body, size, signature, timestamp, enc_reply_to
 		 FROM mail WHERE mail_id = ? AND (sender = ? OR recipient = ?)`,
 		id, username, username).Scan(&m.ID, &m.Sender, &m.Recipient,
 		&m.EncKeySender, &m.EncKeyRecipient, &m.EncSubject, &m.EncBody,
-		&m.Size, &m.Signature, &m.Timestamp)
+		&m.Size, &m.Signature, &m.Timestamp, &m.EncReplyTo)
 	return m, notFound(err)
 }
 

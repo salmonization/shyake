@@ -25,15 +25,19 @@ func RegisterMessage(username, kemPub, sigPub, timestamp string) []byte {
 	return b.done()
 }
 
-// MailMessage is the signed subset of POST /api/mail.
+// MailMessage is the signed subset of POST /api/mail. A reply carries
+// enc_reply_to after enc_body; any other mail has no such field.
 func MailMessage(sender, recipient, fingerprint, encSubject, encBody,
-	timestamp string, size int64) []byte {
+	encReplyTo, timestamp string, size int64) []byte {
 	var b jsonObj
 	b.str("sender", sender)
 	b.str("recipient", recipient)
 	b.str("recipient_kem_fingerprint", fingerprint)
 	b.str("enc_subject", encSubject)
 	b.str("enc_body", encBody)
+	if encReplyTo != "" {
+		b.str("enc_reply_to", encReplyTo)
+	}
 	b.str("timestamp", timestamp)
 	b.num("size", size)
 	return b.done()
@@ -41,8 +45,12 @@ func MailMessage(sender, recipient, fingerprint, encSubject, encBody,
 
 // Level is the protocol level a server reports in GET /api/version.
 // Level 2 signs the bodies of header-authenticated requests
-// (HeaderBodyMessage); a server without that endpoint is level 1.
-const Level = 2
+// (HeaderBodyMessage); level 3 accepts replies (enc_reply_to). A
+// server without that endpoint is level 1.
+const Level = 3
+
+// ReplyLevel is the lowest level that accepts a reply.
+const ReplyLevel = 3
 
 // HeaderMessage is the signed string of a header-authenticated request:
 // METHOD:/path[?query]:username:timestamp

@@ -169,6 +169,42 @@ base64 < image.png | shyake send -t flat_white -s "image.png"
 tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 ```
 
+**Reply command**:
+
+`reply` answers a piece of mail. The reply goes to the other party:
+the sender of a mail you received, or the recipient of a mail you
+sent. A mail you sent to yourself is answered to yourself. The
+subject defaults to `Re: <subject>`; use `-s` to change it.
+
+```sh
+shyake reply fQBjZnvJ56 < answer.txt
+shyake reply fQBjZnvJ56 -s "Another subject" < answer.txt
+```
+
+To answer a mail you saved with `save`, even after it is burned:
+
+```sh
+shyake reply saved fQBjZnvJ56 < answer.txt
+```
+
+`check <id>`, `fetch`, and `read` show which mail a reply answers on
+an `RE:` line. It shows `(saved)` after the ID when only your saved
+copy is left, and `(unavailable)` when the mail is gone.
+
+```
+FROM:  flat_white
+TO:    salmon
+RE:    fQBjZnvJ56
+DATE:  2026-10-10 09:30
+SUBJ:  Re: Coffee tomorrow?
+```
+
+The server cannot read which mail a reply answers: the client
+encrypts that with the mail. Both your instance and the recipient's
+must run server v0.4.0 or later. A reply that fails is kept as a
+draft, as with `send`, and stays a reply when you send it with
+`shyake send -d <id>`.
+
 **Compose command**:
 
 `compose` writes mail drafts. It also works as a personal diary. It

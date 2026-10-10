@@ -786,9 +786,9 @@ cleanup:
 /* Mail detail (fetch --raw or normal)                                */
 /* ------------------------------------------------------------------ */
 
-void cli_render_mail_detail(const shyake_mail_detail *d, int raw, int no_color,
-			    int plain, int tz_hours, const char *time_fmt,
-			    const char *time_fmt_recent)
+void cli_render_mail_detail(const shyake_mail_detail *d, const char *re,
+			    int raw, int no_color, int plain, int tz_hours,
+			    const char *time_fmt, const char *time_fmt_recent)
 {
 	if (!d)
 		return;
@@ -812,6 +812,8 @@ void cli_render_mail_detail(const shyake_mail_detail *d, int raw, int no_color,
 
 	printf("%sFROM:%s  %s\n", c_lbl, c_val, d->sender);
 	printf("%sTO:%s    %s\n", c_lbl, c_val, d->recipient);
+	if (re)
+		printf("%sRE:%s    %s\n", c_lbl, c_val, re);
 	printf("%sDATE:%s  %s\n", c_lbl, c_val, date_buf);
 	printf("%sSUBJ:%s  ", c_lbl, c_val);
 	cli_print_word_wrap(sub_text, 7, tw);
@@ -833,8 +835,8 @@ void cli_render_mail_detail(const shyake_mail_detail *d, int raw, int no_color,
 /* Mail header view (check <id>)                                      */
 /* ------------------------------------------------------------------ */
 
-void cli_render_mail_header(const shyake_mail_detail *d, int no_color,
-			    int tz_hours, const char *time_fmt,
+void cli_render_mail_header(const shyake_mail_detail *d, const char *re,
+			    int no_color, int tz_hours, const char *time_fmt,
 			    const char *time_fmt_recent)
 {
 	if (!d)
@@ -852,6 +854,8 @@ void cli_render_mail_header(const shyake_mail_detail *d, int no_color,
 
 	printf("%sFROM:%s %s\n", c_lbl, c_rs, d->sender);
 	printf("%sTO:%s   %s\n", c_lbl, c_rs, d->recipient);
+	if (re)
+		printf("%sRE:%s   %s\n", c_lbl, c_rs, re);
 	printf("%sSUBJ:%s ", c_lbl, c_rs);
 	cli_print_word_wrap(sub_text, 6, tw);
 	printf("%sSIZE:%s %d\n", c_lbl, c_rs, d->size);

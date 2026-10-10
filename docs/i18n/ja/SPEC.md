@@ -7,8 +7,8 @@
 Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 <table>
-<tr><td>バージョン</td><td>0.3</td></tr>
-<tr><td>最終更新</td><td>2026-09-23</td></tr>
+<tr><td>バージョン</td><td>0.4</td></tr>
+<tr><td>最終更新</td><td>2026-10-10</td></tr>
 </table>
 
 ---
@@ -108,6 +108,14 @@ shyake/
 
 復号はこの逆の手順である：クライアントは自身の KEM 秘密鍵で共有秘密をデカプセル化し、それを暗号化鍵フィールドと XOR して対称鍵を復元し、その後コンテンツを復号する。
 
+**返信。** 返信は、返信先メールの**参照**によってどのメールに答えるかを示す。参照とは、そのメールの `signature` フィールド（サーバーが保存する文字列そのもの）の SHA-256 を小文字 16 進数で表したもので、64 文字である。中継は署名済みペイロードをバイト単位でそのまま転送する（§6.2）ため、両方のインスタンスが同じ署名を保存する。したがって、送信者と受信者の `mail_id` は異なっても、両者が計算する参照は同じになる。
+
+クライアントは参照を返信の対称鍵で暗号化し（件名と同じ方式）、`enc_reply_to` として送信する。サーバーはこれを保存するが読むことはできない。サーバーにわかるのはメールが返信であることだけで、どのメールへの返信かはわからない。
+
+返信は返信先メールの相手方に送られる。受信したメールなら送信者に、送信したメールなら受信者に送られる。ユーザーが自分自身に送ったメールへの返信は自分自身に送られる。これはクライアントの取り決めであり、サーバーは検査できない。
+
+返信がどのメールに答えるかを表示するため、クライアントは受信箱と送信箱の一覧の `sig_hash` の値（§5.2）から参照を探し、次にローカルに保存したメール（§9）から探す。サーバーには参照による検索の手段がないため、クライアントがどのメールを探しているかをサーバーが知ることはない。焼却されたメールはもう見つからない。
+
 単体ファイル暗号化コマンド（`enc` / `dec`）は、同じ ML-KEM-768 + ChaCha20-Poly1305 構成を、長さプレフィックス付きのバイナリコンテナ（`.enc` ファイル）で使用する。
 
 #### 3.3 認証プロトコル
@@ -163,6 +171,8 @@ POST:/api/block:salmon:1749513600:<ボディの sha256 16 進>
   "size": 512
 }
 ```
+
+返信（§3.2）は `enc_body` の後に `"enc_reply_to": "..."` を加える。それ以外のメールにはこのフィールドはない。サーバーは空の `enc_reply_to` を `400` で拒否し、ボディにこのフィールドがある場合にのみ、署名対象の部分集合の再構築に含める。したがって、このフィールドなしで署名されたメールにフィールドを追加すると、署名検証に失敗する。サーバーはプロトコルレベル 3 から返信を受け付ける（§5.1）。
 
 完全なリクエストボディはさらに `enc_key_sender`、`enc_key_recipient`、`signature`、`pow` を運ぶが、これらは署名対象の部分集合には含まれない。
 
@@ -239,11 +249,14 @@ Go サーバーはさらに、一度受け入れたトークンを拒否する�
   "enc_key": "<b64: kem_ct || (sym_key XOR ss)>",
   "enc_recipient": "<b64: nonce||ct||mac>",
   "enc_subject": "<b64: nonce||ct||mac>",
-  "enc_body": "<b64: nonce||ct||mac>"
+  "enc_body": "<b64: nonce||ct||mac>",
+  "enc_reply_to": "<b64: nonce||ct||mac>"
 }
 ```
 
-宛先・件名・本文はすべて暗号化された状態で保存される。平文なのはタイムスタンプ、サイズ、id だけである。空の `enc_recipient` / `enc_subject` 文字列は空フィールドを表す。
+`enc_reply_to` を持つのは返信の下書きだけで、その値は返信先メールの参照（§3.2）である。この下書きを送信すると返信が送られる。
+
+宛先・件名・本文・参照はすべて暗号化された状態で保存される。平文なのはタイムスタンプ、サイズ、id だけである。空の `enc_recipient` / `enc_subject` 文字列は空フィールドを表す。
 
 保存には公開鍵しか必要ないため、`compose` はパスフレーズ不要である。一覧表示・閲覧・編集・送信には KEM 秘密鍵のアンロックが必要である。下書き id はローカルで割り当てられる小さな整数である（既存の最大 id + 1、`O_EXCL` で作成）。
 
@@ -284,6 +297,7 @@ compose のエディタが扱う平文一時ファイルは `mkstemp`（モー�
 | `size` | INTEGER | 平文本文のバイト数（UI 表示専用） |
 | `signature` | TEXT | 送信者の ML-DSA-65 署名、base64 |
 | `timestamp` | INTEGER | サーバーが割り当てる UNIX タイムスタンプ |
+| `enc_reply_to` | TEXT | 返信が答えるメールの暗号化された参照（§3.2）。それ以外のメールでは `''` |
 
 ローカルアドレスは裸の名前で保存される：`@<INSTANCE_DOMAIN>` サフィックスは挿入前に取り除かれる。`recipient` と `sender` のインデックスがメールボックスクエリを支える。`rotate` はそのユーザーが送信者または受信者であるすべてのメール行を削除する。
 
@@ -320,10 +334,10 @@ compose のエディタが扱う平文一時ファイルは `mkstemp`（モー�
 `/api/version` はサーバー自身を示す：
 
 ```json
-{"version": "v0.3.0", "implementation": "go", "protocol": 2}
+{"version": "v0.4.0", "implementation": "go", "protocol": 3}
 ```
 
-`version` は `server/VERSION` にあるリリース（§12.1）で、バージョンを埋め込まずにビルドした場合は `dev` になる。`implementation` は `cf` または `go` である。`protocol` はプロトコルレベルで、レベル 2 はリクエストボディに署名する（§3.3）。このエンドポイントを持たないサーバーはレベル 1 とみなす。クライアントは、インスタンスが受け付けるリクエスト形式をバージョンではなくプロトコルレベルで判断する。
+`version` は `server/VERSION` にあるリリース（§12.1）で、バージョンを埋め込まずにビルドした場合は `dev` になる。`implementation` は `cf` または `go` である。`protocol` はプロトコルレベルで、レベル 2 はリクエストボディに署名し（§3.3）、レベル 3 は返信を受け付ける（§3.2）。このエンドポイントを持たないサーバーはレベル 1 とみなす。クライアントは、インスタンスが受け付けるリクエスト形式をバージョンではなくプロトコルレベルで判断する。
 
 `/api/client/version` は GitHub Releases API をプロキシし、クライアントのビルドを含む各チャネルの最新タグと、そのリリースの各アセットの SHA-256 ダイジェストを返す：
 
@@ -355,7 +369,9 @@ compose のエディタが扱う平文一時ファイルは `mkstemp`（モー�
 | `POST` | `/api/rotate` | 公開鍵をローテーション |
 | `DELETE` | `/api/destroy` | アカウントを抹消 |
 
-`POST /api/mail` の注目すべきステータスコード：`409`（`KEY_MISMATCH`、送信された受信者フィンガープリントがもはや一致しない）、`410`（`USER_DESTROYED`）、`413`（ペイロードが大きすぎる）、`403`（ブロック済み、不正な PoW、または古いタイムスタンプ）。
+`GET /api/mail` の一覧の各項目は `sig_hash`、すなわちそのメールの参照（§3.2）を持つ。一覧には本文、署名、`enc_reply_to` は含まれない。`GET /api/mail/:id` は返信の場合にのみ `enc_reply_to` を返す。
+
+`POST /api/mail` の注目すべきステータスコード：`409`（`KEY_MISMATCH`、送信された受信者フィンガープリントがもはや一致しない）、`410`（`USER_DESTROYED`）、`413`（ペイロードが大きすぎる）、`403`（ブロック済み、不正な PoW、または古いタイムスタンプ）、`422`（プロトコルレベル 3 未満のインスタンスへの返信、§6.2）。
 
 Go サーバーはさらに次を返すことがある：
 
@@ -387,8 +403,9 @@ Go サーバーはさらに次を返すことがある：
 `recipient` がリモートインスタンスに属する場合：
 
 1. クライアントは署名・暗号化済みペイロードを**送信者自身のインスタンス**に POST する（`POST /api/mail`）。
-2. 送信者のインスタンスは検証を終えた後、元の生ペイロードを `https://<recipientDomain>/api/mail` へ転送し、最大 15 秒まで応答を待つ。
-3. リモートインスタンスがメールを受け入れたら（`2xx`）、送信者のインスタンスは送信ボックス用に自身のコピーを保存し、`201` を返す。
+2. 送信者のインスタンスはペイロードを検証する。返信の場合は、まず受信者のインスタンスにプロトコルレベルを問い合わせる（`GET /api/version`）。レベル 3 未満なら `422` と `Recipient instance does not support replies` を返し、中継しない。古いインスタンスは返信を不正な署名として拒否するからである。受信者のインスタンスが応答しない場合、結果は `502` になる。
+3. 送信者のインスタンスは元の生ペイロードを `https://<recipientDomain>/api/mail` へ転送し、最大 15 秒まで応答を待つ。
+4. リモートインスタンスがメールを受け入れたら（`2xx`）、送信者のインスタンスは送信ボックス用に自身のコピーを保存し、`201` を返す。
 
 リレーが失敗した場合、送信者のインスタンスは何も保存しない：
 
@@ -461,7 +478,9 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_NO_INSTANCE` | インスタンス URL が未設定 |
 | `SHYAKE_ERR_BLOCKED` | HTTP 403：受信者が送信者をブロックしている |
 
-API グループ：コンテキストのライフサイクル、鍵生成、PoW 生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`）。
+API グループ：コンテキストのライフサイクル、鍵生成、PoW 生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、返信（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`）。
+
+メール一覧の項目とメール詳細は `ref`、すなわちそのメールの参照（§3.2）を持つ。メール詳細はさらに `reply_ref`、すなわち返信先メールの参照を持ち、返信でなければ `NULL` である。クライアントは `shyake_send_reply()` で返信を送る。その際、返信先メールの `ref` と、`shyake_reply_recipient()` が返す宛先を渡す。`shyake_find_ref()` は参照をメール ID に戻す。
 
 下書きと自己更新は CLI 層の機能（`src/cli/`）であり、ライブラリ API には含まれない。下書きのディスク上フォーマット（§3.8）は公開された自己暗号化プリミティブのみで構築されている。他のクライアントはこのフォーマットを再利用してもよいし、独自の方式で下書きを保存してもよい。
 
@@ -527,6 +546,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `whoami` | 現在のプロファイルを表示（ネットワーク不使用） |
 | `send -t <to> [-s <subj>] [file]` | メールを送信（テキストのみ）。失敗時は下書きとして保存 |
 | `send --draft <id> [-t <to>] [-s <subj>]` | 保存済み下書きを送信（成功時に削除） |
+| `reply [saved] <id> [-s <subj>] [file]` | メールに返信（§3.2）。失敗時は下書きとして保存 |
 | `compose [<id>]` | 暗号化下書きの作成・編集（§3.8） |
 | `check inbox\|sent [opts]` | メールボックスのメタデータを一覧表示 |
 | `check <id>` | 単一メールのヘッダーを確認 |
@@ -549,7 +569,7 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `man [<command>]` | ドキュメントを表示 |
 | `version` | バージョン文字列を表示 |
 
-`check inbox|sent` は `--count`、`--json`、`--csv`、`--no-header` を受け付ける。`send` の宛先はローカル（`username`）またはリモート（`username@instance`）を指定でき、バイナリデータは呼び出し側で base64 エンコードする必要がある。`enc`/`dec` はデバッグとテスト用途を想定している。
+`check inbox|sent` は `--count`、`--json`、`--csv`、`--no-header` を受け付ける。返信に対しては、`check <id>`、`fetch`、`read` が返信先メールの ID を示す `RE:` 行を表示する。保存したコピーしか残っていない場合は `<id> (saved)`、メールがもう存在しない場合は `(unavailable)` と表示する。`reply` の件名は既定で `Re: <subject>` になる。`send --draft` は返信の下書きの宛先を変更できない。`send` の宛先はローカル（`username`）またはリモート（`username@instance`）を指定でき、バイナリデータは呼び出し側で base64 エンコードする必要がある。`enc`/`dec` はデバッグとテスト用途を想定している。
 
 ---
 

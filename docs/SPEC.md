@@ -3,8 +3,8 @@
 Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 <table>
-<tr><td>Version</td><td>0.3</td></tr>
-<tr><td>Last updated</td><td>2026-09-23</td></tr>
+<tr><td>Version</td><td>0.4</td></tr>
+<tr><td>Last updated</td><td>2026-10-10</td></tr>
 </table>
 
 ---
@@ -132,6 +132,29 @@ secret with its KEM secret key. It XORs the secret against the
 encrypted key field to recover the symmetric key, then decrypts the
 content.
 
+**Replies.** A reply names the mail it answers by that mail's
+**reference**: the lowercase hex SHA-256 of the mail's `signature`
+field, as the string the server stores (64 characters). A relay
+forwards the signed payload byte for byte (§6.2), so both instances
+store the same signature. The sender and the recipient therefore
+compute the same reference, though their `mail_id`s differ.
+
+The client encrypts the reference with the reply's symmetric key, as
+it does the subject, and sends it as `enc_reply_to`. The server
+stores it but cannot read it: it learns that a mail is a reply, but
+not which mail it answers.
+
+A reply goes to the other party of the mail it answers: the sender of
+a received mail, or the recipient of a sent one. A mail that a user
+sent to themselves is answered to themselves. This is a client
+convention. The server cannot check it.
+
+To show which mail a reply answers, the client looks for the
+reference among the `sig_hash` values of its inbox and sent listings
+(§5.2), then among its saved mail (§9). The servers have no lookup by
+reference, so they never learn which mail the client looks for. A
+burned mail is no longer found.
+
 The standalone file encryption commands (`enc` / `dec`) use the same
 ML-KEM-768 + ChaCha20-Poly1305 construction. They store data in a
 length-prefixed binary container (`.enc` file).
@@ -203,6 +226,13 @@ subset below, in the field order the client produces:
   "size": 512
 }
 ```
+
+A reply (§3.2) adds `"enc_reply_to": "..."` after `enc_body`. Any
+other mail has no such field. The server rejects an empty
+`enc_reply_to` with `400`, and it rebuilds the signed subset with
+the field only when the body has it. A field added to a mail signed
+without it therefore fails the signature. Servers accept replies from
+protocol level 3 (§5.1).
 
 The full request body also carries `enc_key_sender`,
 `enc_key_recipient`, `signature`, and `pow`. These fields are not
@@ -316,12 +346,16 @@ ML-KEM-768-encapsulates that key to the user's own KEM public key.
   "enc_key": "<b64: kem_ct || (sym_key XOR ss)>",
   "enc_recipient": "<b64: nonce||ct||mac>",
   "enc_subject": "<b64: nonce||ct||mac>",
-  "enc_body": "<b64: nonce||ct||mac>"
+  "enc_body": "<b64: nonce||ct||mac>",
+  "enc_reply_to": "<b64: nonce||ct||mac>"
 }
 ```
 
-The client encrypts recipient, subject, and body at rest. Only
-timestamps, size, and the id stay in plaintext. An empty
+Only the draft of a reply has `enc_reply_to`: the reference of the
+mail it answers (§3.2). Sending the draft sends a reply.
+
+The client encrypts recipient, subject, body, and reference at rest.
+Only timestamps, size, and the id stay in plaintext. An empty
 `enc_recipient` or `enc_subject` string means the field is empty.
 
 Saving a draft needs only the public key, so `compose` requires no
@@ -380,6 +414,7 @@ strings. It deletes all mail and block rows for the user. The server
 | `size` | INTEGER | Plaintext body byte count (UI display only) |
 | `signature` | TEXT | Sender's ML-DSA-65 signature, base64 |
 | `timestamp` | INTEGER | Server-assigned UNIX timestamp |
+| `enc_reply_to` | TEXT | Encrypted reference of the mail a reply answers (§3.2); `''` for other mail |
 
 The server stores local addresses bare: it strips the
 `@<INSTANCE_DOMAIN>` suffix before insertion. Indexes on `recipient`
@@ -430,13 +465,13 @@ enabled.
 `/api/version` identifies the server:
 
 ```json
-{"version": "v0.3.0", "implementation": "go", "protocol": 2}
+{"version": "v0.4.0", "implementation": "go", "protocol": 3}
 ```
 
 `version` is the release in `server/VERSION` (§12.1), or `dev` for a
 build without one. `implementation` is `cf` or `go`. `protocol` is
-the protocol level. Level 2 signs request bodies (§3.3). A server
-without this endpoint is level 1. Clients use the level, not the
+the protocol level. Level 2 signs request bodies (§3.3). Level 3
+accepts replies (§3.2). A server without this endpoint is level 1. Clients use the level, not the
 version, to decide what an instance accepts.
 
 `/api/client/version` proxies the GitHub Releases API. It returns
@@ -478,10 +513,16 @@ headers.
 | `POST` | `/api/rotate` | Rotate public keys |
 | `DELETE` | `/api/destroy` | Destroy account |
 
+Each item of the `GET /api/mail` listing has a `sig_hash`: the
+reference of that mail (§3.2). The listing has no bodies,
+signatures, or `enc_reply_to`. `GET /api/mail/:id` returns
+`enc_reply_to` only for a reply.
+
 Notable status codes on `POST /api/mail`: `409` (`KEY_MISMATCH`, the
 supplied recipient fingerprint no longer matches), `410`
 (`USER_DESTROYED`), `413` (payload too large), `403` (blocked, bad
-PoW, or stale timestamp).
+PoW, or stale timestamp), `422` (a reply to an instance below level
+3, §6.2).
 
 The Go server can also answer:
 
@@ -527,10 +568,16 @@ When `recipient` belongs to a remote instance:
 
 1. The client posts the signed, encrypted payload to the **sender's
    own instance** (`POST /api/mail`).
-2. The sender's instance verifies it, then forwards the original raw
+2. The sender's instance verifies it. For a reply, it first asks the
+   recipient's instance for its protocol level (`GET /api/version`).
+   Below level 3, it answers `422` with `Recipient instance does not
+   support replies` and relays nothing: the older instance would
+   reject the reply as a bad signature. If the recipient's instance
+   does not answer, the result is `502`.
+3. The sender's instance forwards the original raw
    payload to `https://<recipientDomain>/api/mail`. It waits for the
    answer, for at most 15 s.
-3. If the remote instance accepts the mail (`2xx`), the sender's
+4. If the remote instance accepts the mail (`2xx`), the sender's
    instance stores its own copy for the sent box and answers `201`.
 
 If the relay fails, the sender's instance stores nothing:
@@ -658,7 +705,8 @@ Error codes are a typed enum
 
 API groups: context lifecycle, key generation, PoW minting,
 registration, mail (`shyake_send`, `shyake_check`, `shyake_fetch`,
-`shyake_check_one`, `shyake_burn`), local saved mail
+`shyake_check_one`, `shyake_burn`), replies (`shyake_send_reply`,
+`shyake_reply_recipient`, `shyake_find_ref`), local saved mail
 (`shyake_save_mail`, `shyake_read_saved`, `shyake_check_saved_one`,
 `shyake_list_saved`), account (`shyake_block`, `shyake_list_blocks`,
 `shyake_rotate`, `shyake_destroy`), fingerprints
@@ -666,6 +714,13 @@ registration, mail (`shyake_send`, `shyake_check`, `shyake_fetch`,
 (`shyake_selfenc_begin`, `shyake_selfdec_new`, `shyake_selfdec_key`,
 `shyake_selfdec_free`, `shyake_seal_b64`, `shyake_unseal_b64`), and
 standalone file encryption (`shyake_enc_file`, `shyake_dec_file`).
+
+Mail entries and details carry `ref`, the mail's reference (§3.2). A
+detail also carries `reply_ref`, the reference of the mail it
+answers, or `NULL`. A client replies with `shyake_send_reply()`,
+passing the `ref` of the mail it answers and the recipient that
+`shyake_reply_recipient()` gives. `shyake_find_ref()` turns a
+reference back into a mail ID.
 
 Drafts and self-update are CLI-layer features (`src/cli/`), not part
 of the library API. The public self-encryption primitives fully
@@ -739,6 +794,7 @@ Recognized environment variables:
 | `whoami` | Print current profile (no network) |
 | `send -t <to> [-s <subj>] [file]` | Send a mail (text only). Saves as a draft if it fails |
 | `send --draft <id> [-t <to>] [-s <subj>]` | Send a stored draft (deleted on success) |
+| `reply [saved] <id> [-s <subj>] [file]` | Reply to a mail (§3.2). Saves as a draft if it fails |
 | `compose [<id>]` | Compose or edit an encrypted draft (§3.8) |
 | `check inbox\|sent [opts]` | List mailbox metadata |
 | `check <id>` | Inspect a single mail header |
@@ -762,7 +818,11 @@ Recognized environment variables:
 | `version` | Print version string |
 
 `check inbox|sent` accepts `--count`, `--json`, `--csv`, and
-`--no-header`. `send` recipients may be local (`username`) or remote
+`--no-header`. For a reply, `check <id>`, `fetch`, and `read` print
+an `RE:` line with the ID of the mail it answers. They print
+`<id> (saved)` when only a saved copy is left, and `(unavailable)`
+when the mail is gone. `reply` subjects default to `Re: <subject>`.
+`send --draft` cannot change the recipient of a reply's draft. `send` recipients may be local (`username`) or remote
 (`username@instance`). The caller must base64-encode binary data.
 Use `enc` and `dec` for debugging and testing.
 

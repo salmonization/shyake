@@ -122,3 +122,32 @@ func TestImportRejectsOtherDatabases(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A Worker database with replies keeps their references.
+func TestImportD1Replies(t *testing.T) {
+	dir := t.TempDir()
+	reply, err := os.ReadFile("../../../../cf/migrations/0002_reply.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dump := filepath.Join(dir, "export.sql")
+	body := workerSchema(t) + string(reply) + `
+INSERT INTO users VALUES ('alice', 'kemA', 'sigA', 100);
+INSERT INTO mail VALUES ('m1', 'alice', 'alice', 'ks', 'kr', 's', 'b', 1, 'sig-1', 1000, '');
+INSERT INTO mail VALUES ('m2', 'alice', 'alice', 'ks', 'kr', 's', 'b', 1, 'sig-2', 1001, 'ref');
+`
+	if err := os.WriteFile(dump, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dst, err := Open(context.Background(), filepath.Join(dir, "go.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dst.Close()
+	if _, err := ImportD1(context.Background(), dst, dump, "old.example"); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := dst.GetMail(context.Background(), "m2", "alice"); m.EncReplyTo != "ref" {
+		t.Errorf("m2: %+v", m)
+	}
+}

@@ -47,7 +47,8 @@ static void emit(cJSON *arr, const char *kind, cJSON *fields)
 	free(msg);
 }
 
-static void mail(cJSON *arr, const char *subject, double size)
+static void mail(cJSON *arr, const char *subject, const char *reply_to,
+		 double size)
 {
 	cJSON *f = cJSON_CreateObject();
 	cJSON_AddStringToObject(f, "sender", "alice@a.example");
@@ -56,6 +57,8 @@ static void mail(cJSON *arr, const char *subject, double size)
 				"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08");
 	cJSON_AddStringToObject(f, "enc_subject", subject);
 	cJSON_AddStringToObject(f, "enc_body", "Y2lwaGVydGV4dA==");
+	if (reply_to)
+		cJSON_AddStringToObject(f, "enc_reply_to", reply_to);
 	cJSON_AddStringToObject(f, "timestamp", "1749513600");
 	cJSON_AddNumberToObject(f, "size", size);
 	emit(arr, "mail", f);
@@ -80,10 +83,12 @@ int main(void)
 	cJSON_AddStringToObject(r, "timestamp", "1749513600");
 	emit(arr, "register", r);
 
-	mail(arr, "c3ViamVjdA==", 512);
-	mail(arr, "", 0);
+	mail(arr, "c3ViamVjdA==", NULL, 512);
+	mail(arr, "", NULL, 0);
+	mail(arr, "UmU6IHN1YmplY3Q=", "cmVwbHktcmVm", 64);
 	/* every escape class, plus what encoding/json would mangle */
-	mail(arr, "q\"b\\s/ <&> \b\f\n\r\t \x01\x1f \x7f \xc3\xa9 \xe2\x80\xa8", 196608);
+	mail(arr, "q\"b\\s/ <&> \b\f\n\r\t \x01\x1f \x7f \xc3\xa9 \xe2\x80\xa8", NULL,
+	     196608);
 
 	cJSON *h = cJSON_CreateObject();
 	cJSON_AddStringToObject(h, "method", "GET");

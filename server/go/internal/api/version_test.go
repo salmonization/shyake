@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/salmonization/shyake/server/go/internal/protocol"
 )
 
 // A server-only release is not offered to clients.
@@ -31,7 +33,7 @@ func TestSummarizeSkipsServerOnlyReleases(t *testing.T) {
 func TestServerVersion(t *testing.T) {
 	e := newEnv(t)
 	c, out := e.do("GET", "/api/version", nil, nil)
-	if c != 200 || out["implementation"] != "go" || out["protocol"] != float64(2) ||
+	if c != 200 || out["implementation"] != "go" || out["protocol"] != float64(protocol.Level) ||
 		out["version"] != "dev" {
 		t.Errorf("%d %v", c, out)
 	}

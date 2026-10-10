@@ -41,6 +41,11 @@ type Mail struct {
 	Size            int64
 	Signature       string
 	Timestamp       int64
+	// EncReplyTo is the encrypted reference of a reply, "" otherwise.
+	EncReplyTo string
+	// Ref is the hex SHA-256 of Signature, the mail's reference.
+	// ListMail fills it; it is never written.
+	Ref string
 }
 
 // Block is one blocklist entry of a user.
@@ -71,7 +76,8 @@ type Store interface {
 	InsertMail(ctx context.Context, m Mail) (id string, dup bool, err error)
 	// MailIDBySignature finds an already stored copy of a submission.
 	MailIDBySignature(ctx context.Context, signature string) (string, error)
-	// ListMail lists a mailbox newest first, without bodies.
+	// ListMail lists a mailbox newest first, without bodies,
+	// signatures and reply references, but with Ref.
 	ListMail(ctx context.Context, username string, sent bool) ([]Mail, error)
 	// GetMail returns a mail only to its sender or recipient.
 	GetMail(ctx context.Context, id, username string) (Mail, error)

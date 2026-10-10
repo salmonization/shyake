@@ -65,14 +65,14 @@ typedef struct {
 void cli_render_mail_list(const shyake_mail_list *list,
 			  const cli_render_opts *opts);
 
-/* Mail detail rendering */
-void cli_render_mail_detail(const shyake_mail_detail *d, int raw, int no_color,
-			    int plain, int tz_hours, const char *time_fmt,
-			    const char *time_fmt_recent);
+/* Mail detail rendering; re: the mail answered, NULL if none */
+void cli_render_mail_detail(const shyake_mail_detail *d, const char *re,
+			    int raw, int no_color, int plain, int tz_hours,
+			    const char *time_fmt, const char *time_fmt_recent);
 
 /* Single mail header view (check <id>) */
-void cli_render_mail_header(const shyake_mail_detail *d, int no_color,
-			    int tz_hours, const char *time_fmt,
+void cli_render_mail_header(const shyake_mail_detail *d, const char *re,
+			    int no_color, int tz_hours, const char *time_fmt,
 			    const char *time_fmt_recent);
 
 #endif /* SHYAKE_DISPLAY_H */

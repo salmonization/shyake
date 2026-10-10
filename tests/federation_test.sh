@@ -5,9 +5,10 @@
 #   cd client && make && cd ..
 #   bash tests/federation_test.sh
 #
-# Covers a relay in each direction, a relay to an instance that is down
-# (the client keeps a draft and sends it once the instance is back), and
-# a block that the recipient's instance enforces on relayed mail.
+# Covers a relay in each direction, a reply across instances, a relay
+# to an instance that is down (the client keeps a draft and sends it
+# once the instance is back), and a block that the recipient's instance
+# enforces on relayed mail.
 #
 # Requires: go, curl, a built client (client/bin/shyake). Ports 8791 and
 # 8792 must be free.
@@ -99,6 +100,19 @@ check "bobby replies" "$out" "Mail sent."
 sleep 1
 out=$("$CLI" -c "$WORK/alice" --plain check inbox 2>&1)
 check "alice receives the reply" "$out" "fed-2"
+
+section "2b. a reply across instances"
+out=$(echo "answering fed-1" | "$CLI" -c "$WORK/bobby" reply "$id" 2>&1)
+check "bobby replies to fed-1" "$out" "Replying to alice@$A"
+check "the reply is sent" "$out" "Mail sent."
+re_id=$("$CLI" -c "$WORK/alice" --plain check inbox 2>/dev/null |
+    awk '/Re: fed-1/{print $1}')
+sent_id=$("$CLI" -c "$WORK/alice" --plain check sent 2>/dev/null |
+    awk '/fed-1/{print $1}')
+out=$("$CLI" -c "$WORK/alice" --plain check "$re_id" 2>&1)
+check "alice sees what it answers, by her own ID" "$out" "RE:   $sent_id"
+out=$(echo "and more" | "$CLI" -c "$WORK/alice" reply "$sent_id" 2>&1)
+check "alice follows up on her sent mail" "$out" "Replying to bobby@$B"
 
 section "3. relay to an instance that is down"
 # A caches bobby's key for a minute: send once to fill the cache, so the

@@ -193,6 +193,7 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 		EncKeyRecipient string       `json:"enc_key_recipient"`
 		EncSubject      *string      `json:"enc_subject"`
 		EncBody         string       `json:"enc_body"`
+		EncReplyTo      *string      `json:"enc_reply_to"`
 		Size            *json.Number `json:"size"`
 		Timestamp       string       `json:"timestamp"`
 		Signature       string       `json:"signature"`
@@ -208,6 +209,16 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 		m.Signature == "" || m.Pow == "" {
 		fail(w, http.StatusBadRequest, "Missing required fields")
 		return
+	}
+	// a reply's reference is signed only when present: an empty one
+	// would sign differently in the Worker
+	encReplyTo := ""
+	if m.EncReplyTo != nil {
+		if *m.EncReplyTo == "" {
+			fail(w, http.StatusBadRequest, "Invalid enc_reply_to")
+			return
+		}
+		encReplyTo = *m.EncReplyTo
 	}
 	// JSON.stringify prints an integral size as plain digits; anything
 	// else could not have been signed the way the client signs it
@@ -289,7 +300,7 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg := protocol.MailMessage(m.Sender, m.Recipient, m.Fingerprint,
-		*m.EncSubject, m.EncBody, m.Timestamp, size)
+		*m.EncSubject, m.EncBody, encReplyTo, m.Timestamp, size)
 	if !s.verify(senderSig, msg, m.Signature) && (!senderCached ||
 		!s.verifyFresh(ctx, sender, msg, m.Signature)) {
 		fail(w, http.StatusUnauthorized, "Invalid signature")
@@ -314,6 +325,11 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, message{Message: "Mail sent", ID: id})
 		return
 	}
+	// an older instance would reject the reply as a bad signature
+	if encReplyTo != "" && !recipient.IsLocal() &&
+		!s.remoteTakesReplies(w, r, recipient.Domain()) {
+		return
+	}
 	if !s.spent.Add(sha256.Sum256([]byte(m.Pow)), s.now()) {
 		fail(w, http.StatusForbidden, "Invalid Proof of Work")
 		return
@@ -334,12 +350,29 @@ func (s *Server) sendMail(w http.ResponseWriter, r *http.Request) {
 		Size:            size,
 		Signature:       m.Signature,
 		Timestamp:       s.now().Unix(),
+		EncReplyTo:      encReplyTo,
 	})
 	if err != nil {
 		s.internal(w, "mail: insert", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, message{Message: "Mail sent", ID: id})
+}
+
+// remoteTakesReplies reports whether the recipient's instance accepts
+// replies, and answers the client when it does not.
+func (s *Server) remoteTakesReplies(w http.ResponseWriter, r *http.Request, domain string) bool {
+	level, err := s.fed.Level(r.Context(), domain)
+	switch {
+	case err != nil:
+		s.log.Warn("relay failed", "route", r.Pattern, "err", err)
+		fail(w, http.StatusBadGateway, "Recipient instance unreachable")
+	case level < protocol.ReplyLevel:
+		fail(w, http.StatusUnprocessableEntity, "Recipient instance does not support replies")
+	default:
+		return true
+	}
+	return false
 }
 
 // relay forwards a submission to the recipient's instance and reports
@@ -387,6 +420,8 @@ type mailJSON struct {
 	Size            int64   `json:"size"`
 	Signature       *string `json:"signature,omitempty"`
 	Timestamp       int64   `json:"timestamp"`
+	EncReplyTo      string  `json:"enc_reply_to,omitempty"`
+	SigHash         string  `json:"sig_hash,omitempty"`
 }
 
 func toJSON(m store.Mail, full bool) mailJSON {
@@ -395,6 +430,9 @@ func toJSON(m store.Mail, full bool) mailJSON {
 		EncSubject: m.EncSubject, Size: m.Size, Timestamp: m.Timestamp}
 	if full {
 		j.EncBody, j.Signature = &m.EncBody, &m.Signature
+		j.EncReplyTo = m.EncReplyTo
+	} else {
+		j.SigHash = m.Ref
 	}
 	return j
 }

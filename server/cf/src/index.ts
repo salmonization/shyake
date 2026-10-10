@@ -6,7 +6,9 @@ import {
   normalizeAddress,
   addressDomain,
   relayMail,
+  remoteLevel,
   readSignedBody,
+  sha256Hex,
 } from './utils';
 
 // Import the Web build which allows manual instantiation
@@ -43,8 +45,10 @@ export interface Env {
  * `wrangler deploy --define`; absent under a plain `wrangler dev` */
 declare const SERVER_VERSION: string;
 
-/* protocol level: 2 signs the bodies of header-authenticated requests */
-const PROTOCOL_LEVEL = 2;
+/* protocol level: 2 signs the bodies of header-authenticated
+ * requests, 3 accepts replies (enc_reply_to) */
+const PROTOCOL_LEVEL = 3;
+const REPLY_LEVEL = 3;
 
 const app = new Hono<{Bindings: Env}>();
 
@@ -329,6 +333,7 @@ app.post('/api/mail', async c => {
     enc_key_recipient,
     enc_subject,
     enc_body,
+    enc_reply_to,
     size,
     timestamp,
     signature,
@@ -349,6 +354,12 @@ app.post('/api/mail', async c => {
     !pow
   ) {
     return c.json({error: 'Missing required fields'}, 400);
+  }
+
+  /* a reply's reference is signed only when present */
+  const isReply = enc_reply_to !== undefined && enc_reply_to !== null;
+  if (isReply && (typeof enc_reply_to !== 'string' || enc_reply_to === '')) {
+    return c.json({error: 'Invalid enc_reply_to'}, 400);
   }
 
   const isPowValid = await verifyPoW(pow, sender);
@@ -402,6 +413,7 @@ app.post('/api/mail', async c => {
       recipient_kem_fingerprint,
       enc_subject,
       enc_body,
+      enc_reply_to: isReply ? enc_reply_to : undefined,
       timestamp,
       size,
     };
@@ -450,6 +462,19 @@ app.post('/api/mail', async c => {
    * nothing behind, and the client keeps the mail as a draft */
   const recipientDomain = addressDomain(recipient, c.env.INSTANCE_DOMAIN);
   if (recipientDomain !== c.env.INSTANCE_DOMAIN.toLowerCase()) {
+    /* an older instance would reject the reply as a bad signature */
+    if (isReply) {
+      const level = await remoteLevel(recipientDomain);
+      if (level === null) {
+        return c.json({error: 'Recipient instance unreachable'}, 502);
+      }
+      if (level < REPLY_LEVEL) {
+        return c.json(
+          {error: 'Recipient instance does not support replies'},
+          422,
+        );
+      }
+    }
     const refused = await relayMail(recipientDomain, rawBody);
     if (refused) {
       return c.json({error: refused.error}, refused.status);
@@ -460,8 +485,8 @@ app.post('/api/mail', async c => {
     await c.env.DB.prepare(
       'INSERT INTO mail (mail_id, sender, recipient, ' +
         'enc_key_sender, enc_key_recipient, enc_subject, ' +
-        'enc_body, size, signature, timestamp) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'enc_body, size, signature, timestamp, enc_reply_to) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
       .bind(
         mail_id,
@@ -474,6 +499,7 @@ app.post('/api/mail', async c => {
         size,
         signature,
         serverTs,
+        isReply ? enc_reply_to : '',
       )
       .run();
 
@@ -536,13 +562,20 @@ app.get('/api/mail', async c => {
     const column = type === 'sent' ? 'sender' : 'recipient';
     const {results} = await c.env.DB.prepare(
       `SELECT mail_id, sender, recipient, enc_key_sender, ` +
-        `enc_key_recipient, enc_subject, size, timestamp ` +
+        `enc_key_recipient, enc_subject, size, timestamp, signature ` +
         `FROM mail WHERE ${column} = ? ORDER BY timestamp DESC`,
     )
       .bind(username)
       .all();
 
-    return c.json({mail: results}, 200);
+    /* each mail's reference: the hash of its signature */
+    const mail = await Promise.all(
+      results.map(async (r: any) => {
+        const {signature, ...rest} = r;
+        return {...rest, sig_hash: await sha256Hex(signature as string)};
+      }),
+    );
+    return c.json({mail}, 200);
   } catch (e) {
     return c.json({error: 'Database error'}, 500);
   }
@@ -608,6 +641,10 @@ app.get('/api/mail/:id', async c => {
       return c.json({error: 'Mail not found'}, 404);
     }
 
+    /* only a reply carries enc_reply_to */
+    if (!mail.enc_reply_to) {
+      delete mail.enc_reply_to;
+    }
     return c.json(mail, 200);
   } catch (e) {
     return c.json({error: 'Database error'}, 500);

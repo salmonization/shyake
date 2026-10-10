@@ -157,13 +157,22 @@ func (e *env) authed(u *user, method, path string, body []byte) (int, map[string
 // mailBody builds a POST /api/mail body; sender and recipient are the
 // strings the client would send.
 func mailBody(from *user, sender, recipient, fp string) []byte {
+	return replyBody(from, sender, recipient, fp, "")
+}
+
+// replyBody is mailBody with an enc_reply_to, when replyTo is not "".
+func replyBody(from *user, sender, recipient, fp, replyTo string) []byte {
 	ts := now()
 	subj, enc := "c3Vi", "Ym9keQ=="
-	sig := from.sign(protocol.MailMessage(sender, recipient, fp, subj, enc, ts, 4))
-	b, _ := json.Marshal(map[string]any{"sender": sender, "recipient": recipient,
+	sig := from.sign(protocol.MailMessage(sender, recipient, fp, subj, enc, replyTo, ts, 4))
+	m := map[string]any{"sender": sender, "recipient": recipient,
 		"recipient_kem_fingerprint": fp, "enc_subject": subj, "enc_body": enc,
 		"timestamp": ts, "size": 4, "enc_key_sender": "ks", "enc_key_recipient": "kr",
-		"signature": sig, "pow": pow(sender)})
+		"signature": sig, "pow": pow(sender)}
+	if replyTo != "" {
+		m["enc_reply_to"] = replyTo
+	}
+	b, _ := json.Marshal(m)
 	return b
 }
 
@@ -398,5 +407,100 @@ func TestBodySignature(t *testing.T) {
 	}
 	if c, _ := e.authed(next, "GET", "/api/block", nil); c != 200 {
 		t.Errorf("new key after rotate: %d", c)
+	}
+}
+
+// A reply stores its encrypted reference and hands it back; listings
+// carry each mail's own reference, the hash of its signature.
+func TestReply(t *testing.T) {
+	e := newEnv(t)
+	alice, bobby := newUserRegistered(e, "alice"), newUserRegistered(e, "bobby")
+
+	first := mailBody(alice, "alice", "bobby", bobby.fp)
+	e.do("POST", "/api/mail", first, nil)
+	var sent struct{ Signature string }
+	json.Unmarshal(first, &sent)
+	sum := sha256.Sum256([]byte(sent.Signature))
+	_, out := e.authed(bobby, "GET", "/api/mail?type=inbox", nil)
+	item := out["mail"].([]any)[0].(map[string]any)
+	if item["sig_hash"] != hex.EncodeToString(sum[:]) {
+		t.Errorf("listed sig_hash %v, want %x", item["sig_hash"], sum)
+	}
+	if _, ok := item["enc_reply_to"]; ok {
+		t.Error("listing includes enc_reply_to")
+	}
+	_, out = e.authed(bobby, "GET", "/api/mail/"+item["mail_id"].(string), nil)
+	if _, ok := out["enc_reply_to"]; ok {
+		t.Error("a mail that is no reply has enc_reply_to")
+	}
+
+	code, out := e.do("POST", "/api/mail", replyBody(bobby, "bobby", "alice", alice.fp, "cmVm"), nil)
+	if code != 201 {
+		t.Fatalf("reply: %d %v", code, out)
+	}
+	_, out = e.authed(alice, "GET", "/api/mail/"+out["id"].(string), nil)
+	if out["enc_reply_to"] != "cmVm" {
+		t.Errorf("fetched enc_reply_to %v", out["enc_reply_to"])
+	}
+
+	// the reference is signed: added, swapped or empty, it fails
+	var m map[string]any
+	json.Unmarshal(mailBody(bobby, "bobby", "alice", alice.fp), &m)
+	m["enc_reply_to"] = "cmVm"
+	b, _ := json.Marshal(m)
+	if c, _ := e.do("POST", "/api/mail", b, nil); c != 401 {
+		t.Errorf("unsigned enc_reply_to: %d, want 401", c)
+	}
+	json.Unmarshal(replyBody(bobby, "bobby", "alice", alice.fp, "cmVm"), &m)
+	m["enc_reply_to"] = "b3RoZXI="
+	b, _ = json.Marshal(m)
+	if c, _ := e.do("POST", "/api/mail", b, nil); c != 401 {
+		t.Errorf("swapped enc_reply_to: %d, want 401", c)
+	}
+	m["enc_reply_to"] = ""
+	b, _ = json.Marshal(m)
+	if c, _ := e.do("POST", "/api/mail", b, nil); c != 400 {
+		t.Errorf("empty enc_reply_to: %d, want 400", c)
+	}
+}
+
+// A reply to an instance below protocol 3 is refused before the relay.
+func TestReplyToOldInstance(t *testing.T) {
+	carol := newUser("carol")
+	level := 2
+	relayed := 0
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/version":
+			fmt.Fprintf(w, `{"version":"v0","implementation":"go","protocol":%d}`, level)
+		case "/api/pubkey/carol":
+			json.NewEncoder(w).Encode(map[string]string{"kem_pubkey": carol.kemB64,
+				"sig_pubkey": carol.sigB64})
+		case "/api/mail":
+			relayed++
+			w.WriteHeader(201)
+			io.WriteString(w, `{"message":"Mail sent","id":"x"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer remote.Close()
+	e := newEnv(t, func(c *config.Config) { c.FederationEnabled = true })
+	alice := newUserRegistered(e, "alice")
+	to := "carol@" + strings.TrimPrefix(remote.URL, "http://")
+
+	reply := func() int {
+		c, _ := e.do("POST", "/api/mail", replyBody(alice, "alice@"+domain, to, carol.fp, "cmVm"), nil)
+		return c
+	}
+	if c := reply(); c != 422 || relayed != 0 {
+		t.Errorf("reply to level 2: %d (relayed %d), want 422", c, relayed)
+	}
+	if c, _ := e.do("POST", "/api/mail", mailBody(alice, "alice@"+domain, to, carol.fp), nil); c != 201 {
+		t.Errorf("plain mail to level 2: %d, want 201", c)
+	}
+	level = 3
+	if c := reply(); c != 201 || relayed != 2 {
+		t.Errorf("reply to level 3: %d (relayed %d), want 201", c, relayed)
 	}
 }

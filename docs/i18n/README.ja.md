@@ -151,6 +151,33 @@ base64 < image.png | shyake send -t flat_white -s "image.png"
 tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 ```
 
+**reply コマンド**：
+
+`reply` はメールに返信します。返信は相手方に送られます。受け取ったメールなら送信者に、自分が送ったメールなら受信者に送られます。自分自身に送ったメールへの返信は自分自身に送られます。件名は既定で `Re: <元の件名>` になり、`-s` で変更できます。
+
+```sh
+shyake reply fQBjZnvJ56 < answer.txt
+shyake reply fQBjZnvJ56 -s "Another subject" < answer.txt
+```
+
+`save` で保存したメールに返信するには（元のメールが焼却された後でも）：
+
+```sh
+shyake reply saved fQBjZnvJ56 < answer.txt
+```
+
+`check <id>`、`fetch`、`read` は、返信がどのメールに答えているかを `RE:` 行に表示します。ローカルに保存したコピーしか残っていない場合は ID の後に `(saved)`、メールがもう存在しない場合は `(unavailable)` と表示します。
+
+```
+FROM:  flat_white
+TO:    salmon
+RE:    fQBjZnvJ56
+DATE:  2026-10-10 09:30
+SUBJ:  Re: Coffee tomorrow?
+```
+
+返信がどのメールに答えているかをサーバーは読めません。クライアントがその情報をメールと一緒に暗号化するためです。自分のインスタンスと受信者のインスタンスの両方で、サーバー v0.4.0 以降が動作している必要があります。返信に失敗した場合は `send` と同様に下書きとして保存され、`shyake send -d <id>` で送信しても返信のままです。
+
 **compose コマンド**：
 
 `compose` はメール草稿の作成用コマンドで、個人的な日記などの用途にも使えます。指定したエディタ（デフォルトは `ed`）でシンプルなテンプレートを開き、結果を ML-KEM-768 + ChaCha20-Poly1305 で自分自身の鍵に暗号化して `~/.config/shyake/drafts/` に下書きとして保存します。

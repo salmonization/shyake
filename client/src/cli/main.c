@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <ctype.h>
@@ -70,14 +71,34 @@ static void print_send_error(shyake_ctx *ctx, shyake_err ret,
 		shyake_last_error(ctx), recipient);
 }
 
+/* the RE: line of a reply: where the mail it answers is now */
+static char *describe_reply(shyake_ctx *ctx, const shyake_mail_detail *d)
+{
+	if (!d->reply_ref)
+		return NULL;
+	int saved = 0;
+	char *id = shyake_find_ref(ctx, d->reply_ref, &saved);
+	if (!id)
+		return strdup("(unavailable)");
+	if (!saved)
+		return id;
+	usize n = strlen(id) + sizeof(" (saved)");
+	char *s = malloc(n);
+	if (s)
+		snprintf(s, n, "%s (saved)", id);
+	free(id);
+	return s;
+}
+
 /* keep the text of a send that failed, so it is not lost */
 static void rescue_draft(shyake_ctx *ctx, const char *config_dir,
 			 const char *recipient, const char *subject,
-			 const u8 *body, usize body_len, int retry)
+			 const char *reply_ref, const u8 *body, usize body_len,
+			 int retry)
 {
 	char *new_id = NULL;
-	if (cli_save_draft(ctx, config_dir, recipient, subject, body, body_len,
-			   NULL, &new_id) != SHYAKE_OK) {
+	if (cli_save_draft(ctx, config_dir, recipient, subject, reply_ref, body,
+			   body_len, NULL, &new_id) != SHYAKE_OK) {
 		print_drafts_error("Draft save failed.");
 		return;
 	}
@@ -91,6 +112,36 @@ static void rescue_draft(shyake_ctx *ctx, const char *config_dir,
 	} else {
 		printf("Saved as a draft.\n");
 	}
+}
+
+/* why a subject cannot be sent, or NULL when it can */
+static const char *subject_problem(const char *subject)
+{
+	if (!subject || !subject[0])
+		return "The subject cannot be empty.";
+	if (strlen(subject) > 128)
+		return "The subject cannot exceed 128 bytes.";
+	for (const char *p = subject; *p; p++)
+		if (!isspace((unsigned char)*p))
+			return NULL;
+	return "The subject cannot be only whitespace.";
+}
+
+/* "Re: <subject>", kept within 128 bytes on a UTF-8 boundary */
+static char *reply_subject(const char *orig)
+{
+	const char *prefix = strncasecmp(orig, "Re:", 3) == 0 ? "" : "Re: ";
+	usize n = strlen(prefix) + strlen(orig);
+	if (n > 128) {
+		n = 128;
+		while (n > strlen(prefix) &&
+		       ((u8)orig[n - strlen(prefix)] & 0xC0) == 0x80)
+			n--;
+	}
+	char *s = malloc(n + 1);
+	if (s)
+		snprintf(s, n + 1, "%s%s", prefix, orig);
+	return s;
 }
 
 int cmd_init(const char *config_dir);
@@ -695,6 +746,19 @@ int main(int argc, char *argv[])
 				free(config_dir);
 				return EXIT_FAILURE;
 			}
+			/* a reply goes where its draft says */
+			if (d->reply_ref && recipient && d->recipient &&
+			    strcmp(recipient, d->recipient) != 0) {
+				fprintf(stderr,
+					"Draft %s is a reply to %s. "
+					"-t cannot change that.\n",
+					draft_id, d->recipient);
+				shyake_free_mail_detail(d);
+				shyake_free_ctx(ctx);
+				free_app_config(app_cfg);
+				free(config_dir);
+				return EXIT_FAILURE;
+			}
 			if (!recipient && d->recipient && d->recipient[0])
 				recipient = d->recipient;
 			if (!subject && d->subject && d->subject[0])
@@ -714,9 +778,16 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "Sending draft %s to %s... ",
 					draft_id, recipient);
 				fflush(stderr);
-				ret = shyake_send(ctx, recipient, subject,
-						  (const u8 *)d->body,
-						  strlen(d->body));
+				ret = d->reply_ref ?
+					      shyake_send_reply(
+						      ctx, recipient,
+						      d->reply_ref, subject,
+						      (const u8 *)d->body,
+						      strlen(d->body)) :
+					      shyake_send(ctx, recipient,
+							  subject,
+							  (const u8 *)d->body,
+							  strlen(d->body));
 				if (ret == SHYAKE_OK) {
 					fprintf(stderr, "done.\n");
 					printf("Mail sent.\n");
@@ -874,8 +945,8 @@ int main(int argc, char *argv[])
 		 * retry cannot help when you are blocked or the
 		 * recipient is gone */
 		if (ret != SHYAKE_OK)
-			rescue_draft(ctx, config_dir, recipient, subject, body,
-				     body_len,
+			rescue_draft(ctx, config_dir, recipient, subject, NULL,
+				     body, body_len,
 				     ret != SHYAKE_ERR_BLOCKED &&
 					     ret != SHYAKE_ERR_GONE &&
 					     ret != SHYAKE_ERR_NOT_FOUND);
@@ -886,6 +957,147 @@ int main(int argc, char *argv[])
 		free(body);
 		if (extracted_subject)
 			free(extracted_subject);
+		return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
+	}
+
+	if (strcmp(cmd, "reply") == 0) {
+		char *subject = NULL;
+
+		static struct option long_options[] = {
+			{ "subject", required_argument, 0, 's' }, { 0, 0, 0, 0 }
+		};
+
+		int opt, option_index = 0;
+		optind = 2;
+		while ((opt = getopt_long(argc, argv, "s:", long_options,
+					  &option_index)) != -1) {
+			if (opt == 's')
+				subject = optarg;
+		}
+
+		/* reply [saved] <id> [<file>] */
+		int from_saved = optind < argc &&
+				 strcmp(argv[optind], "saved") == 0;
+		if (from_saved)
+			optind++;
+		if (optind >= argc) {
+			fprintf(stderr, "A mail ID is required.\n"
+					"Usage: shyake reply [saved] <id> "
+					"[-s <subject>] [<file>]\n");
+			free_app_config(app_cfg);
+			free(config_dir);
+			return EXIT_FAILURE;
+		}
+		const char *mail_id = argv[optind++];
+		const char *problem = subject ? subject_problem(subject) : NULL;
+		if (problem) {
+			fprintf(stderr, "%s\n", problem);
+			free_app_config(app_cfg);
+			free(config_dir);
+			return EXIT_FAILURE;
+		}
+
+		const char *inst = app_cfg->instance;
+		const char *user = app_cfg->username;
+		if (!inst || !user) {
+			fprintf(stderr,
+				"Missing INSTANCE or USERNAME in config file.\n");
+			free_app_config(app_cfg);
+			free(config_dir);
+			return EXIT_FAILURE;
+		}
+
+		FILE *in_file = stdin;
+		if (optind < argc) {
+			in_file = fopen(argv[optind], "rb");
+			if (!in_file) {
+				fprintf(stderr,
+					"Reply failed. Cannot open %s.\n",
+					argv[optind]);
+				free_app_config(app_cfg);
+				free(config_dir);
+				return EXIT_FAILURE;
+			}
+		}
+		usize body_len;
+		u8 *body = read_all_bytes(in_file, &body_len);
+		if (in_file != stdin)
+			fclose(in_file);
+		if (!body) {
+			fprintf(stderr,
+				"Reply failed. Cannot read the body.\n");
+			free_app_config(app_cfg);
+			free(config_dir);
+			return EXIT_FAILURE;
+		}
+
+		shyake_config cfg = { .config_dir = config_dir,
+				      .instance_url = inst,
+				      .username = user,
+				      .plain = global_plain,
+				      .debug = global_debug,
+				      .no_color = global_no_color ||
+						  app_cfg->no_color };
+		shyake_ctx *ctx = shyake_init_ctx(&cfg);
+		if (prompt_passphrase(ctx, config_dir) != 0) {
+			free(body);
+			shyake_free_ctx(ctx);
+			free_app_config(app_cfg);
+			free(config_dir);
+			return EXIT_FAILURE;
+		}
+
+		/* the mail answered gives recipient, reference, subject */
+		shyake_mail_detail *orig =
+			from_saved ? shyake_check_saved_one(ctx, mail_id) :
+				     shyake_check_one(ctx, mail_id);
+		const char *recipient =
+			orig ? shyake_reply_recipient(ctx, orig) : NULL;
+		char *re_subject = NULL;
+		shyake_err ret = SHYAKE_ERR;
+		if (!orig) {
+			print_lib_error(ctx, "Reply failed.");
+		} else if (!orig->ref || !recipient) {
+			fprintf(stderr,
+				"Reply failed. Mail %s cannot be "
+				"answered.\n",
+				mail_id);
+		} else if (!subject && !orig->subject) {
+			fprintf(stderr,
+				"Reply failed. The subject of mail %s "
+				"cannot be decrypted. "
+				"Use -s <subject>.\n",
+				mail_id);
+		} else {
+			if (!subject) {
+				re_subject = reply_subject(orig->subject);
+				subject = re_subject;
+			}
+			fprintf(stderr, "Replying to %s... ", recipient);
+			fflush(stderr);
+			ret = shyake_send_reply(ctx, recipient, orig->ref,
+						subject, body, body_len);
+			if (ret == SHYAKE_OK) {
+				fprintf(stderr, "done.\n");
+				printf("Mail sent.\n");
+			} else {
+				fprintf(stderr, "\n");
+				print_send_error(ctx, ret, recipient);
+				rescue_draft(
+					ctx, config_dir, recipient, subject,
+					orig->ref, body, body_len,
+					ret != SHYAKE_ERR_BLOCKED &&
+						ret != SHYAKE_ERR_GONE &&
+						ret != SHYAKE_ERR_NOT_FOUND);
+			}
+		}
+
+		free(re_subject);
+		shyake_free_mail_detail(orig);
+		free(body);
+		shyake_free_ctx(ctx);
+		free_app_config(app_cfg);
+		free(config_dir);
 		return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 	}
 
@@ -907,6 +1119,7 @@ int main(int argc, char *argv[])
 
 		/* build template; editing decrypts the existing draft */
 		char *initial = NULL;
+		char *reply_ref = NULL, *reply_to = NULL;
 		if (draft_id) {
 			if (prompt_passphrase(ctx, config_dir) != 0) {
 				shyake_free_ctx(ctx);
@@ -926,6 +1139,10 @@ int main(int argc, char *argv[])
 			}
 			const char *to = d->recipient ? d->recipient : "";
 			const char *sub = d->subject ? d->subject : "";
+			if (d->reply_ref) {
+				reply_ref = strdup(d->reply_ref);
+				reply_to = strdup(to);
+			}
 			usize sz =
 				strlen(to) + strlen(sub) + strlen(d->body) + 32;
 			initial = malloc(sz);
@@ -948,6 +1165,8 @@ int main(int argc, char *argv[])
 				"Edit failed. Cannot create a temporary "
 				"file.\n");
 			free(initial);
+			free(reply_ref);
+			free(reply_to);
 			shyake_free_ctx(ctx);
 			free_app_config(app_cfg);
 			free(config_dir);
@@ -966,6 +1185,8 @@ int main(int argc, char *argv[])
 				editor, est);
 			shred_and_unlink(tmp_path);
 			free(initial);
+			free(reply_ref);
+			free(reply_to);
 			shyake_free_ctx(ctx);
 			free_app_config(app_cfg);
 			free(config_dir);
@@ -996,6 +1217,8 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Draft aborted.\n");
 			free(buf);
 			free(initial);
+			free(reply_ref);
+			free(reply_to);
 			shyake_free_ctx(ctx);
 			free_app_config(app_cfg);
 			free(config_dir);
@@ -1008,6 +1231,8 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Missing '---' separator. "
 					"Draft aborted.\n");
 			free(buf);
+			free(reply_ref);
+			free(reply_to);
 			shyake_free_ctx(ctx);
 			free_app_config(app_cfg);
 			free(config_dir);
@@ -1026,6 +1251,8 @@ int main(int argc, char *argv[])
 		if (!has_content) {
 			fprintf(stderr, "Draft aborted (empty body).\n");
 			free(buf);
+			free(reply_ref);
+			free(reply_to);
 			shyake_free_ctx(ctx);
 			free_app_config(app_cfg);
 			free(config_dir);
@@ -1036,11 +1263,19 @@ int main(int argc, char *argv[])
 			fprintf(stderr,
 				"WARNING: The subject exceeds 128 bytes. "
 				"Sending will fail.\n");
+		if (reply_to && (!to || strcmp(to, reply_to) != 0)) {
+			fprintf(stderr, "A reply keeps its recipient: %s.\n",
+				reply_to);
+			to = reply_to;
+		}
 
 		char *new_id = NULL;
 		shyake_err ret = cli_save_draft(ctx, config_dir, to, subject,
-						(const u8 *)body, strlen(body),
-						draft_id, &new_id);
+						reply_ref, (const u8 *)body,
+						strlen(body), draft_id,
+						&new_id);
+		free(reply_ref);
+		free(reply_to);
 		if (ret == SHYAKE_OK) {
 			printf("Draft %s saved.\n", new_id ? new_id : draft_id);
 		} else {
@@ -1131,11 +1366,13 @@ int main(int argc, char *argv[])
 					ctx, config_dir, app_cfg->username,
 					argv[3]);
 				if (d) {
+					char *re = describe_reply(ctx, d);
 					cli_render_mail_header(
-						d, cfg.no_color,
+						d, re, cfg.no_color,
 						app_cfg->tz_hours,
 						app_cfg->time_format,
 						app_cfg->time_format_recent);
+					free(re);
 					shyake_free_mail_detail(d);
 				} else {
 					print_drafts_error(
@@ -1241,11 +1478,13 @@ int main(int argc, char *argv[])
 				shyake_mail_detail *d =
 					shyake_check_saved_one(ctx, saved_id);
 				if (d) {
+					char *re = describe_reply(ctx, d);
 					cli_render_mail_header(
-						d, cfg.no_color,
+						d, re, cfg.no_color,
 						app_cfg->tz_hours,
 						app_cfg->time_format,
 						app_cfg->time_format_recent);
+					free(re);
 					shyake_free_mail_detail(d);
 				} else {
 					print_lib_error(ctx, "Read failed.");
@@ -1349,10 +1588,12 @@ int main(int argc, char *argv[])
 			/* check <id> metadata view */
 			shyake_mail_detail *d = shyake_check_one(ctx, arg);
 			if (d) {
+				char *re = describe_reply(ctx, d);
 				cli_render_mail_header(
-					d, cfg.no_color, app_cfg->tz_hours,
+					d, re, cfg.no_color, app_cfg->tz_hours,
 					app_cfg->time_format,
 					app_cfg->time_format_recent);
+				free(re);
 				shyake_free_mail_detail(d);
 			} else {
 				print_lib_error(ctx, "Check failed.");
@@ -1427,10 +1668,12 @@ int main(int argc, char *argv[])
 		int ret = 0;
 		shyake_mail_detail *d = shyake_fetch(ctx, mail_id);
 		if (d) {
-			cli_render_mail_detail(d, raw, cfg.no_color, cfg.plain,
-					       app_cfg->tz_hours,
+			char *re = raw ? NULL : describe_reply(ctx, d);
+			cli_render_mail_detail(d, re, raw, cfg.no_color,
+					       cfg.plain, app_cfg->tz_hours,
 					       app_cfg->time_format,
 					       app_cfg->time_format_recent);
+			free(re);
 			shyake_free_mail_detail(d);
 		} else {
 			print_lib_error(ctx, "Fetch failed.");
@@ -1855,10 +2098,12 @@ int main(int argc, char *argv[])
 			shyake_mail_detail *d = cli_read_draft(
 				dctx, config_dir, app_cfg->username, draft_id);
 			if (d) {
+				char *re = raw ? NULL : describe_reply(dctx, d);
 				cli_render_mail_detail(
-					d, raw, dcfg.no_color, dcfg.plain,
+					d, re, raw, dcfg.no_color, dcfg.plain,
 					app_cfg->tz_hours, app_cfg->time_format,
 					app_cfg->time_format_recent);
+				free(re);
 				shyake_free_mail_detail(d);
 			} else {
 				print_drafts_error("Draft read failed.");
@@ -1903,10 +2148,12 @@ int main(int argc, char *argv[])
 		int ret = 0;
 		shyake_mail_detail *d = shyake_read_saved(ctx, mail_id);
 		if (d) {
-			cli_render_mail_detail(d, raw, cfg.no_color, cfg.plain,
-					       app_cfg->tz_hours,
+			char *re = raw ? NULL : describe_reply(ctx, d);
+			cli_render_mail_detail(d, re, raw, cfg.no_color,
+					       cfg.plain, app_cfg->tz_hours,
 					       app_cfg->time_format,
 					       app_cfg->time_format_recent);
+			free(re);
 			shyake_free_mail_detail(d);
 		} else {
 			print_lib_error(ctx, "Read failed.");

@@ -40,13 +40,20 @@ func TestLiboqsVectors(t *testing.T) {
 	}
 	for i, v := range file.Vectors {
 		s := func(k string) string { return v.Fields[k].(string) }
+		opt := func(k string) string {
+			if x, ok := v.Fields[k].(string); ok {
+				return x
+			}
+			return ""
+		}
 		var msg []byte
 		switch v.Kind {
 		case "register":
 			msg = RegisterMessage(s("username"), s("kem_pubkey"), s("sig_pubkey"), s("timestamp"))
 		case "mail":
 			msg = MailMessage(s("sender"), s("recipient"), s("recipient_kem_fingerprint"),
-				s("enc_subject"), s("enc_body"), s("timestamp"), int64(v.Fields["size"].(float64)))
+				s("enc_subject"), s("enc_body"), opt("enc_reply_to"), s("timestamp"),
+				int64(v.Fields["size"].(float64)))
 		case "header":
 			msg = HeaderMessage(s("method"), s("path"), s("username"), s("timestamp"))
 		default:

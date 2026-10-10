@@ -137,6 +137,34 @@ export async function relayMail(
   return {status: s as ContentfulStatusCode, error: text || 'Relay refused'};
 }
 
+/* Ask an instance for its protocol level (SPEC §5.1). An instance
+ * without GET /api/version is level 1; null means no answer. */
+export async function remoteLevel(domain: string): Promise<number | null> {
+  try {
+    const resp = await fetch(`https://${domain}/api/version`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (resp.status === 404) {
+      return 1;
+    }
+    if (!resp.ok) {
+      return null;
+    }
+    const j: any = await resp.json();
+    return typeof j?.protocol === 'number' && j.protocol >= 1 ? j.protocol : 1;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* lowercase hex SHA-256 of a string's UTF-8 bytes */
+export async function sha256Hex(s: string): Promise<string> {
+  const d = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)),
+  );
+  return [...d].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 /* Read the body of a protocol-2 request: its exact bytes are hashed
  * into the signed string. Returns null when it is over 64 KiB. */
 export async function readSignedBody(

@@ -144,24 +144,36 @@ func importUsers(ctx context.Context, s *sql.DB, tx *sql.Tx, rep *ImportReport) 
 }
 
 func importMail(ctx context.Context, s *sql.DB, tx *sql.Tx, rep *ImportReport) error {
+	// a Worker database from before replies has no enc_reply_to
+	var replies int
+	if err := s.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('mail')
+		WHERE name = 'enc_reply_to'`).Scan(&replies); err != nil {
+		return err
+	}
+	replyCol := "''"
+	if replies > 0 {
+		replyCol = "COALESCE(enc_reply_to, '')"
+	}
 	rows, err := s.QueryContext(ctx,
 		`SELECT mail_id, sender, recipient, enc_key_sender, enc_key_recipient,
-		   enc_subject, enc_body, size, signature, timestamp FROM mail ORDER BY timestamp`)
+		   enc_subject, enc_body, size, signature, timestamp, `+replyCol+`
+		 FROM mail ORDER BY timestamp`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, snd, rcp, ks, kr, subj, body, sig string
+		var id, snd, rcp, ks, kr, subj, body, sig, reply string
 		var size, ts int64
-		if err := rows.Scan(&id, &snd, &rcp, &ks, &kr, &subj, &body, &size, &sig, &ts); err != nil {
+		if err := rows.Scan(&id, &snd, &rcp, &ks, &kr, &subj, &body, &size, &sig, &ts,
+			&reply); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO mail (mail_id, sender, recipient, enc_key_sender, enc_key_recipient,
-			   enc_subject, enc_body, size, signature, timestamp, sig_hash)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, snd, rcp, ks, kr, subj, body, size, sig, ts, sigHash(sig))
+			   enc_subject, enc_body, size, signature, timestamp, sig_hash, enc_reply_to)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, snd, rcp, ks, kr, subj, body, size, sig, ts, sigHash(sig), reply)
 		switch {
 		case isConstraint(err):
 			rep.DuplicateMail++

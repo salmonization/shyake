@@ -77,6 +77,14 @@ Then it reapplies any new migrations and redeploys. Git reports a
 reuses existing resources and keeps your settings. It also sets the version that `GET /api/version` reports,
 from `server/VERSION`.
 
+**Upgrading to v0.4.0.** v0.4.0 adds replies (protocol level 3,
+[SPEC.md §3.2](SPEC.md)). It adds a column to the `mail` table:
+`deploy.sh --update` applies the migration, and the Go server
+applies it when it starts. Mail stored before stays readable. Only
+instances at level 3 accept a reply. A reply to a user on an older
+instance fails with a clear message, and other mail still flows.
+Upgrade the server before clients send replies.
+
 **Upgrading to v0.3.0.** From v0.3.0, clients sign the body of
 block, unblock, and rotate requests (protocol level 2, [SPEC.md
 §3.3](SPEC.md)). A v0.3.0 client cannot block, unblock, or rotate on
@@ -283,7 +291,8 @@ curl http://127.0.0.1:8787/api/version
 
 The server applies new database migrations when it starts. A send
 that is in progress during the restart fails, and the client keeps
-it as a draft. See also **Upgrading to v0.3.0** above.
+it as a draft. See also **Upgrading to v0.4.0** and **Upgrading to
+v0.3.0** above.
 
 #### Data location and backups
 

@@ -21,6 +21,7 @@ const char *cli_drafts_last_error(void);
  * passphrase is needed to save (only to read back).
  * recipient: NULL or "" for a diary entry (no recipient).
  * subject: NULL or "" allowed (unlike send).
+ * reply_ref: NULL, or the reference of the mail a reply answers.
  * draft_id: NULL to create a new draft; existing id to overwrite
  *           (created timestamp is preserved, modified is refreshed).
  * out_id: if non-NULL, receives the allocated id string
@@ -30,8 +31,8 @@ const char *cli_drafts_last_error(void);
  */
 shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 			  const char *recipient, const char *subject,
-			  const u8 *body, usize body_len, const char *draft_id,
-			  char **out_id);
+			  const char *reply_ref, const u8 *body, usize body_len,
+			  const char *draft_id, char **out_id);
 
 /*
  * List all local drafts sorted by id (decrypts recipient + subject).
@@ -43,7 +44,8 @@ shyake_saved_list *cli_list_drafts(shyake_ctx *ctx, const char *config_dir,
 				   const char *username);
 
 /*
- * Load and decrypt a draft from disk (body included).
+ * Load and decrypt a draft from disk (body included). A reply's
+ * draft has reply_ref set.
  * Returns allocated shyake_mail_detail* on success, NULL on failure.
  * Caller must free with shyake_free_mail_detail().
  */

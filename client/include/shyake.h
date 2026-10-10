@@ -76,6 +76,17 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 		       const char *subject, const uint8_t *body,
 		       size_t body_len);
 
+/*
+ * Send a reply: shyake_send() plus the reference of the mail it
+ * answers (the ref field of that mail's detail). The reference is
+ * encrypted like the subject and signed with the mail.
+ * recipient should come from shyake_reply_recipient().
+ * Needs server v0.4.0 (protocol 3) on both instances.
+ */
+shyake_err shyake_send_reply(shyake_ctx *ctx, const char *recipient,
+			     const char *reply_ref, const char *subject,
+			     const uint8_t *body, size_t body_len);
+
 /* --- Mail list --- */
 
 typedef struct {
@@ -86,6 +97,7 @@ typedef struct {
 	int64_t timestamp; /* UNIX timestamp seconds (modified for drafts) */
 	int64_t created; /* creation timestamp; non-zero for drafts only */
 	int is_sent; /* 1 if from sent box */
+	char *ref; /* reference: hex SHA-256 of the signature */
 } shyake_mail_entry;
 
 typedef struct {
@@ -114,9 +126,26 @@ typedef struct {
 	int64_t timestamp; /* UNIX timestamp seconds (modified for drafts) */
 	int64_t created; /* creation timestamp; non-zero for drafts only */
 	int size; /* plaintext byte count */
+	char *ref; /* reference: hex SHA-256 of the signature */
+	char *reply_ref; /* reference of the mail answered; NULL if none */
 } shyake_mail_detail;
 
 void shyake_free_mail_detail(shyake_mail_detail *d);
+
+/*
+ * Who a reply to this mail goes to: the other party, or yourself
+ * when the mail was from you to you. Points into d.
+ */
+const char *shyake_reply_recipient(shyake_ctx *ctx,
+				   const shyake_mail_detail *d);
+
+/*
+ * Find the mail a reference names: in the inbox, the sent box, then
+ * the locally saved mail. Returns its allocated mail ID, or NULL when
+ * it is gone (burned, or never in this account). *saved is set to 1
+ * when only a saved copy has it.
+ */
+char *shyake_find_ref(shyake_ctx *ctx, const char *ref, int *saved);
 
 /*
  * Fetch full content of a single mail (decrypt body).

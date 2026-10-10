@@ -11,7 +11,8 @@
  *   "enc_key": "<b64: kem_ct || (sym_key XOR ss)>",
  *   "enc_recipient": "<b64: nonce||ct||mac>" ("" = no recipient),
  *   "enc_subject": "<b64>" ("" = empty subject),
- *   "enc_body": "<b64>"
+ *   "enc_body": "<b64>",
+ *   "enc_reply_to": "<b64>" (a reply only: the mail it answers)
  * }
  *
  * Same hybrid scheme as sent mail, via libshyake's public
@@ -138,8 +139,8 @@ static char *decrypt_field(const u8 *sym, const char *enc)
 
 shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 			  const char *recipient, const char *subject,
-			  const u8 *body, usize body_len, const char *draft_id,
-			  char **out_id)
+			  const char *reply_ref, const u8 *body, usize body_len,
+			  const char *draft_id, char **out_id)
 {
 	drafts_error[0] = '\0';
 	if (!ctx || !config_dir || !body || body_len == 0)
@@ -179,18 +180,22 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 	}
 
 	/* encrypt fields; empty ones stored as "" */
-	char *enc_rec = NULL, *enc_sub = NULL, *enc_bdy = NULL;
+	char *enc_rec = NULL, *enc_sub = NULL, *enc_bdy = NULL, *enc_re = NULL;
 	if (recipient && recipient[0])
 		enc_rec = shyake_seal_b64(sym_key, (const u8 *)recipient,
 					  strlen(recipient));
 	if (subject && subject[0])
 		enc_sub = shyake_seal_b64(sym_key, (const u8 *)subject,
 					  strlen(subject));
+	if (reply_ref)
+		enc_re = shyake_seal_b64(sym_key, (const u8 *)reply_ref,
+					 strlen(reply_ref));
 	enc_bdy = shyake_seal_b64(sym_key, body, body_len);
 	wipe_key(sym_key);
 
 	if (!enc_bdy || (recipient && recipient[0] && !enc_rec) ||
-	    (subject && subject[0] && !enc_sub)) {
+	    (subject && subject[0] && !enc_sub) || (reply_ref && !enc_re)) {
+		free(enc_re);
 		free(enc_rec);
 		free(enc_sub);
 		free(enc_bdy);
@@ -220,6 +225,7 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 		}
 	}
 	if (fd < 0) {
+		free(enc_re);
 		free(enc_rec);
 		free(enc_sub);
 		free(enc_bdy);
@@ -237,8 +243,11 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 	cJSON_AddStringToObject(root, "enc_recipient", enc_rec ? enc_rec : "");
 	cJSON_AddStringToObject(root, "enc_subject", enc_sub ? enc_sub : "");
 	cJSON_AddStringToObject(root, "enc_body", enc_bdy);
+	if (enc_re)
+		cJSON_AddStringToObject(root, "enc_reply_to", enc_re);
 	char *payload = cJSON_PrintUnformatted(root);
 	cJSON_Delete(root);
+	free(enc_re);
 	free(enc_rec);
 	free(enc_sub);
 	free(enc_bdy);
@@ -293,6 +302,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 	}
 	cJSON *jrec = cJSON_GetObjectItem(json, "enc_recipient");
 	cJSON *jsub = cJSON_GetObjectItem(json, "enc_subject");
+	cJSON *jre = cJSON_GetObjectItem(json, "enc_reply_to");
 
 	/* drafts are useless undecrypted: fail hard on key errors */
 	shyake_selfdec *sd = shyake_selfdec_new(ctx);
@@ -304,20 +314,24 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 		cJSON_Delete(json);
 		return NULL;
 	}
-	char *rec = NULL, *sub = NULL, *bdy = NULL;
+	char *rec = NULL, *sub = NULL, *bdy = NULL, *re = NULL;
 	u8 sym[32];
 	int have_sym = shyake_selfdec_key(sd, jkey->valuestring, sym) ==
 		       SHYAKE_OK;
 	if (have_sym) {
 		rec = decrypt_field(sym, jrec ? jrec->valuestring : NULL);
 		sub = decrypt_field(sym, jsub ? jsub->valuestring : NULL);
+		if (cJSON_IsString(jre) && jre->valuestring[0])
+			re = shyake_unseal_b64(sym, jre->valuestring);
 		if (decrypt_body)
 			bdy = shyake_unseal_b64(sym, jbdy->valuestring);
 		wipe_key(sym);
 	}
 	shyake_selfdec_free(sd);
-	if (!have_sym || (decrypt_body && !bdy)) {
+	if (!have_sym || (decrypt_body && !bdy) ||
+	    (cJSON_IsString(jre) && jre->valuestring[0] && !re)) {
 		drafts_set_error("Cannot decrypt draft %s.", draft_id);
+		free(re);
 		free(rec);
 		free(sub);
 		free(bdy);
@@ -334,6 +348,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 	result->timestamp = jupd ? (i64)jupd->valuedouble : 0;
 	result->created = jcrt ? (i64)jcrt->valuedouble : 0;
 	result->size = jsz ? jsz->valueint : 0;
+	result->reply_ref = re;
 
 	cJSON_Delete(json);
 	return result;

@@ -3,6 +3,8 @@ package federation
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
 	"time"
 	"unicode"
@@ -46,4 +48,28 @@ func cleanRemoteText(s string) string {
 		s = string(r[:200])
 	}
 	return s
+}
+
+// Level asks an instance for its protocol level (SPEC §5.1). An
+// instance without GET /api/version is level 1.
+func (c *Client) Level(ctx context.Context, domain string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, relayTimeout)
+	defer cancel()
+	status, body, err := c.get(ctx, c.URL(domain, "/api/version"), 64<<10)
+	if err != nil {
+		return 0, err
+	}
+	if status == http.StatusNotFound {
+		return 1, nil
+	}
+	var v struct {
+		Protocol int `json:"protocol"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &v) != nil {
+		return 0, fmt.Errorf("federation: version answer %d", status)
+	}
+	if v.Protocol < 1 {
+		return 1, nil
+	}
+	return v.Protocol, nil
 }

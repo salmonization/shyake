@@ -150,6 +150,33 @@ base64 < image.png | shyake send -t flat_white -s "image.png"
 tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 ```
 
+**reply 命令**：
+
+`reply` 用于回复邮件。回复发给对方：收到的邮件回复给发件人，你发出的邮件回复给收件人。你发给自己的邮件，回复也发给自己。主题默认为 `Re: <原主题>`，可用 `-s` 修改。
+
+```sh
+shyake reply fQBjZnvJ56 < answer.txt
+shyake reply fQBjZnvJ56 -s "Another subject" < answer.txt
+```
+
+回复用 `save` 保存过的邮件（即使原邮件已被焚毁）：
+
+```sh
+shyake reply saved fQBjZnvJ56 < answer.txt
+```
+
+`check <id>`、`fetch` 和 `read` 会在 `RE:` 行显示回复所对应的邮件。只剩你本地保存的副本时，ID 后会显示 `(saved)`；邮件已不存在时显示 `(unavailable)`。
+
+```
+FROM:  flat_white
+TO:    salmon
+RE:    fQBjZnvJ56
+DATE:  2026-10-10 09:30
+SUBJ:  Re: Coffee tomorrow?
+```
+
+服务器无法读取回复对应的是哪封邮件：客户端会把这一信息随邮件一起加密。你的实例和收件人的实例都必须运行 v0.4.0 或更新的服务端。回复失败时，与 `send` 一样会保存为草稿；用 `shyake send -d <id>` 发送时，它仍然是一封回复。
+
 **compose 命令**：
 
 `compose` 用于撰写邮件草稿，也可作个人日记等用途。该命令用你指定的编辑器（默认为 `ed`）打开一个简单的模板，并将结果作为草稿存入 `~/.config/shyake/drafts/`，使用 ML-KEM-768 + ChaCha20-Poly1305 加密给你自己的密钥。

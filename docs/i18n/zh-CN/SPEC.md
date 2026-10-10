@@ -7,8 +7,8 @@
 Copyright (c) 2026 Salmonization. BSD 2-Clause License.
 
 <table>
-<tr><td>版本</td><td>0.3</td></tr>
-<tr><td>最后更新</td><td>2026-09-23</td></tr>
+<tr><td>版本</td><td>0.4</td></tr>
+<tr><td>最后更新</td><td>2026-10-10</td></tr>
 </table>
 
 ---
@@ -108,6 +108,14 @@ shyake/
 
 解密是上述过程的逆过程：客户端用自己的 KEM 私钥解封装出共享密钥，将其与加密密钥字段异或以恢复对称密钥，然后解密内容。
 
+**回复。** 回复通过被回复邮件的**引用**指明它回复的是哪封邮件。引用是该邮件 `signature` 字段（即服务器存储的字符串）的 SHA-256，小写十六进制，共 64 个字符。中继会逐字节转发签名载荷（§6.2），所以两个实例存储的签名相同。因此发件人和收件人算出的引用相同，尽管双方的 `mail_id` 不同。
+
+客户端用回复的对称密钥加密引用（与主题的加密方式相同），作为 `enc_reply_to` 发送。服务器存储它，但无法读取：服务器知道这封邮件是回复，但不知道它回复的是哪封邮件。
+
+回复发给被回复邮件的另一方：收到的邮件回复给发件人，已发送的邮件回复给收件人。用户发给自己的邮件，回复也发给自己。这是客户端的约定，服务器无法检查。
+
+为了显示回复对应的邮件，客户端先在收件箱和已发送列表的 `sig_hash` 值中查找该引用（§5.2），再在本地保存的邮件中查找（§9）。服务端不提供按引用查找的接口，因此永远不知道客户端在找哪封邮件。已焚毁的邮件不会再被找到。
+
 独立文件加密命令（`enc` / `dec`）使用相同的 ML-KEM-768 + ChaCha20-Poly1305 构造，采用带长度前缀的二进制容器（`.enc` 文件）。
 
 #### 3.3 认证协议
@@ -163,6 +171,8 @@ POST:/api/block:salmon:1749513600:<请求体的 sha256 十六进制>
   "size": 512
 }
 ```
+
+回复（§3.2）在 `enc_body` 之后加上 `"enc_reply_to": "..."`，其他邮件没有这个字段。服务器以 `400` 拒绝空的 `enc_reply_to`，并且只在请求体带有该字段时才把它放进重建的签名子集。因此，在不带该字段签名的邮件上添加它，签名验证会失败。服务器从协议级别 3 起接受回复（§5.1）。
 
 完整请求体还携带 `enc_key_sender`、`enc_key_recipient`、`signature` 和 `pow`，它们不属于被签名的子集。
 
@@ -239,11 +249,14 @@ passphrase 通过交互式提示输入（终端回显关闭），或通过`SHYAK
   "enc_key": "<b64: kem_ct || (sym_key XOR ss)>",
   "enc_recipient": "<b64: nonce||ct||mac>",
   "enc_subject": "<b64: nonce||ct||mac>",
-  "enc_body": "<b64: nonce||ct||mac>"
+  "enc_body": "<b64: nonce||ct||mac>",
+  "enc_reply_to": "<b64: nonce||ct||mac>"
 }
 ```
 
-收件人、主题和正文在磁盘上全部加密；只有时间戳、大小和 id 是明文。空的 `enc_recipient` / `enc_subject` 字符串表示该字段为空。
+只有回复的草稿带有 `enc_reply_to`，即被回复邮件的引用（§3.2）。发送这份草稿就是发送一封回复。
+
+收件人、主题、正文和引用在磁盘上全部加密；只有时间戳、大小和 id 是明文。空的 `enc_recipient` / `enc_subject` 字符串表示该字段为空。
 
 由于保存只需要公钥，`compose` 不需要 passphrase；列出、阅读、编辑和发送草稿则需要解锁 KEM 私钥。草稿 id 是本地分配的小整数（现有最大 id + 1，用 `O_EXCL` 创建）。
 
@@ -284,6 +297,7 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 | `size` | INTEGER | 明文正文字节数（仅供界面显示） |
 | `signature` | TEXT | 发件人的 ML-DSA-65 签名，base64 |
 | `timestamp` | INTEGER | 服务器分配的 UNIX 时间戳 |
+| `enc_reply_to` | TEXT | 回复所回复邮件的加密引用（§3.2）；其他邮件为 `''` |
 
 本地地址以裸用户名存储：插入前会剥离 `@<INSTANCE_DOMAIN>` 后缀。`recipient` 和 `sender` 上的索引服务于邮件箱查询。`rotate` 会删除该用户作为发件人或收件人的所有邮件行。
 
@@ -320,10 +334,10 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 `/api/version` 说明服务端的身份：
 
 ```json
-{"version": "v0.3.0", "implementation": "go", "protocol": 2}
+{"version": "v0.4.0", "implementation": "go", "protocol": 3}
 ```
 
-`version` 是 `server/VERSION` 中的版本（§12.1），没有注入版本的构建为 `dev`。`implementation` 为 `cf` 或 `go`。`protocol` 是协议级别：级别 2 会对请求体签名（§3.3）；没有这个端点的服务器视为级别 1。客户端依据协议级别而不是版本号来判断实例接受哪些请求格式。
+`version` 是 `server/VERSION` 中的版本（§12.1），没有注入版本的构建为 `dev`。`implementation` 为 `cf` 或 `go`。`protocol` 是协议级别：级别 2 会对请求体签名（§3.3），级别 3 接受回复（§3.2）；没有这个端点的服务器视为级别 1。客户端依据协议级别而不是版本号来判断实例接受哪些请求格式。
 
 `/api/client/version` 代理 GitHub Releases API，返回每个渠道中带有客户端构建的最新标签，以及该版本每个发布产物的 SHA-256 摘要：
 
@@ -355,7 +369,9 @@ compose 编辑器操作的明文临时文件由 `mkstemp` 创建（权限 0600�
 | `POST` | `/api/rotate` | 轮换公钥 |
 | `DELETE` | `/api/destroy` | 销毁账户 |
 
-`POST /api/mail` 值得注意的状态码：`409`（`KEY_MISMATCH`，提供的收件人指纹已不匹配）、`410`（`USER_DESTROYED`）、`413`（载荷过大）、`403`（被屏蔽、PoW 无效或时间戳过期）。
+`GET /api/mail` 列表中的每一项都带有 `sig_hash`，即该邮件的引用（§3.2）。列表不含正文、签名和 `enc_reply_to`。`GET /api/mail/:id` 只在邮件是回复时返回 `enc_reply_to`。
+
+`POST /api/mail` 值得注意的状态码：`409`（`KEY_MISMATCH`，提供的收件人指纹已不匹配）、`410`（`USER_DESTROYED`）、`413`（载荷过大）、`403`（被屏蔽、PoW 无效或时间戳过期）、`422`（回复给协议级别低于 3 的实例，§6.2）。
 
 Go 服务端还可能返回：
 
@@ -387,8 +403,9 @@ Go 服务端还可能返回：
 当 `recipient` 属于远程实例时：
 
 1. 客户端将签名并加密的载荷提交到**发件人自己的实例**（`POST /api/mail`）。
-2. 发件人的实例完成验证后，将原始载荷转发到 `https://<recipientDomain>/api/mail`，并等待响应，最多 15 秒。
-3. 远程实例接受邮件（`2xx`）后，发件人的实例才为已发送邮件箱存储自己的副本，并返回 `201`。
+2. 发件人的实例验证载荷。如果是回复，它先向收件人的实例查询协议级别（`GET /api/version`）。级别低于 3 时，它返回 `422` 和 `Recipient instance does not support replies`，不进行中继：旧实例会把回复当作签名无效而拒收。收件人的实例无响应时，结果为 `502`。
+3. 发件人的实例将原始载荷转发到 `https://<recipientDomain>/api/mail`，并等待响应，最多 15 秒。
+4. 远程实例接受邮件（`2xx`）后，发件人的实例才为已发送邮件箱存储自己的副本，并返回 `201`。
 
 中继失败时，发件人的实例不存储任何内容：
 
@@ -461,7 +478,9 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_NO_INSTANCE` | 未配置实例 URL |
 | `SHYAKE_ERR_BLOCKED` | HTTP 403：收件人屏蔽了发件人 |
 
-API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、本地保存的邮件（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、账户（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、指纹（`shyake_fingerprint`）、自加密原语（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`），以及独立文件加密（`shyake_enc_file`、`shyake_dec_file`）。
+API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、回复（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、本地保存的邮件（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、账户（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、指纹（`shyake_fingerprint`）、自加密原语（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`），以及独立文件加密（`shyake_enc_file`、`shyake_dec_file`）。
+
+邮件列表项和邮件详情都带有 `ref`，即该邮件的引用（§3.2）。邮件详情还带有 `reply_ref`，即它所回复邮件的引用，不是回复时为 `NULL`。客户端用 `shyake_send_reply()` 发送回复，传入被回复邮件的 `ref`，以及 `shyake_reply_recipient()` 给出的收件人。`shyake_find_ref()` 把引用转换回邮件 ID。
 
 草稿与自更新属于 CLI 层功能（`src/cli/`），不在库 API 之内。草稿的磁盘格式（§3.8）完全基于公开的自加密原语构建；其他客户端可以复用该格式，也可以用自己的方式存储草稿。
 
@@ -527,6 +546,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `whoami` | 打印当前配置文件（无网络请求） |
 | `send -t <to> [-s <subj>] [file]` | 发送邮件（仅文本）；失败时存为草稿 |
 | `send --draft <id> [-t <to>] [-s <subj>]` | 发送已存草稿（成功后删除） |
+| `reply [saved] <id> [-s <subj>] [file]` | 回复邮件（§3.2）；失败时存为草稿 |
 | `compose [<id>]` | 撰写或编辑加密草稿（§3.8） |
 | `check inbox\|sent [opts]` | 列出邮件箱元数据 |
 | `check <id>` | 查看单封邮件的邮件头 |
@@ -549,7 +569,7 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `man [<command>]` | 显示文档 |
 | `version` | 打印版本字符串 |
 
-`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
+`check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。对于回复，`check <id>`、`fetch` 和 `read` 会打印一行 `RE:`，显示被回复邮件的 ID；只剩本地保存的副本时显示 `<id> (saved)`，邮件已不存在时显示 `(unavailable)`。`reply` 的主题默认为 `Re: <subject>`。`send --draft` 不能更改回复草稿的收件人。`send` 的收件人可以是当前实例用户（`username`）或外部实例用户（`username@instance`）；二进制数据必须由调用方进行 base64 编码。`enc`/`dec` 用于调试和测试。
 
 ---
 

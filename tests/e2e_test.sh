@@ -151,7 +151,7 @@ wait_for_server
 echo -e "  ${GREEN}PASS${NC}  Server reachable at $INSTANCE"
 
 out=$(curl -s "$INSTANCE/api/version")
-assert_contains "server reports protocol level 2" '"protocol":2' "$out"
+assert_contains "server reports protocol level 3" '"protocol":3' "$out"
 
 # ------------------------------------------------------------------ #
 section "1. init"
@@ -404,6 +404,97 @@ fi
 
 # Third-party cannot burn (User A tries to burn a mail in B's inbox only)
 # (skipped as it requires a second unburned mail that A doesn't own)
+
+# ------------------------------------------------------------------ #
+section "11b. reply"
+# ------------------------------------------------------------------ #
+
+# ID of the mail with this subject in a mailbox
+id_of() {
+    sh_run "$1" check "$2" --json 2>/dev/null | python3 -c '
+import sys, json
+print(next((m["mail_id"] for m in json.load(sys.stdin)
+            if m["subject"] == sys.argv[1]), ""))' "$3"
+}
+
+echo "Start of a thread" | sh_run "$DIR_A" send -t "$USER_B" \
+    -s "Thread start" > /dev/null 2>&1
+ORIG_ID=$(id_of "$DIR_B" inbox "Thread start")
+
+# B answers A: the reply goes to the sender
+out=$(echo "First answer" | sh_run "$DIR_B" reply "$ORIG_ID" 2>&1)
+rc=$?; assert_exit "reply exits 0" 0 "$rc" "$out"
+assert_contains "reply: goes to the sender" "Replying to $USER_A" "$out"
+REPLY_ID=$(id_of "$DIR_A" inbox "Re: Thread start")
+
+out=$(sh_run "$DIR_A" check "$REPLY_ID" 2>&1)
+assert_contains "reply: default subject" "Re: Thread start" "$out"
+assert_contains "check <id>: RE line names the original" \
+    "RE:   $ORIG_ID" "$out"
+out=$(sh_run "$DIR_A" fetch "$REPLY_ID" 2>&1)
+assert_contains "fetch: RE line names the original" "RE:    $ORIG_ID" "$out"
+assert_contains "fetch: reply body" "First answer" "$out"
+out=$(sh_run "$DIR_A" check "$ORIG_ID" 2>&1)
+assert_not_contains "check <id>: no RE line on a first mail" "RE:" "$out"
+
+# A follows up on its own sent mail: it goes to the recipient
+out=$(echo "Follow-up" | sh_run "$DIR_A" reply -s "More" "$ORIG_ID" 2>&1)
+rc=$?; assert_exit "reply to own sent mail exits 0" 0 "$rc" "$out"
+assert_contains "reply to own sent mail: goes to the recipient" \
+    "Replying to $USER_B" "$out"
+
+# a reply to a reply keeps the subject as it is
+out=$(echo "Second answer" | sh_run "$DIR_A" reply "$REPLY_ID" 2>&1)
+REPLY2_ID=$(id_of "$DIR_B" inbox "Re: Thread start")
+out=$(sh_run "$DIR_B" check "$REPLY2_ID" 2>&1)
+assert_contains "reply to a reply: subject kept" "SUBJ: Re: Thread start" \
+    "$out"
+assert_not_contains "reply to a reply: no Re: Re:" "Re: Re:" "$out"
+assert_contains "reply to a reply: RE names the first reply" \
+    "RE:   $REPLY_ID" "$out"
+
+# a mail to yourself is answered to yourself
+echo "note" | sh_run "$DIR_A" send -t "$USER_A" -s "Note" > /dev/null 2>&1
+SELF_ID=$(id_of "$DIR_A" inbox "Note")
+out=$(echo "note 2" | sh_run "$DIR_A" reply "$SELF_ID" 2>&1)
+assert_contains "reply to a self mail: goes to yourself" \
+    "Replying to $USER_A" "$out"
+
+# a saved original still resolves, and can be answered, once burned
+sh_run "$DIR_B" save "$ORIG_ID" > /dev/null 2>&1
+sh_run "$DIR_B" burn "$ORIG_ID" > /dev/null 2>&1
+out=$(sh_run "$DIR_B" check "$REPLY_ID" 2>&1)
+assert_contains "RE: a burned original found in saved" \
+    "RE:   $ORIG_ID (saved)" "$out"
+out=$(sh_run "$DIR_A" check "$REPLY_ID" 2>&1)
+assert_contains "RE: a burned original is unavailable" \
+    "RE:   (unavailable)" "$out"
+out=$(sh_run "$DIR_B" read "$ORIG_ID" 2>&1)
+assert_exit "read saved original exits 0" 0 "$?"
+out=$(echo "From the archive" | sh_run "$DIR_B" reply saved "$ORIG_ID" 2>&1)
+rc=$?; assert_exit "reply saved <id> exits 0" 0 "$rc" "$out"
+assert_contains "reply saved: goes to the sender" "Replying to $USER_A" "$out"
+
+out=$(echo "x" | sh_run "$DIR_B" reply "$ORIG_ID" 2>&1)
+rc=$?; assert_exit "reply to a burned mail fails" 1 "$rc"
+assert_contains "reply to a burned mail: reason" \
+    "Reply failed. Mail not found." "$out"
+
+# a failed reply is kept as a draft that stays a reply
+sh_run "$DIR_A" block "$USER_B" > /dev/null 2>&1
+out=$(echo "Blocked answer" | sh_run "$DIR_B" reply -s "Kept" "$REPLY_ID" 2>&1)
+rc=$?; assert_exit "blocked reply fails" 1 "$rc"
+assert_contains "blocked reply: kept as draft" "Saved as draft" "$out"
+RE_DRAFT=$(echo "$out" | sed -n 's/^Saved as draft \([0-9]*\).*/\1/p')
+out=$(sh_run "$DIR_B" check drafts "$RE_DRAFT" 2>&1)
+assert_contains "reply draft: RE line" "RE:   $REPLY_ID" "$out"
+sh_run "$DIR_A" unblock "$USER_B" > /dev/null 2>&1
+out=$(sh_run "$DIR_B" send -d "$RE_DRAFT" -t "$USER_B" 2>&1)
+rc=$?; assert_exit "reply draft: -t cannot redirect it" 1 "$rc"
+out=$(sh_run "$DIR_B" send -d "$RE_DRAFT" 2>&1)
+rc=$?; assert_exit "reply draft: send -d exits 0" 0 "$rc" "$out"
+out=$(sh_run "$DIR_A" check "$(id_of "$DIR_A" inbox "Kept")" 2>&1)
+assert_contains "reply draft: sent as a reply" "RE:   $REPLY_ID" "$out"
 
 # ------------------------------------------------------------------ #
 section "12. rotate"

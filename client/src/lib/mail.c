@@ -20,6 +20,7 @@ void shyake_free_mail_list(shyake_mail_list *list)
 		free(list->entries[i].mail_id);
 		free(list->entries[i].party);
 		free(list->entries[i].subject);
+		free(list->entries[i].ref);
 	}
 	free(list->entries);
 	free(list);
@@ -34,17 +35,84 @@ void shyake_free_mail_detail(shyake_mail_detail *d)
 	free(d->recipient);
 	free(d->subject);
 	free(d->body);
+	free(d->ref);
+	free(d->reply_ref);
 	free(d);
 }
 
 /* ------------------------------------------------------------------ */
+/* Replies                                                            */
+/* ------------------------------------------------------------------ */
 
-shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
-		       const char *subject, const u8 *body, usize body_len)
+#define REF_LEN (SHA256_DIGEST_LENGTH * 2)
+
+/* a reference is 64 lowercase hex digits */
+static int is_ref(const char *s)
+{
+	if (!s || strlen(s) != REF_LEN)
+		return 0;
+	for (const char *p = s; *p; p++)
+		if (!strchr("0123456789abcdef", *p))
+			return 0;
+	return 1;
+}
+
+/* reference of a mail: hex SHA-256 of its signature string */
+static char *sig_ref(const char *signature)
+{
+	if (!signature)
+		return NULL;
+	u8 sum[SHA256_DIGEST_LENGTH];
+	SHA256((const u8 *)signature, strlen(signature), sum);
+	char *hex = malloc(REF_LEN + 1);
+	if (!hex)
+		return NULL;
+	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		snprintf(hex + i * 2, 3, "%02x", sum[i]);
+	return hex;
+}
+
+/* decrypt enc_reply_to; NULL when absent or not a reference */
+static char *open_reply_ref(const u8 *sym, cJSON *json)
+{
+	cJSON *e = cJSON_GetObjectItem(json, "enc_reply_to");
+	if (!cJSON_IsString(e) || !e->valuestring[0])
+		return NULL;
+	char *ref = decrypt_from_b64(sym, e->valuestring);
+	if (ref && !is_ref(ref)) {
+		free(ref);
+		ref = NULL;
+	}
+	return ref;
+}
+
+/* reference of a mail from its full JSON */
+static char *json_ref(cJSON *json)
+{
+	cJSON *sig = cJSON_GetObjectItem(json, "signature");
+	return cJSON_IsString(sig) ? sig_ref(sig->valuestring) : NULL;
+}
+
+const char *shyake_reply_recipient(shyake_ctx *ctx, const shyake_mail_detail *d)
+{
+	if (!ctx || !d || !d->sender || !d->recipient)
+		return NULL;
+	return strcmp(d->sender, ctx->username) == 0 ? d->recipient : d->sender;
+}
+
+/* ------------------------------------------------------------------ */
+
+static shyake_err send_mail(shyake_ctx *ctx, const char *recipient,
+			    const char *reply_ref, const char *subject,
+			    const u8 *body, usize body_len)
 {
 	if (!ctx || !recipient || !body)
 		return SHYAKE_ERR;
 	clear_error(ctx);
+	if (reply_ref && !is_ref(reply_ref)) {
+		set_error(ctx, "The reply reference is not valid.");
+		return SHYAKE_ERR;
+	}
 
 	/* Fetch recipient public key */
 	shyake_err lookup;
@@ -126,17 +194,23 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	char *enc_subject = encrypt_to_b64(sym_key, (const u8 *)subject,
 					   subject ? strlen(subject) : 0);
 	char *enc_body = encrypt_to_b64(sym_key, body, body_len);
+	char *enc_reply_to = reply_ref ? encrypt_to_b64(sym_key,
+							(const u8 *)reply_ref,
+							REF_LEN) :
+					 NULL;
 	char *enc_key_recipient =
 		kem_encapsulate_key(recip_pk, recip_pk_len, sym_key);
 	char *enc_key_sender = kem_encapsulate_key(my_kpk, my_kpk_len, sym_key);
 
-	if (!enc_key_recipient || !enc_key_sender) {
+	if (!enc_key_recipient || !enc_key_sender ||
+	    (reply_ref && !enc_reply_to)) {
 		free(recip_pk_b64);
 		free(recip_pk);
 		free(my_kpk);
 		free(my_ssk);
 		free(enc_subject);
 		free(enc_body);
+		free(enc_reply_to);
 		free(enc_key_recipient);
 		free(enc_key_sender);
 		return SHYAKE_ERR_CRYPTO;
@@ -172,6 +246,9 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	cJSON_AddStringToObject(signed_obj, "enc_subject",
 				enc_subject ? enc_subject : "");
 	cJSON_AddStringToObject(signed_obj, "enc_body", enc_body);
+	if (enc_reply_to)
+		cJSON_AddStringToObject(signed_obj, "enc_reply_to",
+					enc_reply_to);
 	cJSON_AddStringToObject(signed_obj, "timestamp", timestamp);
 	cJSON_AddNumberToObject(signed_obj, "size", body_len);
 
@@ -245,6 +322,21 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 				set_error(ctx, "Cannot reach %s.",
 					  strchr(recipient, '@') + 1);
 				ret = SHYAKE_ERR_HTTP;
+			} else if (http_code == 422 && strchr(recipient, '@') &&
+				   http_error_is(resp.data,
+						 "Recipient instance does not "
+						 "support replies")) {
+				set_error(ctx,
+					  "%s does not accept replies yet. "
+					  "It must run server v0.4.0 or later.",
+					  strchr(recipient, '@') + 1);
+				ret = SHYAKE_ERR_HTTP;
+			} else if (reply_ref && http_code == 401 &&
+				   instance_protocol(ctx) < 3) {
+				set_error(ctx, "Your instance must run server "
+					       "v0.4.0 or later to send "
+					       "replies.");
+				ret = SHYAKE_ERR_HTTP;
 			} else {
 				set_server_error(ctx, http_code, resp.data);
 				ret = SHYAKE_ERR_HTTP;
@@ -264,6 +356,7 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	free(my_ssk);
 	free(enc_subject);
 	free(enc_body);
+	free(enc_reply_to);
 	free(enc_key_recipient);
 	free(enc_key_sender);
 	free(json_raw);
@@ -275,6 +368,21 @@ shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
 	cJSON_Delete(signed_obj);
 	OQS_SIG_free(sig);
 	return ret;
+}
+
+shyake_err shyake_send(shyake_ctx *ctx, const char *recipient,
+		       const char *subject, const u8 *body, usize body_len)
+{
+	return send_mail(ctx, recipient, NULL, subject, body, body_len);
+}
+
+shyake_err shyake_send_reply(shyake_ctx *ctx, const char *recipient,
+			     const char *reply_ref, const char *subject,
+			     const u8 *body, usize body_len)
+{
+	if (!reply_ref)
+		return SHYAKE_ERR;
+	return send_mail(ctx, recipient, reply_ref, subject, body, body_len);
 }
 
 /* ------------------------------------------------------------------ */
@@ -410,6 +518,12 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 						e->size = sz;
 						e->timestamp = (i64)ts;
 						e->is_sent = is_sent;
+						cJSON *sh = cJSON_GetObjectItem(
+							item, "sig_hash");
+						if (cJSON_IsString(sh) &&
+						    is_ref(sh->valuestring))
+							e->ref = strdup(
+								sh->valuestring);
 					}
 					free(ksk);
 				}
@@ -504,6 +618,7 @@ shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 
 				char *sub = NULL;
 				char *bdy = NULL;
+				char *rref = NULL;
 				if (ksk) {
 					u8 *sym = kem_decapsulate_key(enc_key,
 								      ksk);
@@ -512,6 +627,8 @@ shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 								       enc_sub);
 						bdy = decrypt_from_b64(sym,
 								       enc_bdy);
+						rref = open_reply_ref(sym,
+								      json);
 						free(sym);
 					}
 					free(ksk);
@@ -525,6 +642,8 @@ shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 				result->body = bdy;
 				result->timestamp = (i64)ts;
 				result->size = 0;
+				result->ref = json_ref(json);
+				result->reply_ref = rref;
 
 				cJSON_Delete(json);
 			}
@@ -614,12 +733,15 @@ shyake_mail_detail *shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 				u8 *ksk =
 					load_sk_decrypted(ctx, path, &ksk_len);
 				char *sub = NULL;
+				char *rref = NULL;
 				if (ksk) {
 					u8 *sym = kem_decapsulate_key(enc_key,
 								      ksk);
 					if (sym) {
 						sub = decrypt_from_b64(sym,
 								       enc_sub);
+						rref = open_reply_ref(sym,
+								      json);
 						free(sym);
 					}
 					free(ksk);
@@ -633,6 +755,8 @@ shyake_mail_detail *shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 				result->body = NULL;
 				result->timestamp = (i64)ts;
 				result->size = sz;
+				result->ref = json_ref(json);
+				result->reply_ref = rref;
 
 				cJSON_Delete(json);
 			}
@@ -861,13 +985,14 @@ parse_saved_json(shyake_ctx *ctx, const char *mail_id, int decrypt_body)
 	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
 	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
 
-	char *sub = NULL, *bdy = NULL;
+	char *sub = NULL, *bdy = NULL, *rref = NULL;
 	if (ksk) {
 		u8 *sym = kem_decapsulate_key(enc_key, ksk);
 		if (sym) {
 			sub = decrypt_from_b64(sym, enc_sub);
 			if (decrypt_body && enc_bdy)
 				bdy = decrypt_from_b64(sym, enc_bdy);
+			rref = open_reply_ref(sym, json);
 			free(sym);
 		}
 		free(ksk);
@@ -881,6 +1006,8 @@ parse_saved_json(shyake_ctx *ctx, const char *mail_id, int decrypt_body)
 	result->body = bdy;
 	result->timestamp = (i64)ts;
 	result->size = sz;
+	result->ref = json_ref(json);
+	result->reply_ref = rref;
 
 	cJSON_Delete(json);
 	return result;
@@ -1010,4 +1137,84 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 	free(ksk);
 	closedir(d);
 	return list;
+}
+
+/* ------------------------------------------------------------------ */
+/* Finding a referenced mail                                          */
+/* ------------------------------------------------------------------ */
+
+/* mail ID in a listed mailbox with this reference, or NULL */
+static char *find_ref_in_box(shyake_ctx *ctx, const char *type, const char *ref)
+{
+	shyake_mail_list *list = shyake_check(ctx, type);
+	if (!list)
+		return NULL;
+	char *id = NULL;
+	for (int i = 0; i < list->count && !id; i++) {
+		const char *r = list->entries[i].ref;
+		if (r && strcmp(r, ref) == 0)
+			id = strdup(list->entries[i].mail_id);
+	}
+	shyake_free_mail_list(list);
+	return id;
+}
+
+/* mail ID of a saved copy with this reference, or NULL */
+static char *find_ref_in_saved(shyake_ctx *ctx, const char *ref)
+{
+	char dir_path[512];
+	snprintf(dir_path, sizeof(dir_path), "%s/saved", ctx->config_dir);
+	DIR *d = opendir(dir_path);
+	if (!d)
+		return NULL;
+
+	char *id = NULL;
+	struct dirent *ent;
+	while (!id && (ent = readdir(d)) != NULL) {
+		usize nl = strlen(ent->d_name);
+		if (nl <= 5 || strcmp(ent->d_name + nl - 5, ".json") != 0)
+			continue;
+		char path[768];
+		snprintf(path, sizeof(path), "%s/%s", dir_path, ent->d_name);
+		usize len;
+		u8 *raw = load_file(path, &len);
+		if (!raw)
+			continue;
+		cJSON *json = cJSON_ParseWithLength((const char *)raw, len);
+		free(raw);
+		char *r = json ? json_ref(json) : NULL;
+		if (r && strcmp(r, ref) == 0) {
+			id = malloc(nl - 4);
+			if (id) {
+				memcpy(id, ent->d_name, nl - 5);
+				id[nl - 5] = '\0';
+			}
+		}
+		free(r);
+		cJSON_Delete(json);
+	}
+	closedir(d);
+	return id;
+}
+
+char *shyake_find_ref(shyake_ctx *ctx, const char *ref, int *saved)
+{
+	if (saved)
+		*saved = 0;
+	if (!ctx || !is_ref(ref))
+		return NULL;
+
+	char *id = NULL;
+	if (ctx->instance_url && ctx->instance_url[0]) {
+		id = find_ref_in_box(ctx, "inbox", ref);
+		if (!id)
+			id = find_ref_in_box(ctx, "sent", ref);
+	}
+	if (!id) {
+		id = find_ref_in_saved(ctx, ref);
+		if (id && saved)
+			*saved = 1;
+	}
+	clear_error(ctx);
+	return id;
 }

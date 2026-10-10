@@ -5,6 +5,8 @@ package storetest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 
@@ -67,7 +69,9 @@ func testUsers(t *testing.T, s store.Store) {
 func testMail(t *testing.T, s store.Store) {
 	id1, _, err := s.InsertMail(ctx, mail("alice", "bobby", "s1", 100))
 	must(t, err)
-	id2, _, err := s.InsertMail(ctx, mail("carol", "bobby", "s2", 200))
+	reply := mail("carol", "bobby", "s2", 200)
+	reply.EncReplyTo = "ref"
+	id2, _, err := s.InsertMail(ctx, reply)
 	must(t, err)
 	if len(id1) != 10 || id1 == id2 {
 		t.Fatalf("ids %q %q", id1, id2)
@@ -78,8 +82,12 @@ func testMail(t *testing.T, s store.Store) {
 	if len(inbox) != 2 || inbox[0].ID != id2 || inbox[1].ID != id1 {
 		t.Errorf("inbox not newest first: %+v", inbox)
 	}
-	if inbox[0].EncBody != "" {
-		t.Error("ListMail returned a body")
+	if inbox[0].EncBody != "" || inbox[0].EncReplyTo != "" {
+		t.Error("ListMail returned a body or a reply reference")
+	}
+	// Ref is the hex SHA-256 of the signature string
+	if sum := sha256.Sum256([]byte("s1")); inbox[1].Ref != hex.EncodeToString(sum[:]) {
+		t.Errorf("Ref: %q", inbox[1].Ref)
 	}
 	sent, err := s.ListMail(ctx, "alice", true)
 	must(t, err)
@@ -94,8 +102,12 @@ func testMail(t *testing.T, s store.Store) {
 
 	m, err := s.GetMail(ctx, id1, "alice")
 	must(t, err)
-	if m.EncBody != "body" || m.Signature != "s1" || m.Timestamp != 100 {
+	if m.EncBody != "body" || m.Signature != "s1" || m.Timestamp != 100 ||
+		m.EncReplyTo != "" {
 		t.Errorf("GetMail: %+v", m)
+	}
+	if r, _ := s.GetMail(ctx, id2, "bobby"); r.EncReplyTo != "ref" {
+		t.Errorf("GetMail of a reply: %+v", r)
 	}
 	if _, err := s.GetMail(ctx, id1, "carol"); !errors.Is(err, store.ErrNotFound) {
 		t.Error("third party read a mail")
