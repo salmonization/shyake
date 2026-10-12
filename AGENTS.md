@@ -144,7 +144,7 @@ shyake/
 │       ├── internal/api/           # HTTP handlers, auth, rate limits
 │       ├── internal/federation/    # outbound client, key cache, relays
 │       ├── internal/store/         # storage interface + sqlite backend
-│       └── deploy/         # systemd unit, env example
+│       └── deploy/         # systemd unit, env example, install.sh
 ├── tests/
 │   ├── e2e_test.sh         # end-to-end test suite (bash)
 │   └── federation_test.sh  # two Go instances, relays between them
