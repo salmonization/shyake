@@ -201,14 +201,25 @@ content...
 content...
 ```
 
-The result is an encrypted draft, like one from `compose`. Send it
-with `shyake send -d <id>`. The reply goes to the other party: the
+When you leave the editor, the client saves the reply as an
+encrypted draft, then asks whether to send it. Only `y` sends it;
+Enter keeps the draft, and you send it later with
+`shyake send -d <id>`:
+
+```
+Draft 4 saved.
+Send it to flat_white now? [y/N]
+Not sent. Send it with: shyake send -d 4
+```
+
+The reply goes to the other party: the
 sender of a mail you received, or the recipient of a mail you sent.
 A mail you sent to yourself is answered to yourself. A reply has no
 `To:` line, and its recipient cannot be changed. The subject
 defaults to `Re: <subject>`; use `-s` to change it.
 
-To turn a draft you already wrote into a reply:
+To turn a draft you already wrote into a reply (it asks the same
+question):
 
 ```sh
 shyake reply fQBjZnvJ56 -d 3

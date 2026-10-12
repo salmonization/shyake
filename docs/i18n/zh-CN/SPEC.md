@@ -546,8 +546,8 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `whoami` | 打印当前配置文件（无网络请求） |
 | `send -t <to> [-s <subj>] [file]` | 发送邮件（仅文本）；失败时存为草稿 |
 | `send --draft <id> [-t <to>] [-s <subj>]` | 发送已存草稿（成功后删除） |
-| `reply <id> [-s <subj>]` | 在编辑器中对照原信编写回复草稿（§3.2） |
-| `reply <id> -d <draft>` | 把草稿变成对 `<id>` 的回复 |
+| `reply <id> [-s <subj>]` | 在编辑器中对照原信编写回复（§3.2）；先存为草稿，只有回答 `y` 才发送 |
+| `reply <id> -d <draft>` | 把草稿变成对 `<id>` 的回复；只有回答 `y` 才发送 |
 | `reply <id> [-s <subj>] <file>` | 直接发送回复（也可从 stdin 读取）；失败时存为草稿 |
 | `compose [<id>]` | 撰写或编辑加密草稿（§3.8） |
 | `check inbox\|sent [opts]` | 列出邮件箱元数据 |

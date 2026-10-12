@@ -134,3 +134,20 @@ int prompt_new_passphrase(shyake_ctx *ctx, const char *config_dir)
 	memset(pp2, 0, sizeof(pp2));
 	return 0;
 }
+
+int ask_yes(const char *question)
+{
+	/* only for an interactive run; scripts get no */
+	if (!isatty(STDIN_FILENO))
+		return 0;
+	FILE *tty = fopen("/dev/tty", "r+");
+	if (!tty)
+		return 0;
+	fprintf(tty, "%s", question);
+	fflush(tty);
+	char answer[16] = "";
+	if (!fgets(answer, sizeof(answer), tty))
+		fputc('\n', tty);
+	fclose(tty);
+	return answer[0] == 'y' || answer[0] == 'Y';
+}

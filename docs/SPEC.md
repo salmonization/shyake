@@ -794,8 +794,8 @@ Recognized environment variables:
 | `whoami` | Print current profile (no network) |
 | `send -t <to> [-s <subj>] [file]` | Send a mail (text only). Saves as a draft if it fails |
 | `send --draft <id> [-t <to>] [-s <subj>]` | Send a stored draft (deleted on success) |
-| `reply <id> [-s <subj>]` | Write a reply draft in the editor, beside the mail (§3.2) |
-| `reply <id> -d <draft>` | Turn a draft into a reply to `<id>` |
+| `reply <id> [-s <subj>]` | Write a reply in the editor, beside the mail (§3.2); save it as a draft, send only on `y` |
+| `reply <id> -d <draft>` | Turn a draft into a reply to `<id>`; send only on `y` |
 | `reply <id> [-s <subj>] <file>` | Send a reply at once (also from stdin). Saves as a draft if it fails |
 | `compose [<id>]` | Compose or edit an encrypted draft (§3.8) |
 | `check inbox\|sent [opts]` | List mailbox metadata |

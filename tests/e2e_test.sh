@@ -506,8 +506,10 @@ chmod +x "$FAKE_ED_REPLY"
 out=$(EDITOR="$FAKE_ED_REPLY" VISUAL="$FAKE_ED_REPLY" \
     on_tty "'$SHYAKE' --no-color -c '$DIR_B' reply '$REPLY_ID'")
 rc=$?; assert_exit "reply in the editor exits 0" 0 "$rc" "$out"
-assert_contains "reply in the editor: saved as a draft" \
-    "Send it with: shyake send -d" "$out"
+assert_contains "reply in the editor: asks before sending" \
+    "now? [y/N]" "$out"
+assert_contains "reply in the editor: Enter keeps it as a draft" \
+    "Not sent. Send it with: shyake send -d" "$out"
 ED_DRAFT=$(echo "$out" | sed -n 's/^Draft \([0-9]*\) saved.*/\1/p')
 assert_contains "reply in the editor: template has the subject" \
     "Subject: Re: Thread start" "$(cat "$TMPDIR_ROOT"/acct_b/.compose-*.seen)"
@@ -569,6 +571,16 @@ out=$(EDITOR="$FAKE_ED_NOCUT" VISUAL="$FAKE_ED_NOCUT" \
     on_tty "'$SHYAKE' --no-color -c '$DIR_B' reply '$REPLY_ID'")
 assert_contains "deleted >8 line: warning" "The scissors line is gone" "$out"
 assert_contains "deleted >8 line: still saved" "Send it with" "$out"
+
+# answering y sends the reply and deletes its draft
+out=$(printf 'y\n' | EDITOR="$FAKE_ED_REPLY" VISUAL="$FAKE_ED_REPLY" \
+    script -qec "'$SHYAKE' --no-color -c '$DIR_B' reply -s 'Sent at once' '$REPLY_ID'" \
+    /dev/null | tr -d '\r')
+rm -f "$TMPDIR_ROOT"/acct_b/.compose-*.seen
+assert_contains "reply, answered y: sent" "Mail sent." "$out"
+assert_contains "reply, answered y: draft deleted" "deleted." "$out"
+out=$(sh_run "$DIR_A" check "$(id_of "$DIR_A" inbox "Sent at once")" 2>&1)
+assert_contains "reply, answered y: arrives as a reply" "RE:   $REPLY_ID" "$out"
 
 # reply -d turns an existing draft into a reply
 FAKE_ED_PLAIN="$TMPDIR_ROOT/fake_editor_plain.sh"

@@ -20,4 +20,9 @@ int prompt_passphrase(shyake_ctx *ctx, const char *config_dir);
  * Returns 0 on success, -1 on mismatch or read error. */
 int prompt_new_passphrase(shyake_ctx *ctx, const char *config_dir);
 
+/* Ask a yes/no question on the terminal. Returns 1 only for an
+ * answer starting with y or Y; Enter, EOF, or stdin that is not a
+ * terminal is no. */
+int ask_yes(const char *question);
+
 #endif /* SHYAKE_PROMPT_H */

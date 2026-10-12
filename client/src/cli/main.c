@@ -706,11 +706,12 @@ static char *edit_draft(const app_config *cfg, const char *config_dir,
 /*
  * Parse an edited template and store it as a draft. A reply's
  * draft keeps reply_to as its recipient, whatever the template says.
- * Returns an exit status.
+ * out_id, when not NULL, receives the draft's id. Returns an exit
+ * status.
  */
 static int save_edited_draft(shyake_ctx *ctx, const char *config_dir, char *buf,
 			     const char *reply_ref, const char *reply_to,
-			     const char *draft_id)
+			     const char *draft_id, char **out_id)
 {
 	char *to, *subject, *body;
 	if (parse_compose_buffer(buf, &to, &subject, &body) != 0) {
@@ -744,12 +745,67 @@ static int save_edited_draft(shyake_ctx *ctx, const char *config_dir, char *buf,
 	const char *id = new_id ? new_id : draft_id;
 	if (ret != SHYAKE_OK)
 		print_drafts_error("Draft save failed.");
-	else if (reply_ref)
-		printf("Draft %s saved. Send it with: shyake send -d %s\n", id,
-		       id);
 	else
 		printf("Draft %s saved.\n", id);
+	if (ret == SHYAKE_OK && out_id)
+		*out_id = strdup(id);
 	free(new_id);
+	return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+/*
+ * A reply's draft is saved; send it only when the user says so.
+ * Sent, the draft is deleted; otherwise it stays. Returns an exit
+ * status.
+ */
+static int offer_reply_send(shyake_ctx *ctx, const char *config_dir,
+			    const char *username, const char *draft_id,
+			    const char *recipient)
+{
+	char question[320];
+	snprintf(question, sizeof(question), "Send it to %s now? [y/N] ",
+		 recipient);
+	if (!ask_yes(question)) {
+		printf("Not sent. Send it with: shyake send -d %s\n", draft_id);
+		return EXIT_SUCCESS;
+	}
+
+	shyake_mail_detail *d =
+		cli_read_draft(ctx, config_dir, username, draft_id);
+	if (!d || !d->body || !d->reply_ref) {
+		print_drafts_error("Draft read failed.");
+		shyake_free_mail_detail(d);
+		return EXIT_FAILURE;
+	}
+	shyake_err ret = SHYAKE_ERR;
+	const char *problem = subject_problem(d->subject);
+	if (problem) {
+		fprintf(stderr, "%s Edit it with: shyake compose %s\n", problem,
+			draft_id);
+		shyake_free_mail_detail(d);
+		return EXIT_FAILURE;
+	}
+	fprintf(stderr, "Replying to %s... ", recipient);
+	fflush(stderr);
+	ret = shyake_send_reply(ctx, recipient, d->reply_ref, d->subject,
+				(const u8 *)d->body, strlen(d->body));
+	if (ret == SHYAKE_OK) {
+		fprintf(stderr, "done.\n");
+		printf("Mail sent.\n");
+		if (cli_delete_draft(config_dir, draft_id) == SHYAKE_OK)
+			printf("Draft %s deleted.\n", draft_id);
+	} else {
+		fprintf(stderr, "\n");
+		print_send_error(ctx, ret, recipient);
+		if (ret == SHYAKE_ERR_BLOCKED || ret == SHYAKE_ERR_GONE ||
+		    ret == SHYAKE_ERR_NOT_FOUND)
+			printf("Draft %s is kept.\n", draft_id);
+		else
+			printf("Draft %s is kept. Retry with: shyake send -d "
+			       "%s\n",
+			       draft_id, draft_id);
+	}
+	shyake_free_mail_detail(d);
 	return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
@@ -1367,10 +1423,12 @@ int main(int argc, char *argv[])
 						   strlen(d->body), draft_id,
 						   NULL) == SHYAKE_OK) {
 					printf("Draft %s is now a reply to "
-					       "%s. Send it with: shyake send "
-					       "-d %s\n",
-					       draft_id, mail_id, draft_id);
-					status = EXIT_SUCCESS;
+					       "%s.\n",
+					       draft_id, mail_id);
+					status = offer_reply_send(
+						ctx, config_dir,
+						app_cfg->username, draft_id,
+						recipient);
 				} else {
 					print_drafts_error(
 						"Draft save failed.");
@@ -1420,10 +1478,16 @@ int main(int argc, char *argv[])
 				buf = edit_draft(app_cfg, config_dir, initial,
 						 shown);
 			}
+			char *new_id = NULL;
 			if (buf)
 				status = save_edited_draft(ctx, config_dir, buf,
 							   orig->ref, recipient,
-							   NULL);
+							   NULL, &new_id);
+			if (new_id)
+				status = offer_reply_send(ctx, config_dir,
+							  app_cfg->username,
+							  new_id, recipient);
+			free(new_id);
 			free(buf);
 			free(initial);
 			free(shown);
@@ -1514,7 +1578,7 @@ reply_done:
 				      NULL;
 		int status = buf ? save_edited_draft(ctx, config_dir, buf,
 						     reply_ref, reply_to,
-						     draft_id) :
+						     draft_id, NULL) :
 				   EXIT_FAILURE;
 		free(buf);
 		free(initial);
