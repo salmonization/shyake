@@ -171,17 +171,17 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **Reply command**:
 
-`reply` writes a reply to a piece of mail. It opens your editor on
-a reply draft, beside the mail you answer. In `vim` and `nvim`, the
-mail sits read-only in a window on the left and you write on the
-right. Other editors show the mail at the top of the file, above a
-scissors line (`>8`); the client drops that line and everything
-above it. The editor opens with the cursor where you write the
-reply.
+`reply` opens your editor on a reply to a piece of mail. The reply
+goes to the other party of the mail. The subject is
+`Re: <subject>`. Use `-s` to change it.
 
 ```sh
 shyake reply fQBjZnvJ56
 ```
+
+`vim` and `nvim` show the mail read-only in a window on the left.
+Other editors show the mail above a scissors line (`>8`). The client
+ignores the scissors line and all text above it.
 
 ```
 FROM:  flat_white
@@ -201,10 +201,9 @@ content...
 content...
 ```
 
-When you leave the editor, the client saves the reply as an
-encrypted draft, then asks whether to send it. Only `y` sends it;
-Enter keeps the draft, and you send it later with
-`shyake send -d <id>`:
+When you close the editor, the client saves the reply as a draft.
+Then it asks if it must send the reply. Only `y` sends it. Enter
+keeps the draft:
 
 ```
 Draft 4 saved.
@@ -212,28 +211,23 @@ Send it to flat_white now? [y/N]
 Not sent. Send it with: shyake send -d 4
 ```
 
-The reply goes to the other party: the
-sender of a mail you received, or the recipient of a mail you sent.
-A mail you sent to yourself is answered to yourself. A reply has no
-`To:` line, and its recipient cannot be changed. The subject
-defaults to `Re: <subject>`; use `-s` to change it.
+A reply has no `To:` line. You cannot change its recipient.
 
-To turn a draft you already wrote into a reply (it asks the same
-question):
+To make a draft into a reply:
 
 ```sh
 shyake reply fQBjZnvJ56 -d 3
 ```
 
-As with `send`, a body from a file or from stdin is sent at once:
+To send a reply from a file or from stdin immediately:
 
 ```sh
 shyake reply fQBjZnvJ56 < answer.txt
 ```
 
-`check <id>`, `fetch`, and `read` show which mail a reply answers on
-an `RE:` line. It shows `(saved)` after the ID when only your saved
-copy is left, and `(unavailable)` when the mail is gone.
+`check <id>`, `fetch`, and `read` show the mail that a reply answers
+on the `RE:` line. `(saved)` after the ID means that only your saved
+copy exists. `(unavailable)` means that the mail is gone.
 
 ```
 FROM:  salmon
@@ -243,9 +237,9 @@ DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?
 ```
 
-The server cannot read which mail a reply answers: the client
-encrypts that with the mail. Both your instance and the recipient's
-must run server v0.4.0 or later.
+The client encrypts the reference to the answered mail. The server
+cannot read it. Your instance and the instance of the recipient must
+run server v0.4.0 or later.
 
 **Compose command**:
 

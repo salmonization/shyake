@@ -78,12 +78,11 @@ reuses existing resources and keeps your settings. It also sets the version that
 from `server/VERSION`.
 
 **Upgrading to v0.4.0.** v0.4.0 adds replies (protocol level 3,
-[SPEC.md §3.2](SPEC.md)). It adds a column to the `mail` table:
-`deploy.sh --update` applies the migration, and the Go server
-applies it when it starts. Mail stored before stays readable. Only
-instances at level 3 accept a reply. A reply to a user on an older
-instance fails with a clear message, and other mail still flows.
-Upgrade the server before clients send replies.
+[SPEC.md §3.2](SPEC.md)) and a column in the `mail` table.
+`deploy.sh --update` applies the migration. The Go server applies it
+when it starts. Only instances at level 3 accept replies. Other mail
+works between all versions. Upgrade the server before clients send
+replies.
 
 **Upgrading to v0.3.0.** From v0.3.0, clients sign the body of
 block, unblock, and rotate requests (protocol level 2, [SPEC.md
@@ -148,59 +147,54 @@ Node.js and no Cloudflare account.
 
 Prerequisites:
 
-- A machine that stays online. The examples below assume Linux with
+- A machine that stays online. The examples below use Linux with
   systemd.
-- `curl`, `tar` and `sha256sum` to download a release build, Go
-  1.26 or newer to build the binary, or Docker.
-- For federation: a public domain name that points at the machine,
-  and a reverse proxy with a valid TLS certificate (step 4).
+- For federation: a public domain name for the machine, and a reverse
+  proxy with a valid TLS certificate.
 
-Steps:
+Install a release build with the install script, or build the server
+from source. A build from source is safer: you run code that you can
+read, and you do not trust the build machine. Then set up a reverse
+proxy.
 
-1. **Get the binary**. Download a release build, or build it from
-source. Building it yourself is the safer choice: you run code you
-can read, and you do not have to trust the build machine or the
-GitHub account that published the release. A release build is
-quicker to set up.
+#### Install a release build
 
-**Download a release build.** Not every release has server builds: a
-release that changes only the client has none. These commands find
-the newest release that has a build for your machine, download it,
-and check its SHA-256 against the digest GitHub reports for it. Set
-`CHANNEL=preview` to take pre-releases (such as `v0.4.0-indev.1`)
-too; with `stable`, they are skipped.
+Run this command:
 
 ```sh
-CHANNEL=stable          # or: preview
-ASSET=shyake-server-linux-$(uname -m).tar.gz
-TAG='v[0-9]+[.][0-9]+[.][0-9]+'
-[ "$CHANNEL" = preview ] && TAG='v[^/]+'
-
-# newest matching release: download URL and SHA-256
-set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?per_page=100' |
-    awk -v re="/download/$TAG/$ASSET\"" '
-        /"digest":/ { d = $2 }
-        /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
-    tr -d '",')
-URL=$1 SUM=${2#sha256:}
-[ -n "$URL" ] || echo "no release build for $(uname -m): build from source" >&2
-
-curl -fLO "$URL"
-echo "$SUM  $ASSET" | sha256sum -c -
-tar -xzf "$ASSET"
-cd "${ASSET%.tar.gz}"
-./shyake-server -version
+curl -fsSL https://raw.githubusercontent.com/salmonization/shyake/main/server/go/deploy/install.sh | sh
 ```
 
-Stop if `sha256sum` does not print `OK`. The archive contains the
-binary, `shyake-server.service`, and `shyake.env.example`. The
-builds are for Linux on `x86_64` and `aarch64`, named as `uname -m`
-prints them. On anything else, build from source. You can also pick a release by hand on the [releases
-page](https://github.com/salmonization/shyake/releases).
+The script asks for a release channel. `stable` gets releases only.
+`preview` also gets pre-releases, such as `v0.4.0-indev.1`. Then the
+script:
 
-**Build from source.** You need Go 1.26 or newer. Check out the
-newest release first: `main` can hold changes that are not released
-yet. To build a pre-release, check out its tag instead.
+1. Finds the newest release with a server build for your machine.
+2. Compares the SHA-256 of the build with the digest from GitHub.
+3. Installs the binary, the systemd unit, and
+   `/etc/shyake/shyake.env`.
+4. Asks for your instance domain (first install only).
+5. Starts the service.
+
+Release builds exist for Linux on `x86_64` and `aarch64`. To read the
+script before it runs, download it first:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/salmonization/shyake/main/server/go/deploy/install.sh
+less install.sh
+sh install.sh
+```
+
+To change other settings, edit `/etc/shyake/shyake.env`, then restart
+the service. [SPEC.md §11.2](SPEC.md) describes all settings. Also
+set `SHYAKE_GITHUB_TOKEN` ([GitHub token](#github-token-recommended)).
+
+#### Build from source
+
+You need Go 1.26 or newer.
+
+1. **Build the newest release.** The `main` branch can have changes
+that are not released. To build a pre-release, check out its tag.
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
@@ -212,15 +206,12 @@ CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
 ```
 
 The `-ldflags` option sets the version that `shyake-server -version`
-and `GET /api/version` report. Without it, the version is `dev`.
+and `GET /api/version` show. Without it, the version is `dev`. The
+result is a static binary. It runs on any Linux machine with the same
+CPU architecture.
 
-Both ways give a static binary. You can copy it to any Linux machine
-with the same CPU architecture.
-
-2. **Install it with systemd**. Create a system user for the
-service, then install the files. In a source checkout they are in
-`server/go/deploy/`. From a release archive, remove `deploy/` from
-the commands below.
+2. **Install it with systemd.** Create a system user, then install
+the files from `server/go/deploy/`:
 
 ```sh
 sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
@@ -229,21 +220,21 @@ sudo install -D -m 640 -g shyake deploy/shyake.env.example /etc/shyake/shyake.en
 sudo install -m 644 deploy/shyake-server.service /etc/systemd/system/
 ```
 
-3. **Configure it**. Edit `/etc/shyake/shyake.env` and set at least
-the instance domain:
+3. **Configure it.** Edit `/etc/shyake/shyake.env`. Set at least the
+instance domain:
 
 ```sh
 SHYAKE_INSTANCE_DOMAIN=your.domain.example
 SHYAKE_LISTEN=127.0.0.1:8787
 ```
 
-Your instance domain appears in every address on your instance
-(`user@your.domain.example`). Other instances use it to route
-federated mail back to you. The file lists every other setting with
-its default. [SPEC.md §11.2](SPEC.md) describes them all. Also set
+Every address on your instance contains the instance domain
+(`user@your.domain.example`). Other instances use it to send mail to
+you. The file lists every other setting with its default.
+[SPEC.md §11.2](SPEC.md) describes them all. Also set
 `SHYAKE_GITHUB_TOKEN` ([GitHub token](#github-token-recommended)).
 
-Then start the service:
+4. **Start it.**
 
 ```sh
 sudo systemctl daemon-reload
@@ -251,18 +242,18 @@ sudo systemctl enable --now shyake-server
 curl http://127.0.0.1:8787/health
 ```
 
-A `200 OK` means the server and its database work. The service runs
-as the `shyake` user. It can write only to `/var/lib/shyake`, where
-the database lives.
+A `200 OK` means that the server and its database work. The service
+runs as the `shyake` user. It can write only to `/var/lib/shyake`,
+where the database is.
 
-4. **Set up a reverse proxy with TLS**
+#### Set up a reverse proxy with TLS
 
-This step is **required for federation**. Instances always contact
-each other over `https://<domain>/...`, so your instance must be
-reachable at `https://your.domain.example` with a certificate other
-instances accept. A self-signed certificate does not work. If your
-instance is private (its users only mail each other), you can skip
-this step and let clients connect over plain HTTP.
+Federation **requires** a reverse proxy with TLS. Instances always
+connect to each other over `https://<domain>/...`. Thus your instance
+must be at `https://your.domain.example`, with a certificate that
+other instances accept. A self-signed certificate does not work. A
+private instance (its users only mail each other) does not need a
+proxy. Its clients can connect over plain HTTP.
 
 With [Caddy](https://caddyserver.com/), Caddy obtains and renews
 certificates automatically. The entire `Caddyfile` is:
@@ -301,18 +292,11 @@ set `SHYAKE_TRUSTED_PROXIES` to the bridge network, as above.
 
 #### Upgrading
 
-Install the new binary, then restart the service. With release
-builds, run the download commands from step 1 again in a new
-directory, then:
+For a release build, run the install script again. It keeps
+`/etc/shyake/shyake.env` and the systemd unit. It asks before it
+installs a version that is older than the installed one.
 
-```sh
-sudo install -m 755 shyake-server /usr/local/bin/
-sudo systemctl restart shyake-server
-curl http://127.0.0.1:8787/api/version
-```
-
-When you build from source, check out the newest release
-(`vX.Y.Z`, pre-releases skipped) and build it again:
+For a build from source, build the newest release again:
 
 ```sh
 cd shyake

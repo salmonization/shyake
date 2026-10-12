@@ -2,7 +2,7 @@
 
 [English](../../DEPLOY.md) | [简体中文](../zh-CN/DEPLOY.md) | 日本語
 
-> Translated by Claude Fable 5
+> Translated by Claude
 
 Shyake のサーバーには、同じ HTTP API を提供する 2 つの実装があります。クライアントはどちらにも接続でき、両者は互いにフェデレーションできます。
 
@@ -61,7 +61,7 @@ cd shyake/server/cf
 
 すべてのリリースタグを取得して最新の正式リリース（`vX.Y.Z`）に切り替え、プレリリースや未リリースのコードは飛ばします。その後、新しいマイグレーションを適用して再デプロイします。切り替え後に Git が "detached HEAD" と表示しますが、これは想定どおりです。既存のリソースは再利用され、設定もそのまま保たれます。また、`GET /api/version` が返すバージョンを `server/VERSION` から設定します。
 
-**v0.4.0 へのアップグレード。** v0.4.0 は返信機能を追加し（プロトコルレベル 3、[SPEC.md §3.2](SPEC.md)）、`mail` テーブルに列を 1 つ追加します。`deploy.sh --update` がこのマイグレーションを適用し、Go サーバーは起動時に適用します。それ以前に保存されたメールは引き続き読めます。返信を受け付けるのはレベル 3 のインスタンスだけです。古いインスタンスのユーザーへの返信は明確なメッセージとともに失敗しますが、それ以外のメールは通常どおり届きます。クライアントが返信を送る前に、サーバーをアップグレードしてください。
+**v0.4.0 へのアップグレード。** v0.4.0 は返信機能（プロトコルレベル 3、[SPEC.md §3.2](SPEC.md)）と、`mail` テーブルの列を 1 つ追加します。`deploy.sh --update` がマイグレーションを適用し、Go サーバーは起動時に適用します。返信を受け付けるのはレベル 3 のインスタンスだけです。その他のメールはすべてのバージョン間で通常どおり届きます。クライアントが返信を送る前にサーバーをアップグレードしてください。
 
 **v0.3.0 へのアップグレード。** v0.3.0 から、クライアントは block、unblock、rotate のリクエストボディに署名します（プロトコルレベル 2、[SPEC.md §3.3](SPEC.md)）。v0.3.0 のクライアントは古いサーバーでこの 3 つの操作を行えず、古いクライアントも v0.3.0 のサーバーでは行えません。先にサーバーをアップグレードし、その後クライアントを `shyake update` で更新してください。Go サーバーも同様です。
 
@@ -101,41 +101,42 @@ Go サーバーは自分のマシン上で動作します。単一の静的バ�
 
 前提条件：
 
-- 常時オンラインのマシン。以下の例は systemd を備えた Linux を想定しています。
-- リリースビルドのダウンロードには `curl`、`tar`、`sha256sum`、ビルドには Go 1.26 以降が必要です。Docker も使えます。
-- フェデレーションに参加する場合：そのマシンを指す公開ドメイン名と、有効な TLS 証明書を持つリバースプロキシ（手順 4）。
+- 常時オンラインのマシン。以下の例は systemd を備えた Linux を使います。
+- フェデレーションに参加する場合：そのマシンを指す公開ドメイン名と、有効な TLS 証明書を持つリバースプロキシ。
 
-手順：
+インストールスクリプトでリリースビルドを入れるか、ソースからビルドします。ソースからビルドするほうが安全です。自分で読めるコードを動かし、ビルドマシンを信頼する必要がありません。その後、リバースプロキシを設定します。
 
-1. **バイナリを入手**します。リリースビルドをダウンロードするか、ソースからビルドします。自分でビルドするほうが安全です。自分で読めるコードを動かすことになり、ビルドマシンやリリースを公開した GitHub アカウントを信頼する必要がありません。リリースビルドのほうが手軽に用意できます。
+#### リリースビルドをインストール
 
-**リリースビルドをダウンロードする。** すべてのリリースにサーバービルドがあるわけではありません。クライアントだけを変更したリリースにはありません。以下のコマンドは、このマシン向けのビルドを含む最新のリリースを見つけてダウンロードし、GitHub が示すダイジェストで SHA-256 を検証します。`CHANNEL=preview` にするとプレリリース（`v0.4.0-indev.1` など）も対象になり、`stable` ではスキップします。
+次のコマンドを実行します：
 
 ```sh
-CHANNEL=stable          # or: preview
-ASSET=shyake-server-linux-$(uname -m).tar.gz
-TAG='v[0-9]+[.][0-9]+[.][0-9]+'
-[ "$CHANNEL" = preview ] && TAG='v[^/]+'
-
-# 条件に合う最新のリリース：ダウンロード URL と SHA-256
-set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?per_page=100' |
-    awk -v re="/download/$TAG/$ASSET\"" '
-        /"digest":/ { d = $2 }
-        /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
-    tr -d '",')
-URL=$1 SUM=${2#sha256:}
-[ -n "$URL" ] || echo "$(uname -m) 向けのリリースビルドはありません。ソースからビルドしてください" >&2
-
-curl -fLO "$URL"
-echo "$SUM  $ASSET" | sha256sum -c -
-tar -xzf "$ASSET"
-cd "${ASSET%.tar.gz}"
-./shyake-server -version
+curl -fsSL https://raw.githubusercontent.com/salmonization/shyake/main/server/go/deploy/install.sh | sh
 ```
 
-`sha256sum` が `OK` と表示しなければ、そこで中止してください。アーカイブにはバイナリ、`shyake-server.service`、`shyake.env.example` が入っています。リリースビルドは Linux の `x86_64` と `aarch64` 向けだけで、ファイル名は `uname -m` の出力と同じです。それ以外の環境ではソースからビルドしてください。[リリースページ](https://github.com/salmonization/shyake/releases)から手動でリリースを選ぶこともできます。
+スクリプトはリリースチャンネルを尋ねます。`stable` は正式リリースだけを、`preview` は `v0.4.0-indev.1` のようなプレリリースも取得します。その後、スクリプトは次を行います：
 
-**ソースからビルドする。** Go 1.26 以降が必要です。先に最新の正式リリースに切り替えます。`main` には未リリースの変更が含まれることがあるためです。プレリリースをビルドする場合は、そのタグに切り替えてください。
+1. このマシン向けのサーバービルドを持つ最新のリリースを探します。
+2. ビルドの SHA-256 を GitHub のダイジェストと比較します。
+3. バイナリ、systemd unit、`/etc/shyake/shyake.env` をインストールします。
+4. インスタンスのドメインを尋ねます（初回のみ）。
+5. サービスを起動します。
+
+リリースビルドは Linux の `x86_64` と `aarch64` 向けだけです。実行前にスクリプトを読むには、先にダウンロードします：
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/salmonization/shyake/main/server/go/deploy/install.sh
+less install.sh
+sh install.sh
+```
+
+その他の設定を変えるには、`/etc/shyake/shyake.env` を編集してからサービスを再起動します。すべての設定は [SPEC.md §11.2](SPEC.md) にあります。`SHYAKE_GITHUB_TOKEN` も設定してください（[GitHub トークン](#github-トークン推奨)）。
+
+#### ソースからビルド
+
+Go 1.26 以降が必要です。
+
+1. **最新の正式リリースをビルド**します。`main` ブランチには未リリースの変更があることがあります。プレリリースをビルドするには、そのタグに切り替えます。
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
@@ -146,11 +147,9 @@ CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server
 ```
 
-`-ldflags` は `shyake-server -version` と `GET /api/version` が返すバージョンを設定します。付けない場合、バージョンは `dev` になります。
+`-ldflags` は `shyake-server -version` と `GET /api/version` が示すバージョンを設定します。付けない場合、バージョンは `dev` です。結果は静的バイナリで、CPU アーキテクチャが同じ任意の Linux マシンで動きます。
 
-どちらの方法でも静的バイナリが得られ、CPU アーキテクチャが同じ任意の Linux マシンにコピーして使えます。
-
-2. **systemd でインストール**します。サービス用のシステムユーザーを作成してから、ファイルをインストールします。ソースではこれらのファイルは `server/go/deploy/` にあります。リリースのアーカイブを使う場合は、以下のコマンドから `deploy/` を取り除いてください：
+2. **systemd でインストール**します。システムユーザーを作成し、`server/go/deploy/` のファイルをインストールします：
 
 ```sh
 sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
@@ -166,9 +165,9 @@ SHYAKE_INSTANCE_DOMAIN=your.domain.example
 SHYAKE_LISTEN=127.0.0.1:8787
 ```
 
-インスタンスのドメインはそのインスタンス上のすべてのアドレス（`user@your.domain.example`）に埋め込まれ、他のインスタンスはこれを使ってフェデレーションメールを送り返します。このファイルには他のすべての設定がデフォルト値とともに記載されています。詳細は [SPEC.md §11.2](SPEC.md) を参照してください。あわせて `SHYAKE_GITHUB_TOKEN` も設定してください（[GitHub トークン](#github-トークン推奨)を参照）。
+インスタンス上のすべてのアドレスにインスタンスのドメインが入ります（`user@your.domain.example`）。他のインスタンスはこれを使ってあなたにメールを送ります。ファイルにはその他の設定と既定値がすべてあり、[SPEC.md §11.2](SPEC.md) に説明があります。`SHYAKE_GITHUB_TOKEN` も設定してください（[GitHub トークン](#github-トークン推奨)）。
 
-次にサービスを起動します：
+4. **起動**します。
 
 ```sh
 sudo systemctl daemon-reload
@@ -176,11 +175,11 @@ sudo systemctl enable --now shyake-server
 curl http://127.0.0.1:8787/health
 ```
 
-`200 OK` が返れば、サーバーとデータベースは正常に動作しています。サービスは `shyake` ユーザーとして動作し、データベースを置く `/var/lib/shyake` にしか書き込めません。
+`200 OK` は、サーバーとデータベースが動作していることを示します。サービスは `shyake` ユーザーで動き、データベースのある `/var/lib/shyake` にだけ書き込めます。
 
-4. **TLS 付きリバースプロキシを設定**します
+#### TLS 付きリバースプロキシを設定
 
-この手順は**フェデレーションに必須**です。インスタンス同士は常に `https://<domain>/...` で通信するため、あなたのインスタンスは `https://your.domain.example` で到達可能で、他のインスタンスが受け入れる証明書を持っている必要があります。自己署名証明書は使えません。インスタンスが非公開（ユーザー同士でしかメールしない）であれば、この手順を省略して、クライアントを平文 HTTP で接続させることもできます。
+フェデレーションには TLS 付きリバースプロキシが**必須**です。インスタンス同士は常に `https://<domain>/...` で接続します。そのため、あなたのインスタンスは `https://your.domain.example` にあり、他のインスタンスが受け入れる証明書を持つ必要があります。自己署名証明書は使えません。非公開のインスタンス（ユーザー同士でしかメールしない）にはプロキシは不要で、クライアントは平文 HTTP で接続できます。
 
 [Caddy](https://caddyserver.com/) を使えば、証明書の取得と更新は自動で行われます。`Caddyfile` はこれだけです：
 
@@ -210,15 +209,9 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### アップグレード
 
-新しいバイナリをインストールしてから、サービスを再起動します。リリースビルドを使う場合は、新しいディレクトリで手順 1 のダウンロードコマンドをもう一度実行してから、次を実行します：
+リリースビルドの場合は、インストールスクリプトをもう一度実行します。スクリプトは `/etc/shyake/shyake.env` と systemd unit を保ちます。インストール済みより古いバージョンを入れる前には確認します。
 
-```sh
-sudo install -m 755 shyake-server /usr/local/bin/
-sudo systemctl restart shyake-server
-curl http://127.0.0.1:8787/api/version
-```
-
-ソースからビルドする場合は、最新の正式リリース（`vX.Y.Z`、プレリリースは除く）に切り替えてビルドし直します：
+ソースからビルドした場合は、最新の正式リリースをもう一度ビルドします：
 
 ```sh
 cd shyake

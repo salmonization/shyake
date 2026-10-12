@@ -2,7 +2,7 @@
 
 [English](../../DEPLOY.md) | 简体中文 | [日本語](../ja/DEPLOY.md)
 
-> Translated by Claude Fable 5
+> Translated by Claude
 
 Shyake 的服务端有两个实现，提供同一套 HTTP API。客户端可以连接其中任意一个，两种实例之间也能互相联邦。
 
@@ -61,7 +61,7 @@ cd shyake/server/cf
 
 它会拉取所有发布 tag，切换到最新的正式版（`vX.Y.Z`），跳过预发布版本和尚未发布的代码，然后应用新增的迁移并重新部署。切换后 Git 会提示处于 "detached HEAD" 状态，这是正常的。已有资源会被复用，你的配置也会保留。它还会根据 `server/VERSION` 设置 `GET /api/version` 报告的版本号。
 
-**升级到 v0.4.0。** v0.4.0 新增回复功能（协议级别 3，见 [SPEC.md §3.2](SPEC.md)），并给 `mail` 表新增一列：`deploy.sh --update` 会应用该迁移，Go 服务端会在启动时应用。之前存储的邮件仍可正常读取。只有级别 3 的实例才接受回复：回复给旧实例上的用户会失败并给出明确提示，其他邮件不受影响。请先升级服务端，再让客户端发送回复。
+**升级到 v0.4.0。** v0.4.0 新增回复功能（协议级别 3，见 [SPEC.md §3.2](SPEC.md)），并给 `mail` 表增加一列。`deploy.sh --update` 会执行该迁移，Go 服务端在启动时执行。只有级别 3 的实例接受回复，其他邮件在所有版本之间照常收发。请先升级服务端，再让客户端发送回复。
 
 **升级到 v0.3.0。** 从 v0.3.0 起，客户端会对 block、unblock 和 rotate 请求的请求体签名（协议级别 2，见 [SPEC.md §3.3](SPEC.md)）。v0.3.0 客户端无法在旧服务端上执行这三个操作，旧客户端也无法在 v0.3.0 服务端上执行。请先升级服务端，客户端再用 `shyake update` 更新。Go 服务端同样适用。
 
@@ -101,41 +101,42 @@ Go 服务端运行在你自己的机器上。它是单个静态二进制文件 `
 
 前提条件：
 
-- 一台保持在线的机器。下面的示例假设是带 systemd 的 Linux。
-- 下载发布版构建需要 `curl`、`tar` 和 `sha256sum`；从源码构建需要 Go 1.26 或更新版本；或者使用 Docker。
-- 若要参与联邦网络：一个指向该机器的公网域名，以及一个带有效 TLS 证书的反向代理（第 4 步）。
+- 一台保持在线的机器。下面的示例使用带 systemd 的 Linux。
+- 若要参与联邦网络：一个指向该机器的公网域名，以及一个带有效 TLS 证书的反向代理。
 
-步骤：
+用安装脚本安装发布版构建，或者从源码构建。从源码构建更稳妥：你运行的是自己能读到的代码，不需要信任构建机器。之后配置反向代理。
 
-1. **获取二进制文件**。可以下载发布版构建，也可以从源码构建。自行构建更稳妥：你运行的是自己能读到的代码，不必信任构建机器和发布这个版本的 GitHub 账户。下载发布版构建则更省事。
+#### 安装发布版构建
 
-**下载发布版构建。** 并不是每个发布都有服务端构建：只改动客户端的发布没有。下面的命令会找到带有你这台机器对应构建的最新发布，下载它，并用 GitHub 给出的摘要校验其 SHA-256。设置 `CHANNEL=preview` 会把预发布版本（例如 `v0.4.0-indev.1`）也包括进来；`stable` 则跳过它们。
+运行这条命令：
 
 ```sh
-CHANNEL=stable          # or: preview
-ASSET=shyake-server-linux-$(uname -m).tar.gz
-TAG='v[0-9]+[.][0-9]+[.][0-9]+'
-[ "$CHANNEL" = preview ] && TAG='v[^/]+'
-
-# 最新的匹配发布：下载地址和 SHA-256
-set -- $(curl -fsSL 'https://api.github.com/repos/salmonization/shyake/releases?per_page=100' |
-    awk -v re="/download/$TAG/$ASSET\"" '
-        /"digest":/ { d = $2 }
-        /"browser_download_url":/ { if ($2 ~ re) { print $2, d; exit } d = "" }' |
-    tr -d '",')
-URL=$1 SUM=${2#sha256:}
-[ -n "$URL" ] || echo "$(uname -m) 没有发布版构建，请从源码构建" >&2
-
-curl -fLO "$URL"
-echo "$SUM  $ASSET" | sha256sum -c -
-tar -xzf "$ASSET"
-cd "${ASSET%.tar.gz}"
-./shyake-server -version
+curl -fsSL https://raw.githubusercontent.com/salmonization/shyake/main/server/go/deploy/install.sh | sh
 ```
 
-如果 `sha256sum` 没有输出 `OK`，请停止。压缩包里有二进制文件、`shyake-server.service` 和 `shyake.env.example`。发布版构建只提供 `x86_64` 和 `aarch64` 的 Linux 版本，文件名与 `uname -m` 的输出一致；其他平台请从源码构建。你也可以在 [Releases 页面](https://github.com/salmonization/shyake/releases)手动选择发布。
+脚本会询问发布渠道。`stable` 只获取正式版，`preview` 也获取预发布版本，例如 `v0.4.0-indev.1`。然后脚本会：
 
-**从源码构建。** 需要 Go 1.26 或更新版本。先切换到最新的正式版：`main` 上可能有尚未发布的改动。要构建预发布版本，请改为切换到它的 tag。
+1. 找到带有本机对应构建的最新发布。
+2. 把构建的 SHA-256 与 GitHub 给出的摘要比对。
+3. 安装二进制文件、systemd unit 和 `/etc/shyake/shyake.env`。
+4. 询问实例域名（仅首次安装）。
+5. 启动服务。
+
+发布版构建只提供 Linux 的 `x86_64` 和 `aarch64` 版本。要在运行前阅读脚本，先下载它：
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/salmonization/shyake/main/server/go/deploy/install.sh
+less install.sh
+sh install.sh
+```
+
+要修改其他设置，编辑 `/etc/shyake/shyake.env`，然后重启服务。[SPEC.md §11.2](SPEC.md) 说明了所有设置。另外请设置 `SHYAKE_GITHUB_TOKEN`（见 [GitHub token](#github-token建议配置)）。
+
+#### 从源码构建
+
+需要 Go 1.26 或更新版本。
+
+1. **构建最新的正式版。** `main` 分支上可能有尚未发布的改动。要构建预发布版本，请切换到它的 tag。
 
 ```sh
 git clone https://github.com/salmonization/shyake.git
@@ -146,11 +147,9 @@ CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(cat ../VERSION)" \
     -o shyake-server ./cmd/shyake-server
 ```
 
-`-ldflags` 设置 `shyake-server -version` 和 `GET /api/version` 报告的版本号；不加时版本号为 `dev`。
+`-ldflags` 设置 `shyake-server -version` 和 `GET /api/version` 显示的版本号。不加时版本号为 `dev`。得到的是静态二进制文件，可以在任何 CPU 架构相同的 Linux 机器上运行。
 
-两种方式得到的都是静态二进制文件，可以复制到任何 CPU 架构相同的 Linux 机器上运行。
-
-2. **用 systemd 安装**。先为服务创建一个系统用户，再安装文件。源码中这些文件位于 `server/go/deploy/`；如果用的是发布版压缩包，把下面命令里的 `deploy/` 去掉即可：
+2. **用 systemd 安装。** 创建系统用户，然后安装 `server/go/deploy/` 中的文件：
 
 ```sh
 sudo useradd --system --home-dir /var/lib/shyake --shell /usr/sbin/nologin shyake
@@ -159,16 +158,16 @@ sudo install -D -m 640 -g shyake deploy/shyake.env.example /etc/shyake/shyake.en
 sudo install -m 644 deploy/shyake-server.service /etc/systemd/system/
 ```
 
-3. **配置**。编辑 `/etc/shyake/shyake.env`，至少设置实例域名：
+3. **配置。** 编辑 `/etc/shyake/shyake.env`，至少设置实例域名：
 
 ```sh
 SHYAKE_INSTANCE_DOMAIN=your.domain.example
 SHYAKE_LISTEN=127.0.0.1:8787
 ```
 
-实例域名会嵌入到你实例上的每一个地址中（`user@your.domain.example`），其他实例也依靠它把联邦邮件路由回你这里。该文件列出了其余所有设置及其默认值，完整说明见 [SPEC.md §11.2](SPEC.md)。另外请设置 `SHYAKE_GITHUB_TOKEN`（见 [GitHub token](#github-token建议配置)）。
+实例上的每个地址都包含实例域名（`user@your.domain.example`）。其他实例用它把邮件发给你。该文件列出了其他所有设置及其默认值，[SPEC.md §11.2](SPEC.md) 有完整说明。另外请设置 `SHYAKE_GITHUB_TOKEN`（见 [GitHub token](#github-token建议配置)）。
 
-然后启动服务：
+4. **启动。**
 
 ```sh
 sudo systemctl daemon-reload
@@ -176,11 +175,11 @@ sudo systemctl enable --now shyake-server
 curl http://127.0.0.1:8787/health
 ```
 
-返回 `200 OK` 即表示服务端和数据库工作正常。服务以 `shyake` 用户运行，只能写入存放数据库的 `/var/lib/shyake`。
+返回 `200 OK` 表示服务端和数据库都正常。服务以 `shyake` 用户运行，只能写入数据库所在的 `/var/lib/shyake`。
 
-4. **配置带 TLS 的反向代理**
+#### 配置带 TLS 的反向代理
 
-这一步是**联邦网络所必需的**。实例之间总是通过 `https://<domain>/...` 互相联系，因此你的实例必须能通过 `https://your.domain.example` 访问，并且持有其他实例认可的证书。自签名证书无效。如果你的实例是私有的（其用户只在彼此之间通信），可以跳过这一步，让客户端通过明文 HTTP 连接。
+联邦网络**必须**使用带 TLS 的反向代理。实例之间总是通过 `https://<domain>/...` 连接，因此你的实例必须位于 `https://your.domain.example`，并持有其他实例认可的证书。自签名证书无效。私有实例（其用户只在彼此之间通信）不需要代理，客户端可以通过明文 HTTP 连接。
 
 使用 [Caddy](https://caddyserver.com/) 时，证书会自动获取并续期，整个 `Caddyfile` 只需：
 
@@ -210,15 +209,9 @@ docker run -d --name shyake --restart unless-stopped \
 
 #### 升级
 
-安装新的二进制文件，然后重启服务。使用发布版构建时，在一个新目录中再次运行第 1 步的下载命令，然后：
+发布版构建：再次运行安装脚本。脚本会保留 `/etc/shyake/shyake.env` 和 systemd unit，安装比当前更旧的版本前会先询问。
 
-```sh
-sudo install -m 755 shyake-server /usr/local/bin/
-sudo systemctl restart shyake-server
-curl http://127.0.0.1:8787/api/version
-```
-
-从源码构建时，切换到最新的正式版（`vX.Y.Z`，跳过预发布版本）并重新构建：
+从源码构建：重新构建最新的正式版：
 
 ```sh
 cd shyake

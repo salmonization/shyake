@@ -132,28 +132,27 @@ secret with its KEM secret key. It XORs the secret against the
 encrypted key field to recover the symmetric key, then decrypts the
 content.
 
-**Replies.** A reply names the mail it answers by that mail's
-**reference**: the lowercase hex SHA-256 of the mail's `signature`
-field, as the string the server stores (64 characters). A relay
-forwards the signed payload byte for byte (§6.2), so both instances
-store the same signature. The sender and the recipient therefore
-compute the same reference, though their `mail_id`s differ.
+**Replies.** A reply identifies the answered mail by its
+**reference**. The reference is the lowercase hex SHA-256 of the
+`signature` string of that mail (64 characters). A relay forwards
+the signed payload without change (§6.2). Thus both instances store
+the same signature, and both parties get the same reference. Their
+`mail_id`s are different.
 
-The client encrypts the reference with the reply's symmetric key, as
-it does the subject, and sends it as `enc_reply_to`. The server
-stores it but cannot read it: it learns that a mail is a reply, but
-not which mail it answers.
+The client encrypts the reference with the symmetric key of the
+reply, as it encrypts the subject. It sends the result as
+`enc_reply_to`. The server knows that a mail is a reply. It does not
+know which mail the reply answers.
 
-A reply goes to the other party of the mail it answers: the sender of
-a received mail, or the recipient of a sent one. A mail that a user
-sent to themselves is answered to themselves. This is a client
-convention. The server cannot check it.
+A reply goes to the other party of the answered mail. For a received
+mail, this is the sender. For a sent mail, this is the recipient. A
+reply to a mail to yourself goes to yourself. The server cannot
+check this rule. Clients apply it.
 
-To show which mail a reply answers, the client looks for the
-reference among the `sig_hash` values of its inbox and sent listings
-(§5.2), then among its saved mail (§9). The servers have no lookup by
-reference, so they never learn which mail the client looks for. A
-burned mail is no longer found.
+To show the answered mail, the client searches for the reference in
+the `sig_hash` values of the inbox and sent listings (§5.2). Then it
+searches the saved mail (§9). The servers have no search by
+reference. Thus they do not know which mail the client looks for.
 
 The standalone file encryption commands (`enc` / `dec`) use the same
 ML-KEM-768 + ChaCha20-Poly1305 construction. They store data in a
@@ -227,12 +226,12 @@ subset below, in the field order the client produces:
 }
 ```
 
-A reply (§3.2) adds `"enc_reply_to": "..."` after `enc_body`. Any
-other mail has no such field. The server rejects an empty
-`enc_reply_to` with `400`, and it rebuilds the signed subset with
-the field only when the body has it. A field added to a mail signed
-without it therefore fails the signature. Servers accept replies from
-protocol level 3 (§5.1).
+A reply (§3.2) adds `"enc_reply_to": "..."` after `enc_body`. Other
+mail does not have this field. The server rejects an empty
+`enc_reply_to` with `400`. It adds the field to the signed subset
+only when the body has it. Thus a field added to a signed mail makes
+the signature fail. Servers accept replies from protocol level 3
+(§5.1).
 
 The full request body also carries `enc_key_sender`,
 `enc_key_recipient`, `signature`, and `pow`. These fields are not
@@ -820,18 +819,23 @@ Recognized environment variables:
 | `version` | Print version string |
 
 `check inbox|sent` accepts `--count`, `--json`, `--csv`, and
-`--no-header`. For a reply, `check <id>`, `fetch`, and `read` print
-an `RE:` line with the ID of the mail it answers. They print
-`<id> (saved)` when only a saved copy is left, and `(unavailable)`
-when the mail is gone. `reply` subjects default to `Re: <subject>`.
-A reply's draft has no `To:` line: `compose` and `send --draft`
-keep its recipient. In the editor, `vim` and `nvim` show the mail
-read-only in a split window. Other editors get the mail above the
-scissors line `# ------------------------ >8 ------------------------`,
-and the client drops that line and everything above it. A line of
-the mail that starts with it gets a leading space, so it cannot cut
-there. The editor opens on the first body line (`+<line>` for
-editors that take it). `send` recipients may be local (`username`) or remote
+`--no-header`.
+
+For a reply, `check <id>`, `fetch`, and `read` show an `RE:` line
+with the ID of the answered mail. `<id> (saved)` means that only a
+saved copy exists. `(unavailable)` means that the mail is gone.
+
+`reply` sets the subject to `Re: <subject>`. The draft of a reply
+has no `To:` line. `compose` and `send --draft` keep its recipient.
+`vim` and `nvim` show the answered mail read-only in a split window.
+Other editors show it above the scissors line
+`# ------------------------ >8 ------------------------`. The client
+ignores that line and all text above it. If a line of the mail
+starts with the scissors line, the client adds a space before it.
+The editor opens on the first line of the body, with `+<line>` when
+the editor accepts it.
+
+`send` recipients may be local (`username`) or remote
 (`username@instance`). The caller must base64-encode binary data.
 Use `enc` and `dec` for debugging and testing.
 

@@ -2,7 +2,7 @@
 
 [English](../../README.md) | 简体中文 | [日本語](./README.ja.md)
 
-> Translated by Claude Fable 5
+> Translated by Claude
 
 ### 概述
 
@@ -152,11 +152,13 @@ tar czf - ./source | base64 | shyake send -t flat_white -s "source.tar.gz"
 
 **reply 命令**：
 
-`reply` 用于回复邮件。它会打开编辑器编写回复草稿，并把被回复的邮件一并显示出来。在 `vim` 和 `nvim` 中，原信以只读方式显示在左侧窗口，你在右侧编写。其他编辑器会把原信放在文件顶部、剪刀线（`>8`）的上方；保存时，客户端会丢弃剪刀线及其上方的全部内容。编辑器打开时，光标直接位于写回复的位置。
+`reply` 打开编辑器回复一封邮件。回复发给这封邮件的对方。主题为 `Re: <原主题>`，可用 `-s` 修改。
 
 ```sh
 shyake reply fQBjZnvJ56
 ```
+
+`vim` 和 `nvim` 在左侧窗口只读显示原信。其他编辑器把原信放在剪刀线（`>8`）上方，客户端忽略剪刀线及其上方的全部文本。
 
 ```
 FROM:  flat_white
@@ -176,7 +178,7 @@ content...
 content...
 ```
 
-退出编辑器后，客户端先把回复存为加密草稿，再询问是否发送。只有输入 `y` 才会发送；直接回车则保留草稿，之后用 `shyake send -d <id>` 发送：
+关闭编辑器后，客户端把回复存为草稿，然后询问是否发送。只有输入 `y` 才发送，直接回车则保留草稿：
 
 ```
 Draft 4 saved.
@@ -184,21 +186,21 @@ Send it to flat_white now? [y/N]
 Not sent. Send it with: shyake send -d 4
 ```
 
-回复发给对方：收到的邮件回复给发件人，你发出的邮件回复给收件人。你发给自己的邮件，回复也发给自己。回复草稿没有 `To:` 行，收件人不能更改。主题默认为 `Re: <原主题>`，可用 `-s` 修改。
+回复没有 `To:` 行，收件人不能更改。
 
-把已经写好的草稿变成回复（同样会询问是否发送）：
+把草稿变成回复：
 
 ```sh
 shyake reply fQBjZnvJ56 -d 3
 ```
 
-与 `send` 一样，来自文件或 stdin 的正文会直接发送：
+从文件或 stdin 读取正文并直接发送回复：
 
 ```sh
 shyake reply fQBjZnvJ56 < answer.txt
 ```
 
-`check <id>`、`fetch` 和 `read` 会在 `RE:` 行显示回复所对应的邮件。只剩你本地保存的副本时，ID 后会显示 `(saved)`；邮件已不存在时显示 `(unavailable)`。
+`check <id>`、`fetch` 和 `read` 在 `RE:` 行显示回复对应的邮件。ID 后的 `(saved)` 表示只有你本地保存的副本，`(unavailable)` 表示邮件已不存在。
 
 ```
 FROM:  salmon
@@ -208,7 +210,7 @@ DATE:  2026-10-10 09:45
 SUBJ:  Re: Coffee tomorrow?
 ```
 
-服务器无法读取回复对应的是哪封邮件：客户端会把这一信息随邮件一起加密。你的实例和收件人的实例都必须运行 v0.4.0 或更新的服务端。
+客户端会加密被回复邮件的引用，服务器无法读取。你的实例和收件人的实例都必须运行 v0.4.0 或更新的服务端。
 
 **compose 命令**：
 
