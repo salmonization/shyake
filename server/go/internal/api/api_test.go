@@ -427,7 +427,7 @@ func TestReply(t *testing.T) {
 		t.Errorf("listed sig_hash %v, want %x", item["sig_hash"], sum)
 	}
 	if _, ok := item["enc_reply_to"]; ok {
-		t.Error("listing includes enc_reply_to")
+		t.Error("a listed mail that is no reply has enc_reply_to")
 	}
 	_, out = e.authed(bobby, "GET", "/api/mail/"+item["mail_id"].(string), nil)
 	if _, ok := out["enc_reply_to"]; ok {
@@ -441,6 +441,11 @@ func TestReply(t *testing.T) {
 	_, out = e.authed(alice, "GET", "/api/mail/"+out["id"].(string), nil)
 	if out["enc_reply_to"] != "cmVm" {
 		t.Errorf("fetched enc_reply_to %v", out["enc_reply_to"])
+	}
+	// level 4: the listing carries it too, for threads
+	_, out = e.authed(alice, "GET", "/api/mail?type=inbox", nil)
+	if item := out["mail"].([]any)[0].(map[string]any); item["enc_reply_to"] != "cmVm" {
+		t.Errorf("listed enc_reply_to %v", item["enc_reply_to"])
 	}
 
 	// the reference is signed: added, swapped or empty, it fails

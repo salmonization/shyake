@@ -82,8 +82,12 @@ func testMail(t *testing.T, s store.Store) {
 	if len(inbox) != 2 || inbox[0].ID != id2 || inbox[1].ID != id1 {
 		t.Errorf("inbox not newest first: %+v", inbox)
 	}
-	if inbox[0].EncBody != "" || inbox[0].EncReplyTo != "" {
-		t.Error("ListMail returned a body or a reply reference")
+	if inbox[0].EncBody != "" || inbox[0].Signature != "" {
+		t.Error("ListMail returned a body or a signature")
+	}
+	if inbox[0].EncReplyTo != "ref" || inbox[1].EncReplyTo != "" {
+		t.Errorf("ListMail reply references: %q %q",
+			inbox[0].EncReplyTo, inbox[1].EncReplyTo)
 	}
 	// Ref is the hex SHA-256 of the signature string
 	if sum := sha256.Sum256([]byte("s1")); inbox[1].Ref != hex.EncodeToString(sum[:]) {

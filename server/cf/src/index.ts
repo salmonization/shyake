@@ -46,8 +46,9 @@ export interface Env {
 declare const SERVER_VERSION: string;
 
 /* protocol level: 2 signs the bodies of header-authenticated
- * requests, 3 accepts replies (enc_reply_to) */
-const PROTOCOL_LEVEL = 3;
+ * requests, 3 accepts replies (enc_reply_to), 4 lists them with
+ * enc_reply_to so clients can build threads */
+const PROTOCOL_LEVEL = 4;
 const REPLY_LEVEL = 3;
 
 const app = new Hono<{Bindings: Env}>();
@@ -562,17 +563,24 @@ app.get('/api/mail', async c => {
     const column = type === 'sent' ? 'sender' : 'recipient';
     const {results} = await c.env.DB.prepare(
       `SELECT mail_id, sender, recipient, enc_key_sender, ` +
-        `enc_key_recipient, enc_subject, size, timestamp, signature ` +
+        `enc_key_recipient, enc_subject, size, timestamp, signature, ` +
+        `enc_reply_to ` +
         `FROM mail WHERE ${column} = ? ORDER BY timestamp DESC`,
     )
       .bind(username)
       .all();
 
-    /* each mail's reference: the hash of its signature */
+    /* each mail's reference: the hash of its signature; only a
+     * reply carries enc_reply_to */
     const mail = await Promise.all(
       results.map(async (r: any) => {
-        const {signature, ...rest} = r;
-        return {...rest, sig_hash: await sha256Hex(signature as string)};
+        const {signature, enc_reply_to, ...rest} = r;
+        const out: Record<string, unknown> = {
+          ...rest,
+          sig_hash: await sha256Hex(signature as string),
+        };
+        if (enc_reply_to) out.enc_reply_to = enc_reply_to;
+        return out;
       }),
     );
     return c.json({mail}, 200);

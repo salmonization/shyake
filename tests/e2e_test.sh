@@ -151,7 +151,7 @@ wait_for_server
 echo -e "  ${GREEN}PASS${NC}  Server reachable at $INSTANCE"
 
 out=$(curl -s "$INSTANCE/api/version")
-assert_contains "server reports protocol level 3" '"protocol":3' "$out"
+assert_contains "server reports protocol level 4" '"protocol":4' "$out"
 
 # ------------------------------------------------------------------ #
 section "1. init"

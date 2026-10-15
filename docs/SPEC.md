@@ -154,6 +154,16 @@ the `sig_hash` values of the inbox and sent listings (§5.2). Then it
 searches the saved mail (§9). The servers have no search by
 reference. Thus they do not know which mail the client looks for.
 
+A mail and its replies make a thread. A mail can have more than one
+reply, so a thread is a tree. To build the thread of a mail, the
+client follows the references up to the first mail of the thread.
+Then it adds each mail whose reference points to a mail in the
+thread. It searches the inbox and sent listings, then the saved
+mail. From level 4, the listings carry `enc_reply_to` (§5.2), so the
+client builds a thread without one request for each mail. A thread
+can have gaps: a mail that was burned, or that the client cannot
+find, stays in the tree as a missing entry.
+
 The standalone file encryption commands (`enc` / `dec`) use the same
 ML-KEM-768 + ChaCha20-Poly1305 construction. They store data in a
 length-prefixed binary container (`.enc` file).
@@ -464,14 +474,15 @@ enabled.
 `/api/version` identifies the server:
 
 ```json
-{"version": "v0.4.0", "implementation": "go", "protocol": 3}
+{"version": "v0.4.1", "implementation": "go", "protocol": 4}
 ```
 
 `version` is the release in `server/VERSION` (§12.1), or `dev` for a
 build without one. `implementation` is `cf` or `go`. `protocol` is
 the protocol level. Level 2 signs request bodies (§3.3). Level 3
-accepts replies (§3.2). A server without this endpoint is level 1. Clients use the level, not the
-version, to decide what an instance accepts.
+accepts replies (§3.2). Level 4 lists `enc_reply_to` (§5.2). A
+server without this endpoint is level 1. Clients use the level, not
+the version, to decide what an instance accepts.
 
 `/api/client/version` proxies the GitHub Releases API. It returns
 the newest tag of each channel that has client builds, and the
@@ -513,9 +524,9 @@ headers.
 | `DELETE` | `/api/destroy` | Destroy account |
 
 Each item of the `GET /api/mail` listing has a `sig_hash`: the
-reference of that mail (§3.2). The listing has no bodies,
-signatures, or `enc_reply_to`. `GET /api/mail/:id` returns
-`enc_reply_to` only for a reply.
+reference of that mail (§3.2). The listing has no bodies or
+signatures. From level 4, a listed reply has its `enc_reply_to`.
+`GET /api/mail/:id` returns `enc_reply_to` only for a reply.
 
 Notable status codes on `POST /api/mail`: `409` (`KEY_MISMATCH`, the
 supplied recipient fingerprint no longer matches), `410`

@@ -45,9 +45,10 @@ func MailMessage(sender, recipient, fingerprint, encSubject, encBody,
 
 // Level is the protocol level a server reports in GET /api/version.
 // Level 2 signs the bodies of header-authenticated requests
-// (HeaderBodyMessage); level 3 accepts replies (enc_reply_to). A
+// (HeaderBodyMessage); level 3 accepts replies (enc_reply_to); level
+// 4 lists them with enc_reply_to, so clients can build threads. A
 // server without that endpoint is level 1.
-const Level = 3
+const Level = 4
 
 // ReplyLevel is the lowest level that accepts a reply.
 const ReplyLevel = 3

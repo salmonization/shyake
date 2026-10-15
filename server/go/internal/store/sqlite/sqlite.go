@@ -241,7 +241,7 @@ func (db *DB) MailIDBySignature(ctx context.Context, signature string) (string, 
 
 func (db *DB) ListMail(ctx context.Context, username string, sent bool) ([]store.Mail, error) {
 	q := `SELECT mail_id, sender, recipient, enc_key_sender, enc_key_recipient,
-	        enc_subject, size, timestamp, sig_hash
+	        enc_subject, size, timestamp, sig_hash, enc_reply_to
 	      FROM mail WHERE recipient = ? ORDER BY timestamp DESC`
 	if sent {
 		q = strings.Replace(q, "WHERE recipient", "WHERE sender", 1)
@@ -256,7 +256,8 @@ func (db *DB) ListMail(ctx context.Context, username string, sent bool) ([]store
 		var m store.Mail
 		var ref []byte
 		if err := rows.Scan(&m.ID, &m.Sender, &m.Recipient, &m.EncKeySender,
-			&m.EncKeyRecipient, &m.EncSubject, &m.Size, &m.Timestamp, &ref); err != nil {
+			&m.EncKeyRecipient, &m.EncSubject, &m.Size, &m.Timestamp, &ref,
+			&m.EncReplyTo); err != nil {
 			return nil, err
 		}
 		m.Ref = hex.EncodeToString(ref)

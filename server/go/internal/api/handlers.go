@@ -430,10 +430,10 @@ func toJSON(m store.Mail, full bool) mailJSON {
 		EncSubject: m.EncSubject, Size: m.Size, Timestamp: m.Timestamp}
 	if full {
 		j.EncBody, j.Signature = &m.EncBody, &m.Signature
-		j.EncReplyTo = m.EncReplyTo
 	} else {
 		j.SigHash = m.Ref
 	}
+	j.EncReplyTo = m.EncReplyTo
 	return j
 }
 
