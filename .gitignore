@@ -26,3 +26,7 @@ server/go/shyake-server
 server/go/*.db
 server/go/*.db-shm
 server/go/*.db-wal
+# a local server started from the repository root
+/shyake.db
+/shyake.db-shm
+/shyake.db-wal
