@@ -71,8 +71,8 @@ function i64(addr: number, off: number): number {
 }
 
 /* struct offsets (LP64) */
-const MAIL_ENTRY_SIZE = 64;   /* 3 ptrs, i32, pad, 2 i64, i32, pad, ptr */
-const SAVED_ENTRY_SIZE = 56;  /* 4 ptrs, 2 i64, i32, pad */
+const MAIL_ENTRY_SIZE = 72;   /* 3 ptrs, i32, pad, 2 i64, i32, pad, 2 ptrs */
+const SAVED_ENTRY_SIZE = 72;  /* 4 ptrs, 2 i64, i32, pad, 2 ptrs */
 const BLOCK_ENTRY_SIZE = 16;  /* ptr, i64 */
 
 export class ShyakeError extends Error {
@@ -91,6 +91,7 @@ export interface MailEntryOut {
     timestamp: number;
     is_sent: boolean;
     ref: string | null;
+    reply_ref: string | null;
 }
 
 export interface MailDetailOut {
@@ -224,6 +225,7 @@ export class Session {
                         timestamp: i64(e, 32),
                         is_sent: read.i32(e, 48) !== 0,
                         ref: cstr(read.ptr(e, 56)),
+                        reply_ref: cstr(read.ptr(e, 64)),
                     });
                 }
                 return out;
@@ -288,7 +290,8 @@ export class Session {
                         size: read.i32(e, 48),
                         timestamp: i64(e, 32),
                         is_sent: false,
-                        ref: null,
+                        ref: cstr(read.ptr(e, 56)),
+                        reply_ref: cstr(read.ptr(e, 64)),
                     });
                 }
                 return out;

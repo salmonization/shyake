@@ -241,6 +241,59 @@ The client encrypts the reference to the answered mail. The server
 cannot read it. Your instance and the instance of the recipient must
 run server v0.4.0 or later.
 
+**Thread commands**:
+
+A mail and its replies make a thread. `check thread` shows the
+thread of a mail as a graph, oldest mail first. You can give the ID
+of any mail in the thread. `@` marks that mail.
+
+```sh
+shyake check thread a8Kd02LmQx
+```
+
+```
+     Mail ID    From       Subject              Size Date
+*    fQBjZnvJ56 salmon     Coffee tomorrow?     18   Oct 10 09:30
+|\
+| @  a8Kd02LmQx flat_white Re: Coffee tomorrow? 9    Oct 10 09:45
+| *  Zp3n7TqW1c salmon     Re: Coffee tomorrow? 21   Oct 10 10:02
+* |  Hq81cVbN0e salmon     Re: Coffee tomorrow? 14   Oct 10 11:20
+  *  Wm4eRt9YuI flat_white Re: Coffee tomorrow? 11   Oct 10 12:15
+```
+
+A mail can have more than one reply. Each reply opens a new branch
+(`|\`). Here, `Hq81cVbN0e` and `a8Kd02LmQx` both answer
+`fQBjZnvJ56`.
+
+`fetch thread` shows the full text of all mail in the thread, with
+the same graph at the left. `--flat` removes the graph and puts a
+line between the mails.
+
+```sh
+shyake fetch thread a8Kd02LmQx
+shyake fetch thread a8Kd02LmQx --flat
+```
+
+`save thread` saves all mail of the thread that is not saved yet.
+`read thread` shows the thread from saved mail only. It needs no
+connection to the instance.
+
+```sh
+shyake save thread a8Kd02LmQx
+shyake read thread a8Kd02LmQx
+```
+
+The client searches the inbox, the sent mail, and the saved mail.
+`(saved)` after an ID means that only your saved copy exists.
+`(missing)` means that the mail was burned and you did not save it.
+When a mail in the middle of a thread is missing, the mails above it
+and the mails below it show as two threads.
+
+The client builds the thread on your device. Your instance must run
+server v0.4.1 or later. With an older instance, the thread shows
+only the mails that a mail answers, and the replies in your saved
+mail.
+
 **Compose command**:
 
 `compose` writes mail drafts. It also works as a personal diary. It

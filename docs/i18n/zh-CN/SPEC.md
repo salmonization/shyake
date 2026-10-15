@@ -480,7 +480,7 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_NO_INSTANCE` | 未配置实例 URL |
 | `SHYAKE_ERR_BLOCKED` | HTTP 403：收件人屏蔽了发件人 |
 
-API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、回复（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、本地保存的邮件（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、账户（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、指纹（`shyake_fingerprint`）、自加密原语（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`），以及独立文件加密（`shyake_enc_file`、`shyake_dec_file`）。
+API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、回复（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、会话（`shyake_thread_of`、`shyake_free_thread`）、本地保存的邮件（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、账户（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、指纹（`shyake_fingerprint`）、自加密原语（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`），以及独立文件加密（`shyake_enc_file`、`shyake_dec_file`）。
 
 邮件列表项和邮件详情都带有 `ref`，即该邮件的引用（§3.2）。邮件详情还带有 `reply_ref`，即它所回复邮件的引用，不是回复时为 `NULL`。客户端用 `shyake_send_reply()` 发送回复，传入被回复邮件的 `ref`，以及 `shyake_reply_recipient()` 给出的收件人。`shyake_find_ref()` 把引用转换回邮件 ID。
 
@@ -560,6 +560,10 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 | `save <id>` | 在本地存储加密邮件 |
 | `read [-r] <id>` | 解密并打印已保存的邮件 |
 | `read [-r] drafts <id>` | 解密并打印草稿 |
+| `check thread <id>` | 以图的形式显示邮件所在的会话 |
+| `fetch thread <id> [--flat]` | 解密并打印会话 |
+| `save thread <id>` | 在本地存储会话中的邮件 |
+| `read thread <id> [--flat]` | 用已保存的邮件打印会话 |
 | `burn <id>` | 删除邮件（发件人或收件人均可） |
 | `block <target>` | 屏蔽用户或域名 |
 | `unblock <target>` | 取消屏蔽用户或域名 |
@@ -576,6 +580,8 @@ API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件
 `check inbox|sent` 接受 `--count`、`--json`、`--csv` 和 `--no-header`。
 
 对于回复，`check <id>`、`fetch` 和 `read` 显示一行 `RE:`，给出被回复邮件的 ID。`<id> (saved)` 表示只有本地保存的副本，`(unavailable)` 表示邮件已不存在。
+
+`check thread` 像 `git log --graph` 一样，用分支线把会话（§3.2）画出来，最早的邮件在最上面：`*` 是一封邮件，`@` 是命令行中指定的邮件，`|\` 为第二个回复开出一条分支线。一封邮件的最后一个回复沿用该邮件的分支线。`fetch thread` 和 `read thread` 在全文旁画出同样的图。`--flat` 依次打印各封邮件，并带有 `RE:` 行。`check thread --json` 为每封邮件给出 `parent`：被回复邮件在数组中的下标，第一封邮件为 `null`。
 
 `reply` 把主题设为 `Re: <subject>`。回复草稿没有 `To:` 行，`compose` 和 `send --draft` 保留它的收件人。`vim` 和 `nvim` 在分屏中只读显示被回复的邮件。其他编辑器把它放在剪刀线 `# ------------------------ >8 ------------------------` 上方，客户端忽略剪刀线及其上方的全部文本。如果邮件中有一行以剪刀线开头，客户端会在它前面加一个空格。编辑器打开时光标位于正文第一行（编辑器支持时使用 `+<行号>`）。
 

@@ -213,6 +213,44 @@ SUBJ:  Re: Coffee tomorrow?
 
 クライアントは返信先メールへの参照を暗号化するため、サーバーはそれを読めません。自分のインスタンスと受信者のインスタンスの両方で、サーバー v0.4.0 以降が動作している必要があります。
 
+**thread コマンド**：
+
+メールとその返信はスレッドを構成します。`check thread` は、あるメールのスレッドをグラフで表示します。最も古いメールが一番上です。スレッド内のどのメールの ID でも使えます。`@` はそのメールを示します。
+
+```sh
+shyake check thread a8Kd02LmQx
+```
+
+```
+     Mail ID    From       Subject              Size Date
+*    fQBjZnvJ56 salmon     Coffee tomorrow?     18   Oct 10 09:30
+|\
+| @  a8Kd02LmQx flat_white Re: Coffee tomorrow? 9    Oct 10 09:45
+| *  Zp3n7TqW1c salmon     Re: Coffee tomorrow? 21   Oct 10 10:02
+* |  Hq81cVbN0e salmon     Re: Coffee tomorrow? 14   Oct 10 11:20
+  *  Wm4eRt9YuI flat_white Re: Coffee tomorrow? 11   Oct 10 12:15
+```
+
+1 通のメールに複数の返信が付くことがあり、返信ごとに新しい枝（`|\`）が開きます。上の例では、`Hq81cVbN0e` と `a8Kd02LmQx` の両方が `fQBjZnvJ56` への返信です。
+
+`fetch thread` は、スレッド内のすべてのメールの全文を、左側に同じグラフを付けて表示します。`--flat` はグラフを外し、メールの間に区切り線を入れます。
+
+```sh
+shyake fetch thread a8Kd02LmQx
+shyake fetch thread a8Kd02LmQx --flat
+```
+
+`save thread` は、スレッド内でまだ保存していないメールをすべて保存します。`read thread` は保存済みのメールだけでスレッドを表示します。インスタンスへの接続は不要です。
+
+```sh
+shyake save thread a8Kd02LmQx
+shyake read thread a8Kd02LmQx
+```
+
+クライアントは受信箱、送信済み、保存済みのメールを探します。ID の後の `(saved)` は保存したコピーだけがあることを、`(missing)` はメールが burn で削除され、保存もしていないことを示します。スレッドの途中のメールが欠けている場合、その上のメールと下のメールは 2 つのスレッドとして表示されます。
+
+スレッドは自分の端末で構築されます。自分のインスタンスでサーバー v0.4.1 以降が動作している必要があります。インスタンスが古い場合、スレッドにはあるメールが返信しているメールと、保存済みのメールにある返信だけが表示されます。
+
 **compose コマンド**：
 
 `compose` はメール草稿の作成用コマンドで、個人的な日記などの用途にも使えます。指定したエディタ（デフォルトは `ed`）でシンプルなテンプレートを開き、結果を ML-KEM-768 + ChaCha20-Poly1305 で自分自身の鍵に暗号化して `~/.config/shyake/drafts/` に下書きとして保存します。

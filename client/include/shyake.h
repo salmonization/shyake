@@ -98,6 +98,8 @@ typedef struct {
 	int64_t created; /* creation timestamp; non-zero for drafts only */
 	int is_sent; /* 1 if from sent box */
 	char *ref; /* reference: hex SHA-256 of the signature */
+	char *reply_ref; /* reference of the mail answered; NULL if none
+			  * or the instance is below protocol 4 */
 } shyake_mail_entry;
 
 typedef struct {
@@ -229,6 +231,8 @@ typedef struct {
 	int64_t timestamp; /* modified timestamp for drafts */
 	int64_t created; /* creation timestamp; non-zero for drafts only */
 	int size;
+	char *ref; /* reference: hex SHA-256 of the signature */
+	char *reply_ref; /* reference of the mail answered; NULL if none */
 } shyake_saved_entry;
 
 typedef struct {
@@ -262,6 +266,46 @@ shyake_mail_detail *shyake_check_saved_one(shyake_ctx *ctx,
  * Returns allocated shyake_saved_list* on success, NULL on failure.
  */
 shyake_saved_list *shyake_list_saved(shyake_ctx *ctx);
+
+/* --- Threads --- */
+
+/* where a thread entry was found (bit flags; 0 = missing) */
+#define SHYAKE_IN_INBOX 1
+#define SHYAKE_IN_SENT 2
+#define SHYAKE_IN_SAVED 4
+
+typedef struct {
+	char *mail_id; /* NULL for a missing mail (burned or not found) */
+	char *sender; /* NULL when missing */
+	char *recipient; /* NULL when missing */
+	char *subject; /* decrypted; NULL when missing */
+	int64_t timestamp; /* UNIX seconds; 0 when missing */
+	int size; /* plaintext byte count */
+	int where; /* SHYAKE_IN_* flags; 0 when missing */
+	char *ref; /* reference: hex SHA-256 of the signature */
+	char *reply_ref; /* reference of the mail answered; NULL if none */
+	int parent; /* index of the answered mail; -1 for the first */
+} shyake_thread_entry;
+
+typedef struct {
+	shyake_thread_entry *entries; /* a mail before its replies, then
+				       * oldest first */
+	int count;
+	int focus; /* index of the mail asked for */
+	int complete; /* 0: the instance is below protocol 4, so only
+		       * saved mail adds replies */
+} shyake_thread;
+
+void shyake_free_thread(shyake_thread *t);
+
+/*
+ * The thread of a mail: the mails it answers up to the first one,
+ * and all replies to them, from the inbox, the sent box and the
+ * saved mail. With saved_only, only saved mail is searched and no
+ * request is made. Returns NULL when the mail is not found.
+ */
+shyake_thread *shyake_thread_of(shyake_ctx *ctx, const char *mail_id,
+				int saved_only);
 
 /* --- Self-encryption primitives (encrypt-at-rest to own key) --- */
 

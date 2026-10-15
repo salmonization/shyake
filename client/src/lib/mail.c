@@ -21,6 +21,7 @@ void shyake_free_mail_list(shyake_mail_list *list)
 		free(list->entries[i].party);
 		free(list->entries[i].subject);
 		free(list->entries[i].ref);
+		free(list->entries[i].reply_ref);
 	}
 	free(list->entries);
 	free(list);
@@ -494,7 +495,7 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 								"enc_subject")
 								->valuestring;
 
-						char *sub = NULL;
+						char *sub = NULL, *rref = NULL;
 						if (ksk) {
 							u8 *sym =
 								kem_decapsulate_key(
@@ -504,12 +505,16 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 								sub = decrypt_from_b64(
 									sym,
 									enc_sub);
+								rref = open_reply_ref(
+									sym,
+									item);
 								free(sym);
 							}
 						}
 
 						shyake_mail_entry *e =
 							&result->entries[i];
+						e->reply_ref = rref;
 						e->mail_id = strdup(id);
 						e->party = strdup(party);
 						e->subject =
@@ -861,6 +866,8 @@ void shyake_free_saved_list(shyake_saved_list *list)
 		free(list->entries[i].sender);
 		free(list->entries[i].recipient);
 		free(list->entries[i].subject);
+		free(list->entries[i].ref);
+		free(list->entries[i].reply_ref);
 	}
 	free(list->entries);
 	free(list);
@@ -1112,16 +1119,19 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 		const char *enc_sub =
 			cJSON_GetObjectItem(json, "enc_subject")->valuestring;
 
-		char *sub = NULL;
+		char *sub = NULL, *rref = NULL;
 		if (ksk) {
 			u8 *sym = kem_decapsulate_key(enc_key, ksk);
 			if (sym) {
 				sub = decrypt_from_b64(sym, enc_sub);
+				rref = open_reply_ref(sym, json);
 				free(sym);
 			}
 		}
 
 		shyake_saved_entry *e = &list->entries[idx];
+		e->ref = json_ref(json);
+		e->reply_ref = rref;
 		e->mail_id = strdup(mail_id);
 		e->sender = strdup(snd);
 		e->recipient = strdup(rec);

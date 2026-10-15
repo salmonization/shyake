@@ -123,8 +123,8 @@ itself and tests relays between them.
 shyake/
 ├── client/                 # C client
 │   ├── src/lib/            # core library (account, crypto, mail,
-│   │   │                   #   network, passphrase, known_hosts,
-│   │   │                   #   enc_dec)
+│   │   │                   #   thread, network, passphrase,
+│   │   │                   #   known_hosts, enc_dec)
 │   │   └── vendor/cJSON/   # vendored JSON parser
 │   ├── src/cli/            # CLI entry, init, display, prompts,
 │   │                       #   drafts, self-update, man pages

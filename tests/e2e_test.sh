@@ -598,6 +598,98 @@ assert_contains "reply -d: recipient set" "TO:   $USER_A" "$out"
 assert_contains "reply -d: RE line" "RE:   $REPLY_ID" "$out"
 
 # ------------------------------------------------------------------ #
+section "11c. threads"
+# ------------------------------------------------------------------ #
+
+# T_A <- T_B <- T_C <- T_E, and T_A <- T_D; one second apart, so
+# the order is fixed
+echo "Ethiopian beans?" | sh_run "$DIR_A" send -t "$USER_B" \
+    -s "Beans" > /dev/null 2>&1
+T_A=$(id_of "$DIR_B" inbox "Beans")
+sleep 1
+echo "250 g left." | sh_run "$DIR_B" reply "$T_A" -s "Re: Beans B" \
+    > /dev/null 2>&1
+T_B=$(id_of "$DIR_A" inbox "Re: Beans B")
+sleep 1
+echo "I take them." | sh_run "$DIR_A" reply "$T_B" -s "Re: Beans C" \
+    > /dev/null 2>&1
+T_C=$(id_of "$DIR_A" sent "Re: Beans C")
+sleep 1
+echo "Kenyan beans too?" | sh_run "$DIR_A" reply "$T_A" -s "Re: Beans D" \
+    > /dev/null 2>&1
+T_D=$(id_of "$DIR_A" sent "Re: Beans D")
+sleep 1
+echo "On Friday." | sh_run "$DIR_B" reply "$T_C" -s "Re: Beans E" \
+    > /dev/null 2>&1
+T_E=$(id_of "$DIR_B" sent "Re: Beans E")
+assert_exit "thread: five mails sent" 0 \
+    "$([ -n "$T_A$T_B" ] && [ -n "$T_C" ] && [ -n "$T_D" ] && [ -n "$T_E" ] \
+        && echo 0 || echo 1)"
+
+# graph column and mail ID of each row
+graph_ids() {
+    sed -E 's/^([^A-Za-z0-9(]*)([A-Za-z0-9]{10}|\(missing\)).*/\1\2/'
+}
+expect="*    $T_A
+|\\
+| *  $T_B
+| @  $T_C
+* |  $T_D
+  *  $T_E"
+out=$(sh_run "$DIR_A" check thread "$T_C" --no-header 2>&1)
+rc=$?; assert_exit "check thread exits 0" 0 "$rc" "$out"
+assert_exit "check thread: graph, oldest first" 0 \
+    "$([ "$(echo "$out" | graph_ids)" = "$expect" ] && echo 0 || echo 1)"
+out=$(sh_run "$DIR_B" check thread "$T_A" 2>&1)
+assert_contains "check thread: any mail shows all" "Total: 5 items" "$out"
+assert_contains "check thread: @ marks the mail" "@    $T_A" "$out"
+out=$(sh_run "$DIR_A" check thread "$T_E" --json 2>&1)
+parents=$(echo "$out" | python3 -c '
+import sys, json
+print(",".join(str(m["parent"]) for m in json.load(sys.stdin)))')
+assert_exit "check thread --json: parents" 0 \
+    "$([ "$parents" = "None,0,1,0,2" ] && echo 0 || echo 1)" "$parents"
+
+out=$(sh_run "$DIR_B" fetch thread "$T_D" 2>&1)
+rc=$?; assert_exit "fetch thread exits 0" 0 "$rc" "$out"
+assert_contains "fetch thread: body in its lane" "| |  250 g left." "$out"
+assert_contains "fetch thread: last body" "     On Friday." "$out"
+out=$(sh_run "$DIR_B" fetch thread "$T_D" --flat 2>&1)
+assert_contains "fetch thread --flat: RE line" "RE:    $T_B" "$out"
+assert_not_contains "fetch thread --flat: no graph" "|\\" "$out"
+out=$(sh_run "$DIR_B" fetch thread "$T_D" --raw 2>&1)
+rc=$?; assert_exit "fetch thread --raw is refused" 1 "$rc" "$out"
+out=$(sh_run "$DIR_B" check thread nosuchmail 2>&1)
+rc=$?; assert_exit "check thread: unknown mail exits 1" 1 "$rc" "$out"
+assert_contains "check thread: unknown mail" "Mail nosuchmail not found." "$out"
+
+out=$(sh_run "$DIR_B" save thread "$T_E" 2>&1)
+rc=$?; assert_exit "save thread exits 0" 0 "$rc" "$out"
+assert_contains "save thread: all saved" "Saved 5 mail." "$out"
+out=$(sh_run "$DIR_B" save thread "$T_E" 2>&1)
+assert_contains "save thread: again" "Saved 0 mail. 5 were already saved." "$out"
+
+# a burned mail: a gap for A, a saved copy for B
+sh_run "$DIR_B" burn "$T_B" > /dev/null 2>&1
+out=$(sh_run "$DIR_A" check thread "$T_E" --no-header 2>&1)
+expect="*  (missing)
+*  $T_C
+@  $T_E"
+assert_exit "check thread: burned mail is a gap" 0 \
+    "$([ "$(echo "$out" | graph_ids)" = "$expect" ] && echo 0 || echo 1)" "$out"
+out=$(sh_run "$DIR_B" check thread "$T_E" 2>&1)
+assert_contains "check thread: saved copy fills the gap" "$T_B (saved)" "$out"
+assert_contains "check thread: still five" "Total: 5 items" "$out"
+
+# read thread needs no instance
+cp "$DIR_B/config" "$DIR_B/config.bak"
+sed -i 's|^INSTANCE=.*|INSTANCE=http://127.0.0.1:1|' "$DIR_B/config"
+out=$(sh_run "$DIR_B" read thread "$T_A" 2>&1)
+rc=$?; assert_exit "read thread works offline" 0 "$rc" "$out"
+assert_contains "read thread: bodies" "| |  250 g left." "$out"
+mv "$DIR_B/config.bak" "$DIR_B/config"
+
+# ------------------------------------------------------------------ #
 section "12. rotate"
 # ------------------------------------------------------------------ #
 

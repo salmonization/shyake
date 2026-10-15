@@ -480,7 +480,7 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_NO_INSTANCE` | インスタンス URL が未設定 |
 | `SHYAKE_ERR_BLOCKED` | HTTP 403：受信者が送信者をブロックしている |
 
-API グループ：コンテキストのライフサイクル、鍵生成、PoW 生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、返信（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`）。
+API グループ：コンテキストのライフサイクル、鍵生成、PoW 生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、返信（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、スレッド（`shyake_thread_of`、`shyake_free_thread`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`）。
 
 メール一覧の項目とメール詳細は `ref`、すなわちそのメールの参照（§3.2）を持つ。メール詳細はさらに `reply_ref`、すなわち返信先メールの参照を持ち、返信でなければ `NULL` である。クライアントは `shyake_send_reply()` で返信を送る。その際、返信先メールの `ref` と、`shyake_reply_recipient()` が返す宛先を渡す。`shyake_find_ref()` は参照をメール ID に戻す。
 
@@ -560,6 +560,10 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 | `save <id>` | 暗号化メールをローカルに保存 |
 | `read [-r] <id>` | 保存済みメールを復号して表示 |
 | `read [-r] drafts <id>` | 下書きを復号して表示 |
+| `check thread <id>` | メールのスレッドをグラフで表示 |
+| `fetch thread <id> [--flat]` | スレッドを復号して表示 |
+| `save thread <id>` | スレッドのメールをローカルに保存 |
+| `read thread <id> [--flat]` | 保存済みメールからスレッドを表示 |
 | `burn <id>` | メールを削除（送信者・受信者どちらでも可） |
 | `block <target>` | ユーザーまたはドメインをブロック |
 | `unblock <target>` | ユーザーまたはドメインのブロックを解除 |
@@ -576,6 +580,8 @@ API グループ：コンテキストのライフサイクル、鍵生成、PoW 
 `check inbox|sent` は `--count`、`--json`、`--csv`、`--no-header` を受け付ける。
 
 返信の場合、`check <id>`、`fetch`、`read` は返信先メールの ID を示す `RE:` 行を表示する。`<id> (saved)` は保存したコピーだけがあることを、`(unavailable)` はメールがもう存在しないことを示す。
+
+`check thread` は `git log --graph` と同じように、スレッド（§3.2）を枝の線で描く。最も古いメールが一番上である。`*` はメール、`@` はコマンドラインで指定したメール、`|\` は 2 通目の返信のために新しい枝を開く。あるメールへの最後の返信は、そのメールの枝をそのまま使う。`fetch thread` と `read thread` は全文の横に同じグラフを描く。`--flat` はメールを順に表示し、`RE:` 行を付ける。`check thread --json` は各メールに `parent`、すなわち返信先メールの配列内の添字を与える。最初のメールでは `null` である。
 
 `reply` は件名を `Re: <subject>` にする。返信の下書きには `To:` 行がなく、`compose` と `send --draft` はその宛先を保つ。`vim` と `nvim` は返信先のメールを分割ウィンドウに読み取り専用で表示する。その他のエディタでは、返信先のメールが切り取り線 `# ------------------------ >8 ------------------------` の上に表示され、クライアントは切り取り線とそれより上のテキストをすべて無視する。メールの中に切り取り線で始まる行があれば、クライアントはその前に空白を 1 つ加える。エディタは本文の 1 行目にカーソルを置いて開く（エディタが対応していれば `+<行番号>` を使う）。
 

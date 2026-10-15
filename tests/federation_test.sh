@@ -113,6 +113,15 @@ out=$("$CLI" -c "$WORK/alice" --plain check "$re_id" 2>&1)
 check "alice sees what it answers, by her own ID" "$out" "RE:   $sent_id"
 out=$(echo "and more" | "$CLI" -c "$WORK/alice" reply "$sent_id" 2>&1)
 check "alice follows up on her sent mail" "$out" "Replying to bobby@$B"
+sleep 1
+# fed-1 has two replies; each instance has its own IDs for them
+out=$("$CLI" -c "$WORK/alice" --plain check thread "$re_id" 2>&1)
+check "alice's thread has three mails" "$out" "Total: 3 items"
+check "alice's thread branches" "$out" "|\\"
+check "alice's thread marks her pick" "$out" "@  $re_id"
+out=$("$CLI" -c "$WORK/bobby" --plain check thread "$id" 2>&1)
+check "bobby's thread has three mails" "$out" "Total: 3 items"
+check "bobby's thread starts at his ID" "$out" "@    $id"
 
 section "3. relay to an instance that is down"
 # A caches bobby's key for a minute: send once to fill the cache, so the

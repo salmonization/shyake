@@ -212,6 +212,44 @@ SUBJ:  Re: Coffee tomorrow?
 
 客户端会加密被回复邮件的引用，服务器无法读取。你的实例和收件人的实例都必须运行 v0.4.0 或更新的服务端。
 
+**thread 命令**：
+
+一封邮件和它的回复构成一个会话（thread）。`check thread` 以图的形式显示某封邮件所在的会话，最早的邮件在最上面。可以使用会话中任意一封邮件的 ID，`@` 标出这封邮件。
+
+```sh
+shyake check thread a8Kd02LmQx
+```
+
+```
+     Mail ID    From       Subject              Size Date
+*    fQBjZnvJ56 salmon     Coffee tomorrow?     18   Oct 10 09:30
+|\
+| @  a8Kd02LmQx flat_white Re: Coffee tomorrow? 9    Oct 10 09:45
+| *  Zp3n7TqW1c salmon     Re: Coffee tomorrow? 21   Oct 10 10:02
+* |  Hq81cVbN0e salmon     Re: Coffee tomorrow? 14   Oct 10 11:20
+  *  Wm4eRt9YuI flat_white Re: Coffee tomorrow? 11   Oct 10 12:15
+```
+
+一封邮件可以有多个回复，每个回复开出一条新的分支（`|\`）。上例中，`Hq81cVbN0e` 和 `a8Kd02LmQx` 都回复了 `fQBjZnvJ56`。
+
+`fetch thread` 显示会话中所有邮件的全文，左侧带有同样的图。`--flat` 去掉图，在邮件之间加分隔线。
+
+```sh
+shyake fetch thread a8Kd02LmQx
+shyake fetch thread a8Kd02LmQx --flat
+```
+
+`save thread` 保存会话中所有尚未保存的邮件。`read thread` 只用本地保存的邮件显示会话，不需要连接实例。
+
+```sh
+shyake save thread a8Kd02LmQx
+shyake read thread a8Kd02LmQx
+```
+
+客户端在收件箱、已发送和本地保存的邮件中查找。ID 后的 `(saved)` 表示只有你本地保存的副本，`(missing)` 表示邮件已被 burn 删除且你没有保存。会话中间的邮件缺失时，它上面和下面的邮件会显示为两个会话。
+
+会话在你的设备上构建。你的实例必须运行 v0.4.1 或更新的服务端。实例较旧时，会话只显示一封邮件所回复的各封邮件，以及你本地保存的邮件中的回复。
+
 **compose 命令**：
 
 `compose` 用于撰写邮件草稿，也可作个人日记等用途。该命令用你指定的编辑器（默认为 `ed`）打开一个简单的模板，并将结果作为草稿存入 `~/.config/shyake/drafts/`，使用 ML-KEM-768 + ChaCha20-Poly1305 加密给你自己的密钥。

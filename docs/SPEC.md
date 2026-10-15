@@ -716,7 +716,8 @@ Error codes are a typed enum
 API groups: context lifecycle, key generation, PoW minting,
 registration, mail (`shyake_send`, `shyake_check`, `shyake_fetch`,
 `shyake_check_one`, `shyake_burn`), replies (`shyake_send_reply`,
-`shyake_reply_recipient`, `shyake_find_ref`), local saved mail
+`shyake_reply_recipient`, `shyake_find_ref`), threads
+(`shyake_thread_of`, `shyake_free_thread`), local saved mail
 (`shyake_save_mail`, `shyake_read_saved`, `shyake_check_saved_one`,
 `shyake_list_saved`), account (`shyake_block`, `shyake_list_blocks`,
 `shyake_rotate`, `shyake_destroy`), fingerprints
@@ -816,6 +817,10 @@ Recognized environment variables:
 | `save <id>` | Store encrypted mail locally |
 | `read [-r] <id>` | Decrypt and print a saved mail |
 | `read [-r] drafts <id>` | Decrypt and print a draft |
+| `check thread <id>` | Show the thread of a mail as a graph |
+| `fetch thread <id> [--flat]` | Decrypt and print a thread |
+| `save thread <id>` | Store the mail of a thread locally |
+| `read thread <id> [--flat]` | Print a thread from saved mail |
 | `burn <id>` | Delete a mail (sender or recipient) |
 | `block <target>` | Block a user or domain |
 | `unblock <target>` | Unblock a user or domain |
@@ -835,6 +840,15 @@ Recognized environment variables:
 For a reply, `check <id>`, `fetch`, and `read` show an `RE:` line
 with the ID of the answered mail. `<id> (saved)` means that only a
 saved copy exists. `(unavailable)` means that the mail is gone.
+
+`check thread` draws the thread (§3.2) as lanes, oldest mail first,
+like `git log --graph`: `*` is a mail, `@` is the mail named on the
+command line, and `|\` opens a lane for a second reply. A reply that
+is the last reply to its mail takes the lane of that mail. `fetch
+thread` and `read thread` draw the same graph beside the full text.
+`--flat` prints the mails one after the other, with a `RE:` line.
+`check thread --json` gives each mail a `parent`: the array index of
+the answered mail, or `null` for the first.
 
 `reply` sets the subject to `Re: <subject>`. The draft of a reply
 has no `To:` line. `compose` and `send --draft` keep its recipient.

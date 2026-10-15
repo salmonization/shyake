@@ -60,6 +60,7 @@ typedef struct {
 	const char *time_fmt_recent;
 	const char *
 		id_label; /* override "Mail ID" column header (NULL = default) */
+	int local; /* thread from saved mail only: no "(saved)" marks */
 } cli_render_opts;
 
 void cli_render_mail_list(const shyake_mail_list *list,
@@ -74,5 +75,17 @@ void cli_render_mail_detail(const shyake_mail_detail *d, const char *re,
 void cli_render_mail_header(const shyake_mail_detail *d, const char *re,
 			    int no_color, int tz_hours, const char *time_fmt,
 			    const char *time_fmt_recent);
+
+/* Thread views: a lane graph, oldest first (check thread) */
+void cli_render_thread_list(const shyake_thread *t,
+			    const cli_render_opts *opts);
+
+/* Thread with bodies (fetch thread, read thread); details[i] is the
+ * detail of entry i, NULL when it is missing or cannot be read.
+ * flat: no graph, a separator line between mails. */
+void cli_render_thread_mails(const shyake_thread *t,
+			     shyake_mail_detail *const *details, int flat,
+			     int no_color, int plain, int tz_hours,
+			     const char *time_fmt, const char *time_fmt_recent);
 
 #endif /* SHYAKE_DISPLAY_H */

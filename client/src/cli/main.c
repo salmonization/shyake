@@ -871,6 +871,152 @@ static int offer_reply_send(shyake_ctx *ctx, const char *config_dir,
 	return ret == SHYAKE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
+/* check, fetch, save or read thread <id> */
+static int run_thread(const char *cmd, int argc, char *argv[],
+		      const app_config *app_cfg, char *config_dir)
+{
+	int is_check = strcmp(cmd, "check") == 0;
+	int is_save = strcmp(cmd, "save") == 0;
+	int local = strcmp(cmd, "read") == 0;
+	int flat = 0, json = 0, no_header = 0, bad = 0;
+	static struct option thread_options[] = {
+		{ "flat", no_argument, 0, 'f' },
+		{ "json", no_argument, 0, 'J' },
+		{ "no-header", no_argument, 0, 'H' },
+		{ "raw", no_argument, 0, 'r' },
+		{ 0, 0, 0, 0 }
+	};
+	int opt, opt_idx = 0;
+	optind = 3;
+	while ((opt = getopt_long(argc, argv, "r", thread_options, &opt_idx)) !=
+	       -1) {
+		switch (opt) {
+		case 'f':
+			flat = 1;
+			bad |= is_check || is_save;
+			break;
+		case 'J':
+			json = 1;
+			bad |= !is_check;
+			break;
+		case 'H':
+			no_header = 1;
+			bad |= !is_check;
+			break;
+		case 'r':
+			fprintf(stderr,
+				"--raw shows one mail. Use '%s <id> --raw'.\n",
+				cmd);
+			return EXIT_FAILURE;
+		default:
+			bad = 1;
+			break;
+		}
+	}
+	const char *id = optind < argc ? argv[optind] : NULL;
+	if (!id || bad) {
+		fprintf(stderr, "Usage: shyake %s thread <id>%s\n", cmd,
+			is_check ? " [--json] [--no-header]" :
+			is_save	 ? "" :
+				   " [--flat]");
+		return EXIT_FAILURE;
+	}
+	if (!app_cfg->username || (!local && !app_cfg->instance)) {
+		fprintf(stderr,
+			"Missing INSTANCE or USERNAME in config file.\n");
+		return EXIT_FAILURE;
+	}
+
+	char action[32];
+	snprintf(action, sizeof(action), "%c%s failed.", toupper(cmd[0]),
+		 cmd + 1);
+	shyake_config cfg = {
+		.config_dir = config_dir,
+		.instance_url = app_cfg->instance ? app_cfg->instance : "",
+		.username = app_cfg->username,
+		.plain = global_plain,
+		.debug = global_debug,
+		.no_color = global_no_color || app_cfg->no_color
+	};
+	shyake_ctx *ctx = shyake_init_ctx(&cfg);
+	if (prompt_passphrase(ctx, config_dir) != 0) {
+		shyake_free_ctx(ctx);
+		return EXIT_FAILURE;
+	}
+	shyake_thread *t = shyake_thread_of(ctx, id, local);
+	if (!t) {
+		print_lib_error(ctx, action);
+		shyake_free_ctx(ctx);
+		return EXIT_FAILURE;
+	}
+	if (!t->complete)
+		fprintf(stderr, "Your instance does not list replies "
+				"(protocol 4). Only saved mail adds "
+				"replies.\n");
+
+	int ret = EXIT_SUCCESS;
+	if (is_check) {
+		cli_render_opts ro = { 0 };
+		ro.json_out = json;
+		ro.no_header = no_header;
+		ro.no_color = cfg.no_color;
+		ro.plain = cfg.plain;
+		ro.tz_hours = app_cfg->tz_hours;
+		ro.time_fmt = app_cfg->time_format;
+		ro.time_fmt_recent = app_cfg->time_format_recent;
+		cli_render_thread_list(t, &ro);
+	} else if (is_save) {
+		int saved = 0, had = 0, missing = 0;
+		for (int i = 0; i < t->count; i++) {
+			shyake_thread_entry *e = &t->entries[i];
+			if (!e->mail_id) {
+				missing++;
+			} else if (e->where & SHYAKE_IN_SAVED) {
+				had++;
+			} else if (shyake_save_mail(ctx, e->mail_id) ==
+				   SHYAKE_OK) {
+				saved++;
+			} else {
+				char what[64];
+				snprintf(what, sizeof(what),
+					 "Save of %s failed.", e->mail_id);
+				print_lib_error(ctx, what);
+				ret = EXIT_FAILURE;
+			}
+		}
+		printf("Saved %d mail.", saved);
+		if (had)
+			printf(" %d %s already saved.", had,
+			       had == 1 ? "was" : "were");
+		if (missing)
+			printf(" %d %s missing.", missing,
+			       missing == 1 ? "is" : "are");
+		printf("\n");
+	} else {
+		/* bodies: from the instance, else from the saved copy */
+		shyake_mail_detail **d = calloc((usize)t->count, sizeof(*d));
+		for (int i = 0; d && i < t->count; i++) {
+			shyake_thread_entry *e = &t->entries[i];
+			if (!e->mail_id)
+				continue;
+			if (!local &&
+			    (e->where & (SHYAKE_IN_INBOX | SHYAKE_IN_SENT)))
+				d[i] = shyake_fetch(ctx, e->mail_id);
+			if (!d[i] && (e->where & SHYAKE_IN_SAVED))
+				d[i] = shyake_read_saved(ctx, e->mail_id);
+		}
+		cli_render_thread_mails(t, d, flat, cfg.no_color, cfg.plain,
+					app_cfg->tz_hours, app_cfg->time_format,
+					app_cfg->time_format_recent);
+		for (int i = 0; d && i < t->count; i++)
+			shyake_free_mail_detail(d[i]);
+		free(d);
+	}
+	shyake_free_thread(t);
+	shyake_free_ctx(ctx);
+	return ret;
+}
+
 int main(int argc, char *argv[])
 {
 	/* parse global flags before command dispatch */
@@ -1654,6 +1800,13 @@ reply_done:
 	}
 
 	if (strcmp(cmd, "check") == 0) {
+		if (argc >= 3 && strcmp(argv[2], "thread") == 0) {
+			int r = run_thread(cmd, argc, argv, app_cfg,
+					   config_dir);
+			free_app_config(app_cfg);
+			free(config_dir);
+			return r;
+		}
 		if (argc < 3) {
 			fprintf(stderr,
 				"Usage: shyake check <inbox|sent|id> [options]\n");
@@ -1971,6 +2124,13 @@ reply_done:
 	}
 
 	if (strcmp(cmd, "fetch") == 0) {
+		if (argc >= 3 && strcmp(argv[2], "thread") == 0) {
+			int r = run_thread(cmd, argc, argv, app_cfg,
+					   config_dir);
+			free_app_config(app_cfg);
+			free(config_dir);
+			return r;
+		}
 		int raw = 0;
 		const char *mail_id = NULL;
 
@@ -2367,6 +2527,13 @@ reply_done:
 	}
 
 	if (strcmp(cmd, "save") == 0) {
+		if (argc >= 3 && strcmp(argv[2], "thread") == 0) {
+			int r = run_thread(cmd, argc, argv, app_cfg,
+					   config_dir);
+			free_app_config(app_cfg);
+			free(config_dir);
+			return r;
+		}
 		if (argc < 3) {
 			fprintf(stderr, "Usage: shyake save <id>\n");
 			free_app_config(app_cfg);
@@ -2410,6 +2577,13 @@ reply_done:
 	}
 
 	if (strcmp(cmd, "read") == 0) {
+		if (argc >= 3 && strcmp(argv[2], "thread") == 0) {
+			int r = run_thread(cmd, argc, argv, app_cfg,
+					   config_dir);
+			free_app_config(app_cfg);
+			free(config_dir);
+			return r;
+		}
 		int raw = 0;
 		const char *mail_id = NULL;
 
