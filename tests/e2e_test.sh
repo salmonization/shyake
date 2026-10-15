@@ -601,7 +601,15 @@ assert_contains "reply -d: RE line" "RE:   $REPLY_ID" "$out"
 section "12. rotate"
 # ------------------------------------------------------------------ #
 
-out=$(SHYAKE_PASSPHRASE="" sh_run "$DIR_A" rotate 2>&1)
+# a wrong username aborts before any change
+pk_before=$(sha256sum "$DIR_A/kem_pk.bin")
+out=$(echo "nobody" | SHYAKE_PASSPHRASE="" sh_run "$DIR_A" rotate 2>&1)
+rc=$?; assert_exit "rotate: wrong username exits 1" 1 "$rc" "$out"
+assert_contains "rotate: warns about saved mail" "cannot decrypt your saved" "$out"
+assert_exit "rotate: keys unchanged after abort" 0 \
+    "$([ "$pk_before" = "$(sha256sum "$DIR_A/kem_pk.bin")" ] && echo 0 || echo 1)"
+
+out=$(echo "$USER_A" | SHYAKE_PASSPHRASE="" sh_run "$DIR_A" rotate 2>&1)
 rc=$?; assert_exit "rotate exits 0" 0 "$rc" "$out"
 assert_contains "rotate: success message" "rotated" "$out"
 
@@ -645,10 +653,21 @@ USER_C="tstc${TS}"
 init_nopass "$DIR_C"
 sh_run "$DIR_C" register -u "$USER_C" -i "$INSTANCE" > /dev/null 2>&1
 
+# local data to delete, and a file that is not shyake's
+EDITOR="$FAKE_ED_PLAIN" VISUAL="$FAKE_ED_PLAIN" sh_run "$DIR_C" compose \
+    > /dev/null 2>&1
+echo "keep" > "$DIR_C/notes.txt"
+assert_exit "destroy: draft saved before destroy" 0 \
+    "$([ -n "$(ls -A "$DIR_C/drafts" 2>/dev/null)" ] && echo 0 || echo 1)"
+
 # destroy requires typing username to stdin
 out=$(echo "$USER_C" | sh_run "$DIR_C" destroy 2>&1)
 rc=$?; assert_exit "destroy exits 0" 0 "$rc" "$out"
 assert_contains "destroy: confirmation" "estroyed" "$out"
+assert_contains "destroy: local data deleted" "drafts deleted" "$out"
+left=$(ls -A "$DIR_C")
+assert_exit "destroy: only other files remain" 0 \
+    "$([ "$left" = "notes.txt" ] && echo 0 || echo 1)" "$left"
 
 # After destroy, pubkey should be empty / user effectively gone
 resp=$(curl -sf "$INSTANCE/api/pubkey/$USER_C" 2>&1) || true
@@ -680,7 +699,7 @@ echo "first mail" | sh_run "$DIR_D" send -t "$USER_E" \
     -s "Cache E key" > /dev/null 2>&1 || true
 
 # E rotates keys — server now has a new pubkey for E
-SHYAKE_PASSPHRASE="" sh_run "$DIR_E" rotate > /dev/null 2>&1 || true
+echo "$USER_E" | SHYAKE_PASSPHRASE="" sh_run "$DIR_E" rotate > /dev/null 2>&1 || true
 
 # D sends to E again — expects failure: local fingerprint mismatch
 out_mismatch=$(echo "after rotate" | sh_run "$DIR_D" send -t "$USER_E" \

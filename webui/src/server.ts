@@ -5,7 +5,7 @@
  */
 
 import { Session } from "./ffi";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -290,6 +290,19 @@ route("POST", "/api/rotate", async ({ req }) => {
     }
 });
 
+// only what shyake keeps in the config dir
+const LOCAL_DATA = [
+    "config",
+    "kem_pk.bin",
+    "kem_sk.bin",
+    "sig_pk.bin",
+    "sig_sk.bin",
+    "known_hosts",
+    "known_hosts.tmp",
+    "saved",
+    "drafts",
+];
+
 route("POST", "/api/destroy", async ({ req }) => {
     try {
         const { confirm } = await req.json();
@@ -299,7 +312,7 @@ route("POST", "/api/destroy", async ({ req }) => {
         await needSession().destroy();
         session?.close();
         session = null;
-        for (const f of readdirSync(CONFIG_DIR))
+        for (const f of LOCAL_DATA)
             rmSync(join(CONFIG_DIR, f), { recursive: true, force: true });
         return json({ ok: true });
     } catch (e) {

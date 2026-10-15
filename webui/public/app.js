@@ -379,7 +379,7 @@ async function loadBlocklist() {
 }
 
 $("btn-rotate").onclick = async () => {
-    if (!confirm("轮换密钥会清空与你相关的所有邮件，继续？")) return;
+    if (!confirm("轮换密钥会清空实例上与你相关的所有邮件，新密钥也无法解密已保存的邮件和草稿。继续？")) return;
     try {
         await post("/rotate", { newPassphrase: $("rotate-pass").value });
         showMsg($("acct-msg"), "密钥已轮换", true);

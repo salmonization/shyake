@@ -6,6 +6,9 @@
 #include <getopt.h>
 #include <ctype.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <errno.h>
 #include "shyake.h"
 #include "display.h"
 #include "prompt.h"
@@ -520,6 +523,65 @@ static void shred_and_unlink(const char *path)
 		fclose(f);
 	}
 	unlink(path);
+}
+
+/* remove a file or a directory tree; no shell */
+static int remove_tree(const char *path)
+{
+	struct stat st;
+	if (lstat(path, &st) != 0)
+		return errno == ENOENT ? 0 : -1;
+	if (!S_ISDIR(st.st_mode))
+		return unlink(path);
+	DIR *d = opendir(path);
+	if (!d)
+		return -1;
+	int ret = 0;
+	struct dirent *e;
+	while ((e = readdir(d)) != NULL) {
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+			continue;
+		char sub[1024];
+		if (snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name) >=
+			    (int)sizeof(sub) ||
+		    remove_tree(sub) != 0)
+			ret = -1;
+	}
+	closedir(d);
+	return rmdir(path) == 0 ? ret : -1;
+}
+
+/* delete only what shyake keeps in the config dir */
+static int remove_local_data(const char *config_dir)
+{
+	static const char *const names[] = {
+		"config",	   "kem_pk.bin", "kem_sk.bin",
+		"sig_pk.bin",	   "sig_sk.bin", "known_hosts",
+		"known_hosts.tmp", "saved",	 "drafts",
+	};
+	int ret = 0;
+	for (usize i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		char path[1024];
+		snprintf(path, sizeof(path), "%s/%s", config_dir, names[i]);
+		if (remove_tree(path) != 0)
+			ret = -1;
+	}
+	return ret;
+}
+
+/* read one line from stdin and compare it with the username */
+static int confirm_username(const char *user)
+{
+	printf("Type your username to confirm: ");
+	fflush(stdout);
+	char buf[256];
+	if (!fgets(buf, sizeof(buf), stdin))
+		return 0;
+	if (strcmp(trim_whitespace(buf), user) != 0) {
+		fprintf(stderr, "Username mismatch. Aborted.\n");
+		return 0;
+	}
+	return 1;
 }
 
 /* private temp file inside the config dir (not /tmp) */
@@ -2136,6 +2198,18 @@ reply_done:
 			free(config_dir);
 			return EXIT_FAILURE;
 		}
+		printf("WARNING: This replaces your key pairs and deletes all "
+		       "mail to and from\n");
+		printf("you on the instance. The new keys cannot decrypt your "
+		       "saved mail and\n");
+		printf("drafts. To keep them, export them first, for example "
+		       "with\n");
+		printf("'shyake read <id> --no-color > mail.txt'.\n");
+		if (!confirm_username(user)) {
+			free_app_config(app_cfg);
+			free(config_dir);
+			return EXIT_FAILURE;
+		}
 		shyake_config cfg = { .config_dir = config_dir,
 				      .instance_url = inst,
 				      .username = user,
@@ -2234,30 +2308,6 @@ reply_done:
 		const char *inst = app_cfg->instance;
 		const char *user = app_cfg->username;
 
-		printf("WARNING: This destroys your account on the instance "
-		       "and deletes your\n");
-		printf("local configuration and keys. All mail to and from you "
-		       "is deleted.\n");
-		printf("Your username stays locked on this instance and cannot "
-		       "be registered\n");
-		printf("again. Type your username to confirm: ");
-		fflush(stdout);
-
-		char buf[256];
-		if (!fgets(buf, sizeof(buf), stdin)) {
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
-		}
-
-		char *input = trim_whitespace(buf);
-		if (strcmp(input, user) != 0) {
-			fprintf(stderr, "Username mismatch. Aborted.\n");
-			free_app_config(app_cfg);
-			free(config_dir);
-			return EXIT_FAILURE;
-		}
-
 		if (!inst || !user) {
 			fprintf(stderr,
 				"Missing INSTANCE or USERNAME in config file.\n");
@@ -2265,6 +2315,19 @@ reply_done:
 			free(config_dir);
 			return EXIT_FAILURE;
 		}
+		printf("WARNING: This destroys your account on the instance "
+		       "and deletes all mail\n");
+		printf("to and from you there. It also deletes your local "
+		       "configuration, keys,\n");
+		printf("saved mail, and drafts. Your username stays locked on "
+		       "this instance\n");
+		printf("and cannot be registered again.\n");
+		if (!confirm_username(user)) {
+			free_app_config(app_cfg);
+			free(config_dir);
+			return EXIT_FAILURE;
+		}
+
 		shyake_config cfg = { .config_dir = config_dir,
 				      .instance_url = inst,
 				      .username = user,
@@ -2283,12 +2346,15 @@ reply_done:
 		shyake_err ret = shyake_destroy(ctx);
 
 		if (ret == SHYAKE_OK) {
-			char cmd_buf[512];
-			snprintf(cmd_buf, sizeof(cmd_buf), "rm -rf %s/*",
-				 config_dir);
-			system(cmd_buf);
-			printf("Account destroyed. "
-			       "Local configuration and keys deleted.\n");
+			printf("Account destroyed.\n");
+			if (remove_local_data(config_dir) == 0)
+				printf("Local configuration, keys, saved mail, "
+				       "and drafts deleted.\n");
+			else
+				fprintf(stderr,
+					"Cannot delete all files in %s. "
+					"Delete them yourself.\n",
+					config_dir);
 		} else {
 			print_lib_error(ctx, "Destroy failed.");
 		}

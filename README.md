@@ -426,7 +426,9 @@ shyake update preview
 
 **Rotate command**:
 
-This rotates your key pairs and clears all mail to and from you.
+This rotates your key pairs and clears all mail to and from you on
+the instance. The new keys cannot decrypt your saved mail and drafts.
+To keep them, export them first. Type your username to confirm.
 
 ```sh
 shyake rotate
@@ -434,10 +436,11 @@ shyake rotate
 
 **Destroy command**:
 
-This deletes your local configuration and key pairs. It also
-destroys your account on the instance. It clears all mail to and
-from you. Your username stays permanently locked. You cannot
-register it again on this instance.
+This deletes your local configuration, key pairs, saved mail, and
+drafts. It also destroys your account on the instance. It clears
+all mail to and from you. Your username stays permanently locked.
+You cannot register it again on this instance. Type your username
+to confirm. Other files in the configuration directory stay.
 
 ```sh
 shyake destroy

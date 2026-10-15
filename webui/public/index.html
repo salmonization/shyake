@@ -118,7 +118,7 @@
             </div>
             <div class="section">
                 <h3>密钥轮换</h3>
-                <div class="desc">重新生成密钥对并上传。会清空与你相关的所有邮件。</div>
+                <div class="desc">重新生成密钥对并上传。会清空实例上与你相关的所有邮件。新密钥无法解密已保存的邮件和草稿，如需保留，请先导出。</div>
                 <label>新密钥密码（留空则不加密）</label>
                 <input type="password" id="rotate-pass">
                 <div class="btn-row">
@@ -127,7 +127,7 @@
             </div>
             <div class="section">
                 <h3 style="color:var(--danger)">销毁账户</h3>
-                <div class="desc">删除本地配置与密钥，并销毁实例上的账户。所有邮件被清除，用户名在该实例上永久锁定。输入你的用户名以确认。</div>
+                <div class="desc">删除本地配置、密钥、已保存的邮件和草稿，并销毁实例上的账户。所有邮件被清除，用户名在该实例上永久锁定。输入你的用户名以确认。</div>
                 <div class="btn-row" style="margin-top:0">
                     <input type="text" id="destroy-confirm" placeholder="输入用户名确认" style="flex:1">
                     <button class="danger" id="btn-destroy">销毁</button>
