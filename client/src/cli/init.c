@@ -9,6 +9,7 @@
 
 #include "shyake.h"
 #include "prompt.h"
+#include "init.h"
 
 static const char *default_config =
 	"# shyake global configuration file\n\n"
@@ -72,6 +73,70 @@ static int mkdir_p(const char *path)
 	return 0;
 }
 
+/* write the default config unless one exists */
+static void write_default_config(const char *config_dir)
+{
+	char config_file[512];
+	snprintf(config_file, sizeof(config_file), "%s/config", config_dir);
+	struct stat st = { 0 };
+	if (stat(config_file, &st) == 0) {
+		printf("Config file %s already exists. Skipping.\n",
+		       config_file);
+		return;
+	}
+	FILE *f = fopen(config_file, "w");
+	if (!f) {
+		fprintf(stderr, "Init failed. Cannot create %s.\n",
+			config_file);
+		return;
+	}
+	fputs(default_config, f);
+	fclose(f);
+	printf("Created default config at %s\n", config_file);
+}
+
+/* whether a key pair is still to be generated */
+static int keys_missing(const char *config_dir)
+{
+	char path[512];
+	struct stat st = { 0 };
+	snprintf(path, sizeof(path), "%s/kem_pk.bin", config_dir);
+	if (stat(path, &st) == -1)
+		return 1;
+	snprintf(path, sizeof(path), "%s/sig_pk.bin", config_dir);
+	return stat(path, &st) == -1;
+}
+
+/* passphrase for new secret keys, typed twice; -1 on mismatch */
+static int ask_key_passphrase(shyake_ctx *ctx, const char *config_dir)
+{
+	if (!getenv("SHYAKE_PASSPHRASE")) {
+		fprintf(stderr, "Key: %s/kem_sk.bin\n", config_dir);
+		fflush(stderr);
+	}
+	char pp1[512], pp2[512];
+	memset(pp1, 0, sizeof(pp1));
+	memset(pp2, 0, sizeof(pp2));
+	int ret = -1;
+	if (read_passphrase("Enter passphrase (empty for no passphrase): ", pp1,
+			    sizeof(pp1)) != 0)
+		goto out;
+	if (pp1[0] != '\0') {
+		int rd = read_passphrase("Enter same passphrase again: ", pp2,
+					 sizeof(pp2));
+		if (strcmp(pp1, pp2) != 0)
+			fprintf(stderr, "Passphrases do not match.\n");
+		if (rd != 0 || strcmp(pp1, pp2) != 0)
+			goto out;
+	}
+	shyake_set_passphrase(ctx, pp1);
+	ret = 0;
+out:
+	memset(pp1, 0, sizeof(pp1));
+	memset(pp2, 0, sizeof(pp2));
+	return ret;
+}
+
 int cmd_init(const char *config_dir)
 {
 	char *allocated = NULL;
@@ -86,37 +151,17 @@ int cmd_init(const char *config_dir)
 	}
 
 	struct stat st = { 0 };
-	if (stat(config_dir, &st) == -1) {
-		if (mkdir_p(config_dir) == -1) {
-			fprintf(stderr, "Init failed. Cannot create %s (%s).\n",
-				config_dir, strerror(errno));
-			free(allocated);
-			return 1;
-		}
+	if (stat(config_dir, &st) == -1 && mkdir_p(config_dir) == -1) {
+		fprintf(stderr, "Init failed. Cannot create %s (%s).\n",
+			config_dir, strerror(errno));
+		free(allocated);
+		return 1;
 	}
-
-	char config_file[512];
-	snprintf(config_file, sizeof(config_file), "%s/config", config_dir);
-
-	if (stat(config_file, &st) == -1) {
-		FILE *f = fopen(config_file, "w");
-		if (f) {
-			fputs(default_config, f);
-			fclose(f);
-			printf("Created default config at %s\n", config_file);
-		} else {
-			fprintf(stderr, "Init failed. Cannot create %s.\n",
-				config_file);
-		}
-	} else {
-		printf("Config file %s already exists. Skipping.\n",
-		       config_file);
-	}
+	write_default_config(config_dir);
 
 	shyake_config cfg = { .config_dir = config_dir,
 			      .instance_url = "",
 			      .username = "" };
-
 	shyake_ctx *ctx = shyake_init_ctx(&cfg);
 	if (!ctx) {
 		fprintf(stderr,
@@ -125,56 +170,17 @@ int cmd_init(const char *config_dir)
 		return 1;
 	}
 
-	/* Prompt for passphrase only when new keys will actually be generated */
-	char kem_pk_path[512], sig_pk_path[512];
-	struct stat st2 = { 0 };
-	snprintf(kem_pk_path, sizeof(kem_pk_path), "%s/kem_pk.bin", config_dir);
-	snprintf(sig_pk_path, sizeof(sig_pk_path), "%s/sig_pk.bin", config_dir);
-	if (stat(kem_pk_path, &st2) == -1 || stat(sig_pk_path, &st2) == -1) {
-		char kem_sk_path[512];
-		snprintf(kem_sk_path, sizeof(kem_sk_path), "%s/kem_sk.bin",
-			 config_dir);
-		if (!getenv("SHYAKE_PASSPHRASE")) {
-			fprintf(stderr, "Key: %s\n", kem_sk_path);
-			fflush(stderr);
-		}
-		char pp1[512], pp2[512];
-		memset(pp1, 0, sizeof(pp1));
-		memset(pp2, 0, sizeof(pp2));
-		if (read_passphrase(
-			    "Enter passphrase (empty for no passphrase): ", pp1,
-			    sizeof(pp1)) != 0) {
-			shyake_free_ctx(ctx);
-			free(allocated);
-			return 1;
-		}
-		if (pp1[0] != '\0') {
-			if (read_passphrase("Enter same passphrase again: ",
-					    pp2, sizeof(pp2)) != 0 ||
-			    strcmp(pp1, pp2) != 0) {
-				if (strcmp(pp1, pp2) != 0)
-					fprintf(stderr,
-						"Passphrases do not match.\n");
-				memset(pp1, 0, sizeof(pp1));
-				memset(pp2, 0, sizeof(pp2));
-				shyake_free_ctx(ctx);
-				free(allocated);
-				return 1;
-			}
-			memset(pp2, 0, sizeof(pp2));
-		}
-		shyake_set_passphrase(ctx, pp1);
-		memset(pp1, 0, sizeof(pp1));
-	}
-
-	if (shyake_generate_keys(ctx) == 0) {
+	/* prompt only when new keys will actually be generated */
+	int ret = 0;
+	if (keys_missing(config_dir) &&
+	    ask_key_passphrase(ctx, config_dir) != 0)
+		ret = 1;
+	else if (shyake_generate_keys(ctx) == 0)
 		printf("Keys generated.\n");
-	} else {
+	else
 		fprintf(stderr, "Init failed. Cannot generate keys.\n");
-	}
 
 	shyake_free_ctx(ctx);
 	free(allocated);
-
-	return 0;
+	return ret;
 }

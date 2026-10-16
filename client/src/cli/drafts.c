@@ -137,6 +137,33 @@ static char *decrypt_field(const u8 *sym, const char *enc)
 	return shyake_unseal_b64(sym, enc);
 }
 
+/*
+ * Open the file of draft_id for rewriting, or create the next free
+ * id exclusively for a new draft. id_buf receives the id.
+ */
+static int open_draft_file(const char *config_dir, const char *draft_id,
+			   char *id_buf, usize id_len)
+{
+	char path[640];
+	if (draft_id) {
+		snprintf(id_buf, id_len, "%s", draft_id);
+		snprintf(path, sizeof(path), "%s/drafts/%s.json", config_dir,
+			 draft_id);
+		return open(path, O_WRONLY | O_TRUNC, 0600);
+	}
+	int fd = -1;
+	long id = max_draft_id(config_dir) + 1;
+	for (int tries = 0; tries < 100; tries++, id++) {
+		snprintf(id_buf, id_len, "%ld", id);
+		snprintf(path, sizeof(path), "%s/drafts/%ld.json", config_dir,
+			 id);
+		fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (fd >= 0 || errno != EEXIST)
+			break;
+	}
+	return fd;
+}
+
 shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 			  const char *recipient, const char *subject,
 			  const char *reply_ref, const u8 *body, usize body_len,
@@ -203,27 +230,8 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 		return SHYAKE_ERR_CRYPTO;
 	}
 
-	/* allocate id and create file exclusively for new drafts */
 	char id_buf[32];
-	char draft_path[640];
-	int fd = -1;
-	if (draft_id) {
-		snprintf(id_buf, sizeof(id_buf), "%s", draft_id);
-		snprintf(draft_path, sizeof(draft_path), "%s/drafts/%s.json",
-			 config_dir, draft_id);
-		fd = open(draft_path, O_WRONLY | O_TRUNC, 0600);
-	} else {
-		long id = max_draft_id(config_dir) + 1;
-		for (int tries = 0; tries < 100; tries++, id++) {
-			snprintf(id_buf, sizeof(id_buf), "%ld", id);
-			snprintf(draft_path, sizeof(draft_path),
-				 "%s/drafts/%ld.json", config_dir, id);
-			fd = open(draft_path, O_WRONLY | O_CREAT | O_EXCL,
-				  0600);
-			if (fd >= 0 || errno != EEXIST)
-				break;
-		}
-	}
+	int fd = open_draft_file(config_dir, draft_id, id_buf, sizeof(id_buf));
 	if (fd < 0) {
 		free(enc_re);
 		free(enc_rec);
@@ -371,6 +379,50 @@ static int draft_entry_cmp(const void *a, const void *b)
 	return (ia > ib) - (ia < ib);
 }
 
+/* one row of the drafts list, from drafts/<name>; -1 if unreadable */
+static int fill_draft_entry(shyake_saved_entry *e, shyake_selfdec *sd,
+			    const char *dir_path, const char *name, long id,
+			    const char *self)
+{
+	char fpath[768];
+	snprintf(fpath, sizeof(fpath), "%s/%s", dir_path, name);
+	char *raw = read_text_file(fpath);
+	if (!raw)
+		return -1;
+	cJSON *json = cJSON_Parse(raw);
+	free(raw);
+	cJSON *jkey = json ? cJSON_GetObjectItem(json, "enc_key") : NULL;
+	if (!jkey || !jkey->valuestring) {
+		cJSON_Delete(json);
+		return -1;
+	}
+	cJSON *jrec = cJSON_GetObjectItem(json, "enc_recipient");
+	cJSON *jsub = cJSON_GetObjectItem(json, "enc_subject");
+	cJSON *jupd = cJSON_GetObjectItem(json, "modified");
+	cJSON *jcrt = cJSON_GetObjectItem(json, "created");
+	cJSON *jsz = cJSON_GetObjectItem(json, "size");
+
+	char *rec = NULL, *sub = NULL;
+	u8 sym[32];
+	if (shyake_selfdec_key(sd, jkey->valuestring, sym) == SHYAKE_OK) {
+		rec = decrypt_field(sym, jrec ? jrec->valuestring : NULL);
+		sub = decrypt_field(sym, jsub ? jsub->valuestring : NULL);
+		wipe_key(sym);
+	}
+
+	char id_buf[32];
+	snprintf(id_buf, sizeof(id_buf), "%ld", id);
+	e->mail_id = strdup(id_buf);
+	e->sender = strdup(self);
+	e->recipient = rec ? rec : strdup("(decryption failed)");
+	e->subject = sub ? sub : strdup("(decryption failed)");
+	e->timestamp = jupd ? (i64)jupd->valuedouble : 0;
+	e->created = jcrt ? (i64)jcrt->valuedouble : 0;
+	e->size = jsz ? jsz->valueint : 0;
+	cJSON_Delete(json);
+	return 0;
+}
+
 shyake_saved_list *cli_list_drafts(shyake_ctx *ctx, const char *config_dir,
 				   const char *username)
 {
@@ -419,55 +471,10 @@ shyake_saved_list *cli_list_drafts(shyake_ctx *ctx, const char *config_dir,
 	int idx = 0;
 	while ((ent = readdir(d)) != NULL && idx < count) {
 		long id = numeric_draft_id(ent->d_name);
-		if (id < 0)
-			continue;
-
-		char fpath[768];
-		snprintf(fpath, sizeof(fpath), "%s/%s", dir_path, ent->d_name);
-		char *raw = read_text_file(fpath);
-		if (!raw)
-			continue;
-
-		cJSON *json = cJSON_Parse(raw);
-		free(raw);
-		if (!json)
-			continue;
-
-		cJSON *jkey = cJSON_GetObjectItem(json, "enc_key");
-		cJSON *jrec = cJSON_GetObjectItem(json, "enc_recipient");
-		cJSON *jsub = cJSON_GetObjectItem(json, "enc_subject");
-		cJSON *jupd = cJSON_GetObjectItem(json, "modified");
-		cJSON *jcrt = cJSON_GetObjectItem(json, "created");
-		cJSON *jsz = cJSON_GetObjectItem(json, "size");
-		if (!jkey || !jkey->valuestring) {
-			cJSON_Delete(json);
-			continue;
-		}
-
-		char *rec = NULL, *sub = NULL;
-		u8 sym[32];
-		if (shyake_selfdec_key(sd, jkey->valuestring, sym) ==
-		    SHYAKE_OK) {
-			rec = decrypt_field(sym,
-					    jrec ? jrec->valuestring : NULL);
-			sub = decrypt_field(sym,
-					    jsub ? jsub->valuestring : NULL);
-			wipe_key(sym);
-		}
-
-		shyake_saved_entry *e = &list->entries[idx];
-		char id_buf[32];
-		snprintf(id_buf, sizeof(id_buf), "%ld", id);
-		e->mail_id = strdup(id_buf);
-		e->sender = strdup(self);
-		e->recipient = rec ? rec : strdup("(decryption failed)");
-		e->subject = sub ? sub : strdup("(decryption failed)");
-		e->timestamp = jupd ? (i64)jupd->valuedouble : 0;
-		e->created = jcrt ? (i64)jcrt->valuedouble : 0;
-		e->size = jsz ? jsz->valueint : 0;
-		idx++;
-
-		cJSON_Delete(json);
+		if (id >= 0 &&
+		    fill_draft_entry(&list->entries[idx], sd, dir_path,
+				     ent->d_name, id, self) == 0)
+			idx++;
 	}
 
 	list->count = idx;

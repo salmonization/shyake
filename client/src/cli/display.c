@@ -421,18 +421,242 @@ void cli_render_fingerprint(const char *label, const shyake_fp_result *r,
 /* Mail list rendering                                                */
 /* ------------------------------------------------------------------ */
 
+/* columns by index: the bit position of their COL_* flag */
+#define NCOLS 7
+enum { C_ID, C_PARTY, C_SUBJECT, C_SIZE, C_DATE, C_CREATED, C_MODIFIED };
+
+/* space after a column when the subject is fitted to the terminal */
+static const int col_gap[NCOLS] = { 1, 1, 0, 1, 0, 1, 0 };
+
+/* column index of a COL_* flag, -1 for anything else */
+static int col_index(int col)
+{
+	for (int i = 0; i < NCOLS; i++)
+		if (col == 1 << i)
+			return i;
+	return -1;
+}
+
+/* one mail of a list as display strings, by column index */
+typedef struct {
+	char *cell[NCOLS];
+} list_row;
+
+static list_row *format_rows(const shyake_mail_list *list,
+			     const cli_render_opts *opts)
+{
+	list_row *rows = calloc(list->count, sizeof(list_row));
+	for (int i = 0; i < list->count; i++) {
+		const shyake_mail_entry *e = &list->entries[i];
+		char **cell = rows[i].cell;
+		char pbuf[256], sbuf[16], dbuf[64], cbuf[64];
+		cli_format_party(e->party, pbuf, sizeof(pbuf));
+		cli_format_size(e->size, sbuf, sizeof(sbuf));
+		cli_format_timestamp(e->timestamp, opts->tz_hours,
+				     opts->time_fmt, opts->time_fmt_recent,
+				     dbuf, sizeof(dbuf));
+		cli_format_timestamp(e->created, opts->tz_hours, opts->time_fmt,
+				     opts->time_fmt_recent, cbuf, sizeof(cbuf));
+		cell[C_ID] = strdup(e->mail_id);
+		cell[C_PARTY] = strdup(pbuf);
+		cell[C_SUBJECT] =
+			strdup(e->subject ? e->subject : "<decryption failed>");
+		cell[C_SIZE] = strdup(sbuf);
+		cell[C_DATE] = strdup(dbuf);
+		cell[C_CREATED] = strdup(cbuf);
+		cell[C_MODIFIED] = strdup(dbuf);
+	}
+	return rows;
+}
+
+static void free_rows(list_row *rows, int count)
+{
+	for (int i = 0; i < count; i++)
+		for (int c = 0; c < NCOLS; c++)
+			free(rows[i].cell[c]);
+	free(rows);
+}
+
+static void print_list_json(const list_row *rows, int count, int is_sent)
+{
+	cJSON *arr = cJSON_CreateArray();
+	for (int i = 0; i < count; i++) {
+		char *const *cell = rows[i].cell;
+		cJSON *obj = cJSON_CreateObject();
+		cJSON_AddStringToObject(obj, "mail_id", cell[C_ID]);
+		cJSON_AddStringToObject(obj, is_sent ? "recipient" : "sender",
+					cell[C_PARTY]);
+		cJSON_AddStringToObject(obj, "subject", cell[C_SUBJECT]);
+		cJSON_AddStringToObject(obj, "size", cell[C_SIZE]);
+		cJSON_AddStringToObject(obj, "date", cell[C_DATE]);
+		cJSON_AddItemToArray(arr, obj);
+	}
+	char *out = cJSON_PrintUnformatted(arr);
+	printf("%s\n", out);
+	free(out);
+	cJSON_Delete(arr);
+}
+
+static void print_list_csv(const list_row *rows, int count,
+			   const cli_render_opts *opts, const char *id_hdr,
+			   int is_sent)
+{
+	if (!opts->no_header)
+		printf("%s,%s,Subject,Size,Date\n", id_hdr,
+		       is_sent ? "To" : "From");
+	for (int i = 0; i < count; i++) {
+		char *const *cell = rows[i].cell;
+		const char *sub = cell[C_SUBJECT];
+		char escaped[2048] = { 0 };
+		int p = 0;
+		for (int j = 0; sub[j] && p < 2040; j++) {
+			if (sub[j] == '"')
+				escaped[p++] = '"';
+			escaped[p++] = sub[j];
+		}
+		printf("%s,%s,\"%s\",%s,%s\n", cell[C_ID], cell[C_PARTY],
+		       escaped, cell[C_SIZE], cell[C_DATE]);
+	}
+}
+
+/* widest cell of each active column; the subject fits the terminal */
+static void column_widths(const list_row *rows, int count, unsigned active,
+			  const char *const *label, const cli_render_opts *opts,
+			  int *w)
+{
+	for (int c = 0; c < NCOLS; c++)
+		w[c] = (int)strlen(label[c]);
+	for (int i = 0; i < count; i++) {
+		for (int c = 0; c < NCOLS; c++) {
+			if (!(active & (1u << c)))
+				continue;
+			const char *cell = rows[i].cell[c];
+			int l = c == C_SUBJECT ? utf8_display_width(cell) :
+						 (int)strlen(cell);
+			if (l > w[c])
+				w[c] = l;
+		}
+	}
+	if (opts->plain || !(active & COL_SUBJECT))
+		return;
+
+	int tw = opts->term_width > 0 ? opts->term_width :
+					cli_get_terminal_width();
+	int used = 0;
+	for (int c = 0; c < NCOLS; c++)
+		if (c != C_SUBJECT && (active & (1u << c)))
+			used += w[c] + col_gap[c];
+	int max_sub = tw - used - 1;
+	if (max_sub < 15)
+		max_sub = 15;
+	if (w[C_SUBJECT] > max_sub)
+		w[C_SUBJECT] = max_sub;
+}
+
+static void print_list_header(const int *order, int ncols,
+			      const char *const *label, const int *w,
+			      int no_color)
+{
+	if (!no_color)
+		printf("\033[0m");
+	for (int k = 0; k < ncols; k++) {
+		int c = col_index(order[k]);
+		if (c < 0)
+			continue;
+		const char *sep = k == ncols - 1 ? "" : " ";
+		if (no_color)
+			printf("%-*s%s", w[c], label[c], sep);
+		else
+			printf("\033[39m\033[4m%s\033[24m%-*s%s", label[c],
+			       w[c] - (int)strlen(label[c]), "", sep);
+	}
+	printf("\n");
+}
+
+static void print_list_row(const shyake_mail_entry *e, const list_row *r,
+			   const int *order, int ncols, const int *w,
+			   int no_color)
+{
+	const char *c_w = no_color ? "" : "\033[39m";
+	const char *c_cy = no_color ? "" : "\033[36m";
+	const char *c_rs = no_color ? "" : "\033[0m";
+	const char *c_sz = no_color	   ? "" :
+			   e->size >= 1024 ? "\033[1;35m" :
+					     "\033[35m";
+
+	for (int k = 0; k < ncols; k++) {
+		int c = col_index(order[k]);
+		if (c < 0)
+			continue;
+		const char *sep = k == ncols - 1 ? "" : " ";
+		const char *text = r->cell[c];
+		if (c == C_PARTY) {
+			/* a remote party keeps its @ uncolored */
+			int len = (int)strlen(text);
+			if (len > 0 && text[len - 1] == '@')
+				printf("%s%.*s%s@", c_cy, len - 1, text, c_w);
+			else
+				printf("%s%s", c_cy, text);
+			printf("%s%-*s%s", c_rs, w[c] - len, "", sep);
+		} else if (c == C_SUBJECT) {
+			/* pad to the width with spaces (byte printf won't) */
+			char sub[512];
+			int dw = utf8_truncate(text, sub, sizeof(sub), w[c]);
+			printf("%s%s%*s%s%s", c_w, sub, w[c] - dw, "", c_rs,
+			       sep);
+		} else {
+			const char *color = c == C_ID	? c_rs :
+					    c == C_SIZE ? c_sz :
+							  c_w;
+			printf("%s%-*s%s%s", color, w[c], text, c_rs, sep);
+		}
+	}
+	printf("\n");
+}
+
+static void print_list_table(const shyake_mail_list *list, const list_row *rows,
+			     const cli_render_opts *opts, const char *id_hdr,
+			     int is_sent)
+{
+	cli_setup_pager(opts->plain);
+
+	/* active columns in order; all defaults if col_count == 0 */
+	static const int def_order[] = { COL_ID, COL_PARTY, COL_SUBJECT,
+					 COL_SIZE, COL_DATE };
+	const int *order = opts->col_count > 0 ? opts->col_order : def_order;
+	int ncols = opts->col_count > 0 ? opts->col_count : 5;
+	unsigned active = 0;
+	for (int k = 0; k < ncols; k++)
+		active |= (unsigned)order[k];
+
+	const char *label[NCOLS] = { id_hdr,	is_sent ? "To" : "From",
+				     "Subject", "Size",
+				     "Date",	"Created",
+				     "Modified" };
+	int w[NCOLS];
+	column_widths(rows, list->count, active, label, opts, w);
+
+	if (!opts->no_header)
+		print_list_header(order, ncols, label, w, opts->no_color);
+	for (int i = 0; i < list->count; i++)
+		print_list_row(&list->entries[i], &rows[i], order, ncols, w,
+			       opts->no_color);
+	if (!opts->no_header)
+		printf("\nTotal: %d item%s\n", list->count,
+		       list->count == 1 ? "" : "s");
+	cli_wait_pager();
+}
+
 void cli_render_mail_list(const shyake_mail_list *list,
 			  const cli_render_opts *opts)
 {
 	if (!list)
 		return;
 	int count = list->count;
-
 	if (opts->count_only) {
 		printf("%d\n", count);
 		return;
 	}
-
 	if (count == 0) {
 		if (opts->json_out)
 			printf("[]\n");
@@ -441,345 +665,18 @@ void cli_render_mail_list(const shyake_mail_list *list,
 		return;
 	}
 
-	int is_sent = list->count > 0 && list->entries[0].is_sent;
-	const char *id_hdr = (opts->id_label && opts->id_label[0]) ?
+	int is_sent = list->entries[0].is_sent;
+	const char *id_hdr = opts->id_label && opts->id_label[0] ?
 				     opts->id_label :
 				     "Mail ID";
-
-	/* Pre-format all entries into display strings */
-	char **d_party = calloc(count, sizeof(char *));
-	char **d_subject = calloc(count, sizeof(char *));
-	char **d_size = calloc(count, sizeof(char *));
-	char **d_date = calloc(count, sizeof(char *));
-	char **d_created = calloc(count, sizeof(char *));
-	char **d_modified = calloc(count, sizeof(char *));
-
-	for (int i = 0; i < count; i++) {
-		shyake_mail_entry *e = &list->entries[i];
-
-		char pbuf[256];
-		cli_format_party(e->party, pbuf, sizeof(pbuf));
-		d_party[i] = strdup(pbuf);
-
-		d_subject[i] = e->subject ? strdup(e->subject) :
-					    strdup("<decryption failed>");
-
-		char sbuf[16];
-		cli_format_size(e->size, sbuf, sizeof(sbuf));
-		d_size[i] = strdup(sbuf);
-
-		char dbuf[64];
-		cli_format_timestamp(e->timestamp, opts->tz_hours,
-				     opts->time_fmt, opts->time_fmt_recent,
-				     dbuf, sizeof(dbuf));
-		d_date[i] = strdup(dbuf);
-
-		char cbuf[64], mbuf[64];
-		cli_format_timestamp(e->created, opts->tz_hours, opts->time_fmt,
-				     opts->time_fmt_recent, cbuf, sizeof(cbuf));
-		cli_format_timestamp(e->timestamp, opts->tz_hours,
-				     opts->time_fmt, opts->time_fmt_recent,
-				     mbuf, sizeof(mbuf));
-		d_created[i] = strdup(cbuf);
-		d_modified[i] = strdup(mbuf);
-	}
-
-	/* JSON output */
-	if (opts->json_out) {
-		cJSON *arr = cJSON_CreateArray();
-		for (int i = 0; i < count; i++) {
-			shyake_mail_entry *e = &list->entries[i];
-			cJSON *obj = cJSON_CreateObject();
-			cJSON_AddStringToObject(obj, "mail_id", e->mail_id);
-			cJSON_AddStringToObject(
-				obj, is_sent ? "recipient" : "sender",
-				d_party[i]);
-			cJSON_AddStringToObject(obj, "subject", d_subject[i]);
-			cJSON_AddStringToObject(obj, "size", d_size[i]);
-			cJSON_AddStringToObject(obj, "date", d_date[i]);
-			cJSON_AddItemToArray(arr, obj);
-		}
-		char *out = cJSON_PrintUnformatted(arr);
-		printf("%s\n", out);
-		free(out);
-		cJSON_Delete(arr);
-		goto cleanup;
-	}
-
-	/* CSV output */
-	if (opts->csv_out) {
-		if (!opts->no_header)
-			printf("%s,%s,Subject,Size,Date\n", id_hdr,
-			       is_sent ? "To" : "From");
-		for (int i = 0; i < count; i++) {
-			shyake_mail_entry *e = &list->entries[i];
-			char escaped[2048] = { 0 };
-			int p = 0;
-			for (int j = 0; d_subject[i][j] && p < 2040; j++) {
-				if (d_subject[i][j] == '"')
-					escaped[p++] = '"';
-				escaped[p++] = d_subject[i][j];
-			}
-			printf("%s,%s,\"%s\",%s,%s\n", e->mail_id, d_party[i],
-			       escaped, d_size[i], d_date[i]);
-		}
-		goto cleanup;
-	}
-
-	/* Table output */
-	cli_setup_pager(opts->plain);
-
-	/* build active column list; default to all if col_count == 0 */
-	static const int def_order[] = { COL_ID, COL_PARTY, COL_SUBJECT,
-					 COL_SIZE, COL_DATE };
-	const int *order = (opts->col_count > 0) ? opts->col_order : def_order;
-	int ncols = (opts->col_count > 0) ? opts->col_count : 5;
-
-	/* build active-column bitmask for fast membership test */
-	unsigned int active = 0;
-	for (int c = 0; c < ncols; c++)
-		active |= (unsigned)order[c];
-
-	/* column widths */
-	int w_id = (int)strlen(id_hdr);
-	int w_snd = is_sent ? 2 : 4;
-	int w_sub = 7;
-	int w_sz = 4;
-	int w_dt = 4;
-	int w_crt = 7; /* "Created" */
-	int w_mod = 8; /* "Modified" */
-
-	for (int i = 0; i < count; i++) {
-		int l;
-		if (active & COL_ID) {
-			l = (int)strlen(list->entries[i].mail_id);
-			if (l > w_id)
-				w_id = l;
-		}
-		if (active & COL_PARTY) {
-			l = (int)strlen(d_party[i]);
-			if (l > w_snd)
-				w_snd = l;
-		}
-		if (active & COL_SUBJECT) {
-			l = utf8_display_width(d_subject[i]);
-			if (l > w_sub)
-				w_sub = l;
-		}
-		if (active & COL_SIZE) {
-			l = (int)strlen(d_size[i]);
-			if (l > w_sz)
-				w_sz = l;
-		}
-		if (active & COL_DATE) {
-			l = (int)strlen(d_date[i]);
-			if (l > w_dt)
-				w_dt = l;
-		}
-		if (active & COL_CREATED) {
-			l = (int)strlen(d_created[i]);
-			if (l > w_crt)
-				w_crt = l;
-		}
-		if (active & COL_MODIFIED) {
-			l = (int)strlen(d_modified[i]);
-			if (l > w_mod)
-				w_mod = l;
-		}
-	}
-
-	if (!opts->plain && (active & COL_SUBJECT)) {
-		int tw = opts->term_width > 0 ? opts->term_width :
-						cli_get_terminal_width();
-		int used = 0;
-		if (active & COL_ID)
-			used += w_id + 1;
-		if (active & COL_PARTY)
-			used += w_snd + 1;
-		if (active & COL_SIZE)
-			used += w_sz + 1;
-		if (active & COL_DATE)
-			used += w_dt;
-		if (active & COL_CREATED)
-			used += w_crt + 1;
-		if (active & COL_MODIFIED)
-			used += w_mod;
-		int max_sub = tw - used - 1;
-		if (max_sub < 15)
-			max_sub = 15;
-		if (w_sub > max_sub)
-			w_sub = max_sub;
-	}
-
-	const char *ul_on = opts->no_color ? "" : "\033[4m";
-	const char *ul_off = opts->no_color ? "" : "\033[24m";
-	const char *c_w = opts->no_color ? "" : "\033[39m";
-	const char *c_cy = opts->no_color ? "" : "\033[36m";
-	const char *c_mg = opts->no_color ? "" : "\033[35m";
-	const char *c_rs = opts->no_color ? "" : "\033[0m";
-
-	const char *col2_hdr = is_sent ? "To" : "From";
-
-	/* header row: iterate col_order */
-	if (!opts->no_header) {
-		if (!opts->no_color)
-			printf("%s", c_rs);
-		for (int c = 0; c < ncols; c++) {
-			int is_last = (c == ncols - 1);
-			switch (order[c]) {
-			case COL_ID:
-				if (opts->no_color)
-					printf("%-*s%s", w_id, id_hdr,
-					       is_last ? "" : " ");
-				else
-					printf("%s%s%s%s%-*s%s", c_w, ul_on,
-					       id_hdr, ul_off,
-					       w_id - (int)strlen(id_hdr), "",
-					       is_last ? "" : " ");
-				break;
-			case COL_PARTY:
-				if (opts->no_color)
-					printf("%-*s%s", w_snd, col2_hdr,
-					       is_last ? "" : " ");
-				else
-					printf("%s%s%s%s%-*s%s", c_w, ul_on,
-					       col2_hdr, ul_off,
-					       w_snd - (int)strlen(col2_hdr),
-					       "", is_last ? "" : " ");
-				break;
-			case COL_SUBJECT:
-				if (opts->no_color)
-					printf("%-*s%s", w_sub, "Subject",
-					       is_last ? "" : " ");
-				else
-					printf("%s%sSubject%s%-*s%s", c_w,
-					       ul_on, ul_off, w_sub - 7, "",
-					       is_last ? "" : " ");
-				break;
-			case COL_SIZE:
-				if (opts->no_color)
-					printf("%-*s%s", w_sz, "Size",
-					       is_last ? "" : " ");
-				else
-					printf("%s%sSize%s%-*s%s", c_w, ul_on,
-					       ul_off, w_sz - 4, "",
-					       is_last ? "" : " ");
-				break;
-			case COL_DATE:
-				if (opts->no_color)
-					printf("%-*s%s", w_dt, "Date",
-					       is_last ? "" : " ");
-				else
-					printf("%s%sDate%s%-*s%s", c_w, ul_on,
-					       ul_off, w_dt - 4, "",
-					       is_last ? "" : " ");
-				break;
-			case COL_CREATED:
-				if (opts->no_color)
-					printf("%-*s%s", w_crt, "Created",
-					       is_last ? "" : " ");
-				else
-					printf("%s%sCreated%s%-*s%s", c_w,
-					       ul_on, ul_off, w_crt - 7, "",
-					       is_last ? "" : " ");
-				break;
-			case COL_MODIFIED:
-				if (opts->no_color)
-					printf("%-*s%s", w_mod, "Modified",
-					       is_last ? "" : " ");
-				else
-					printf("%s%sModified%s%-*s%s", c_w,
-					       ul_on, ul_off, w_mod - 8, "",
-					       is_last ? "" : " ");
-				break;
-			default:
-				break;
-			}
-		}
-		printf("\n");
-	}
-
-	/* data rows: iterate col_order */
-	for (int i = 0; i < count; i++) {
-		shyake_mail_entry *e = &list->entries[i];
-		int is_large = (e->size >= 1024);
-		const char *c_sz =
-			is_large ? (opts->no_color ? "" : "\033[1;35m") : c_mg;
-
-		for (int c = 0; c < ncols; c++) {
-			int is_last = (c == ncols - 1);
-			switch (order[c]) {
-			case COL_ID:
-				printf("%s%-*s%s%s", c_rs, w_id, e->mail_id,
-				       c_rs, is_last ? "" : " ");
-				break;
-			case COL_PARTY: {
-				int len_snd = (int)strlen(d_party[i]);
-				if (len_snd > 0 &&
-				    d_party[i][len_snd - 1] == '@') {
-					printf("%s%.*s%s@", c_cy, len_snd - 1,
-					       d_party[i], c_w);
-				} else {
-					printf("%s%s", c_cy, d_party[i]);
-				}
-				printf("%s%-*s%s", c_rs, w_snd - len_snd, "",
-				       is_last ? "" : " ");
-				break;
-			}
-			case COL_SUBJECT: {
-				char sub_trunc[512];
-				int dw = utf8_truncate(d_subject[i], sub_trunc,
-						       sizeof(sub_trunc),
-						       w_sub);
-				/* pad to w_sub with spaces (byte printf won't) */
-				printf("%s%s%*s%s%s", c_w, sub_trunc,
-				       w_sub - dw, "", c_rs,
-				       is_last ? "" : " ");
-				break;
-			}
-			case COL_SIZE:
-				printf("%s%-*s%s%s", c_sz, w_sz, d_size[i],
-				       c_rs, is_last ? "" : " ");
-				break;
-			case COL_DATE:
-				printf("%s%-*s%s%s", c_w, w_dt, d_date[i], c_rs,
-				       is_last ? "" : " ");
-				break;
-			case COL_CREATED:
-				printf("%s%-*s%s%s", c_w, w_crt, d_created[i],
-				       c_rs, is_last ? "" : " ");
-				break;
-			case COL_MODIFIED:
-				printf("%s%-*s%s%s", c_w, w_mod, d_modified[i],
-				       c_rs, is_last ? "" : " ");
-				break;
-			default:
-				break;
-			}
-		}
-		printf("\n");
-	}
-
-	if (!opts->no_header)
-		printf("\nTotal: %d item%s\n", count, count == 1 ? "" : "s");
-
-	cli_wait_pager();
-
-cleanup:
-	for (int i = 0; i < count; i++) {
-		free(d_party[i]);
-		free(d_subject[i]);
-		free(d_size[i]);
-		free(d_date[i]);
-		free(d_created[i]);
-		free(d_modified[i]);
-	}
-	free(d_party);
-	free(d_subject);
-	free(d_size);
-	free(d_date);
-	free(d_created);
-	free(d_modified);
+	list_row *rows = format_rows(list, opts);
+	if (opts->json_out)
+		print_list_json(rows, count, is_sent);
+	else if (opts->csv_out)
+		print_list_csv(rows, count, opts, id_hdr, is_sent);
+	else
+		print_list_table(list, rows, opts, id_hdr, is_sent);
+	free_rows(rows, count);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1015,61 +912,62 @@ static void print_graph(const char *row, int width, int no_color)
 		printf("%*s", width - (int)strlen(row) + 2, "");
 }
 
+/* check thread --json: entries in display order */
+static void print_thread_json(const shyake_thread *t,
+			      const cli_render_opts *opts)
+{
+	cJSON *arr = cJSON_CreateArray();
+	for (int i = 0; i < t->count; i++) {
+		const shyake_thread_entry *e = &t->entries[i];
+		cJSON *o = cJSON_CreateObject();
+		if (e->mail_id) {
+			char dbuf[64], sbuf[16];
+			cli_format_timestamp(e->timestamp, opts->tz_hours,
+					     opts->time_fmt,
+					     opts->time_fmt_recent, dbuf,
+					     sizeof(dbuf));
+			cli_format_size(e->size, sbuf, sizeof(sbuf));
+			cJSON_AddStringToObject(o, "mail_id", e->mail_id);
+			cJSON_AddStringToObject(o, "sender", e->sender);
+			cJSON_AddStringToObject(o, "recipient", e->recipient);
+			cJSON_AddStringToObject(o, "subject",
+						e->subject ?
+							e->subject :
+							"<decryption failed>");
+			cJSON_AddStringToObject(o, "size", sbuf);
+			cJSON_AddStringToObject(o, "date", dbuf);
+			cJSON_AddBoolToObject(o, "saved",
+					      e->where & SHYAKE_IN_SAVED);
+		} else {
+			cJSON_AddNullToObject(o, "mail_id");
+			cJSON_AddTrueToObject(o, "missing");
+		}
+		/* parent: array index, also when it is missing */
+		const char *pid =
+			e->parent >= 0 ? t->entries[e->parent].mail_id : NULL;
+		if (pid)
+			cJSON_AddStringToObject(o, "reply_to", pid);
+		else
+			cJSON_AddNullToObject(o, "reply_to");
+		if (e->parent >= 0)
+			cJSON_AddNumberToObject(o, "parent", e->parent);
+		else
+			cJSON_AddNullToObject(o, "parent");
+		cJSON_AddItemToArray(arr, o);
+	}
+	char *out = cJSON_PrintUnformatted(arr);
+	printf("%s\n", out);
+	free(out);
+	cJSON_Delete(arr);
+}
+
 void cli_render_thread_list(const shyake_thread *t, const cli_render_opts *opts)
 {
 	if (!t || t->count == 0)
 		return;
 	int n = t->count;
-
 	if (opts->json_out) {
-		cJSON *arr = cJSON_CreateArray();
-		for (int i = 0; i < n; i++) {
-			const shyake_thread_entry *e = &t->entries[i];
-			cJSON *o = cJSON_CreateObject();
-			const char *pid =
-				e->parent >= 0 ? t->entries[e->parent].mail_id :
-						 NULL;
-			if (e->mail_id) {
-				char dbuf[64];
-				cli_format_timestamp(e->timestamp,
-						     opts->tz_hours,
-						     opts->time_fmt,
-						     opts->time_fmt_recent,
-						     dbuf, sizeof(dbuf));
-				char sbuf[16];
-				cli_format_size(e->size, sbuf, sizeof(sbuf));
-				cJSON_AddStringToObject(o, "mail_id",
-							e->mail_id);
-				cJSON_AddStringToObject(o, "sender", e->sender);
-				cJSON_AddStringToObject(o, "recipient",
-							e->recipient);
-				cJSON_AddStringToObject(
-					o, "subject",
-					e->subject ? e->subject :
-						     "<decryption failed>");
-				cJSON_AddStringToObject(o, "size", sbuf);
-				cJSON_AddStringToObject(o, "date", dbuf);
-				cJSON_AddBoolToObject(
-					o, "saved", e->where & SHYAKE_IN_SAVED);
-			} else {
-				cJSON_AddNullToObject(o, "mail_id");
-				cJSON_AddTrueToObject(o, "missing");
-			}
-			/* parent: array index, also when it is missing */
-			if (pid)
-				cJSON_AddStringToObject(o, "reply_to", pid);
-			else
-				cJSON_AddNullToObject(o, "reply_to");
-			if (e->parent >= 0)
-				cJSON_AddNumberToObject(o, "parent", e->parent);
-			else
-				cJSON_AddNullToObject(o, "parent");
-			cJSON_AddItemToArray(arr, o);
-		}
-		char *out = cJSON_PrintUnformatted(arr);
-		printf("%s\n", out);
-		free(out);
-		cJSON_Delete(arr);
+		print_thread_json(t, opts);
 		return;
 	}
 
@@ -1194,6 +1092,67 @@ static void print_body(const char *prefix, int width, const char *body,
 	}
 }
 
+/* how cli_render_thread_mails draws */
+struct mails_view {
+	const thread_graph *g; /* NULL when flat */
+	int no_color;
+	int tz_hours;
+	const char *time_fmt;
+	const char *time_fmt_recent;
+};
+
+/* header lines and body of entry i; d is NULL when unavailable */
+static void print_thread_mail(const struct mails_view *v,
+			      const shyake_thread *t, int i,
+			      const shyake_mail_detail *d)
+{
+	const shyake_thread_entry *e = &t->entries[i];
+	const char *pre = v->g ? v->g->below[i] : NULL;
+	int w = v->g ? v->g->width : 0;
+	const char *c_lbl = v->no_color ? "" : "\033[1;36m";
+	const char *c_rs = v->no_color ? "" : "\033[0m";
+	if (!e->mail_id) {
+		print_body(pre, w, "This mail was burned or cannot be found.",
+			   v->no_color);
+		return;
+	}
+
+	char date[64];
+	cli_format_timestamp(e->timestamp, v->tz_hours, v->time_fmt,
+			     v->time_fmt_recent, date, sizeof(date));
+	const char *sub = e->subject ? e->subject : "<decryption failed>";
+	const char *re = NULL;
+	if (e->parent >= 0)
+		re = t->entries[e->parent].mail_id ?
+			     t->entries[e->parent].mail_id :
+			     "(missing)";
+	const char *labels[] = { "FROM:", "TO:", "RE:", "DATE:", "SUBJ:" };
+	const char *vals[] = { e->sender, e->recipient, re, date, sub };
+	for (int k = 0; k < 5; k++) {
+		/* the graph already shows what it answers */
+		if (k == 2 && (v->g || !re))
+			continue;
+		if (pre)
+			print_graph(pre, w, v->no_color);
+		printf("%s%s%s%*s%s\n", c_lbl, labels[k], c_rs,
+		       7 - (int)strlen(labels[k]), "", vals[k]);
+	}
+	if (pre)
+		print_graph(pre, -1, v->no_color);
+	else
+		printf("\n");
+
+	const char *body = d && d->body ? d->body :
+			   d		? "<body decryption failed>" :
+					  "<body not available>";
+	char *copy = strdup(body);
+	usize bl = strlen(copy);
+	while (bl > 0 && copy[bl - 1] == '\n')
+		copy[--bl] = '\0';
+	print_body(pre, w, copy, v->no_color);
+	free(copy);
+}
+
 void cli_render_thread_mails(const shyake_thread *t,
 			     shyake_mail_detail *const *details, int flat,
 			     int no_color, int plain, int tz_hours,
@@ -1206,75 +1165,26 @@ void cli_render_thread_mails(const shyake_thread *t,
 	if (!flat)
 		build_graph(t, &g);
 	cli_setup_pager(plain);
+	struct mails_view v = { flat ? NULL : &g, no_color, tz_hours, time_fmt,
+				time_fmt_recent };
 	const char *c_lbl = no_color ? "" : "\033[1;36m";
 	const char *c_rs = no_color ? "" : "\033[0m";
 
 	for (int i = 0; i < n; i++) {
-		const shyake_thread_entry *e = &t->entries[i];
-		const shyake_mail_detail *d = details[i];
-		const char *pre = flat ? NULL : g.below[i];
-		int w = flat ? 0 : g.width;
-
+		const char *id = t->entries[i].mail_id ? t->entries[i].mail_id :
+							 "(missing)";
 		/* first line: graph node and mail ID */
-		if (flat) {
-			if (i > 0)
-				printf("\n%s\n\n",
-				       "----------------------------------------");
-			printf("%sID:%s    %s\n", c_lbl, c_rs,
-			       e->mail_id ? e->mail_id : "(missing)");
-		} else {
-			if (g.fork[i]) {
-				print_graph(g.fork[i], -1, no_color);
-			}
+		if (flat && i > 0)
+			printf("\n%s\n\n",
+			       "----------------------------------------");
+		if (!flat && g.fork[i])
+			print_graph(g.fork[i], -1, no_color);
+		if (!flat)
 			print_graph(g.node[i], g.width, no_color);
-			printf("%sID:%s    %s\n", c_lbl, c_rs,
-			       e->mail_id ? e->mail_id : "(missing)");
-		}
-		if (!e->mail_id) {
-			print_body(pre, w,
-				   "This mail was burned or cannot be found.",
-				   no_color);
-		} else {
-			char date[64];
-			cli_format_timestamp(e->timestamp, tz_hours, time_fmt,
-					     time_fmt_recent, date,
-					     sizeof(date));
-			const char *sub = e->subject ? e->subject :
-						       "<decryption failed>";
-			const char *re = NULL;
-			if (e->parent >= 0)
-				re = t->entries[e->parent].mail_id ?
-					     t->entries[e->parent].mail_id :
-					     "(missing)";
-			const char *labels[] = { "FROM:", "TO:", "RE:", "DATE:",
-						 "SUBJ:" };
-			const char *vals[] = { e->sender, e->recipient, re,
-					       date, sub };
-			for (int k = 0; k < 5; k++) {
-				/* the graph already shows what it answers */
-				if (k == 2 && (!flat || !re))
-					continue;
-				if (pre)
-					print_graph(pre, w, no_color);
-				printf("%s%s%s%*s%s\n", c_lbl, labels[k], c_rs,
-				       7 - (int)strlen(labels[k]), "", vals[k]);
-			}
-			if (pre)
-				print_graph(pre, -1, no_color);
-			else
-				printf("\n");
-			const char *body = d && d->body ? d->body :
-					   d ? "<body decryption failed>" :
-					       "<body not available>";
-			char *copy = strdup(body);
-			usize bl = strlen(copy);
-			while (bl > 0 && copy[bl - 1] == '\n')
-				copy[--bl] = '\0';
-			print_body(pre, w, copy, no_color);
-			free(copy);
-		}
+		printf("%sID:%s    %s\n", c_lbl, c_rs, id);
+		print_thread_mail(&v, t, i, details[i]);
 		if (!flat && i + 1 < n)
-			print_graph(pre, -1, no_color);
+			print_graph(g.below[i], -1, no_color);
 	}
 	cli_wait_pager();
 	if (!flat)

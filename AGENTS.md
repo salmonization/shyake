@@ -126,8 +126,9 @@ shyake/
 │   │   │                   #   thread, network, passphrase,
 │   │   │                   #   known_hosts, enc_dec)
 │   │   └── vendor/cJSON/   # vendored JSON parser
-│   ├── src/cli/            # CLI entry, init, display, prompts,
-│   │                       #   drafts, self-update, man pages
+│   ├── src/cli/            # CLI entry + commands (main), config,
+│   │                       #   compose (editor), init, display,
+│   │                       #   prompts, drafts, self-update, man
 │   ├── include/shyake.h    # public FFI API (opaque context pointer)
 │   ├── tests/              # unit tests + test account fixtures
 │   └── Makefile

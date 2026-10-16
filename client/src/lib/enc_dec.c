@@ -38,6 +38,49 @@ static u32 read_u32le(FILE *f)
 	       ((u32)buf[3] << 24);
 }
 
+/* whole file into memory; NULL when it cannot be read */
+static u8 *read_input(shyake_ctx *ctx, const char *path, usize *len)
+{
+	FILE *in = fopen(path, "rb");
+	if (!in) {
+		set_error(ctx, "Cannot open %s.", path);
+		return NULL;
+	}
+	fseek(in, 0, SEEK_END);
+	long fsz = ftell(in);
+	fseek(in, 0, SEEK_SET);
+	u8 *data = NULL;
+	if (fsz >= 0) {
+		*len = (usize)fsz;
+		data = malloc(*len);
+		if (data && fread(data, 1, *len, in) != *len) {
+			free(data);
+			data = NULL;
+		}
+	}
+	fclose(in);
+	return data;
+}
+
+/* KEM public key to encrypt to: the recipient's, else our own */
+static u8 *target_kem_pk(shyake_ctx *ctx, const char *recipient, usize *len,
+			 shyake_err *err)
+{
+	*err = SHYAKE_ERR_CRYPTO;
+	if (!recipient) {
+		char path[512];
+		snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+		return load_file(path, len);
+	}
+	char *pk_b64 = fetch_recipient_pubkey(ctx, recipient, err);
+	if (!pk_b64)
+		return NULL;
+	*err = SHYAKE_ERR_CRYPTO;
+	u8 *pk = base64_decode(pk_b64, len);
+	free(pk_b64);
+	return pk;
+}
+
 shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 			   const char *out_path, const char *recipient,
 			   char **out_used_path)
@@ -46,157 +89,124 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR;
 	clear_error(ctx);
 
-	/* load plaintext */
-	FILE *in = fopen(in_path, "rb");
-	if (!in) {
-		set_error(ctx, "Cannot open %s.", in_path);
+	usize pt_len;
+	u8 *pt = read_input(ctx, in_path, &pt_len);
+	if (!pt)
 		return SHYAKE_ERR;
-	}
-	fseek(in, 0, SEEK_END);
-	long fsz = ftell(in);
-	fseek(in, 0, SEEK_SET);
-	if (fsz < 0) {
-		fclose(in);
-		return SHYAKE_ERR;
-	}
-	usize pt_len = (usize)fsz;
-	u8 *pt = malloc(pt_len);
-	if (!pt || fread(pt, 1, pt_len, in) != pt_len) {
-		free(pt);
-		fclose(in);
-		return SHYAKE_ERR;
-	}
-	fclose(in);
-
-	/* resolve KEM public key */
-	u8 *kem_pk = NULL;
+	shyake_err ret;
 	usize kem_pk_len = 0;
-
-	if (recipient) {
-		shyake_err lookup;
-		char *pk_b64 = fetch_recipient_pubkey(ctx, recipient, &lookup);
-		if (!pk_b64) {
-			free(pt);
-			return lookup;
-		}
-		kem_pk = base64_decode(pk_b64, &kem_pk_len);
-		free(pk_b64);
-	} else {
-		char path[512];
-		snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
-		kem_pk = load_file(path, &kem_pk_len);
-	}
-
+	u8 *kem_pk = target_kem_pk(ctx, recipient, &kem_pk_len, &ret);
 	if (!kem_pk) {
 		free(pt);
-		return SHYAKE_ERR_CRYPTO;
+		return ret;
 	}
 
-	/* generate random symmetric key */
-	u8 sym_key[32];
-	FILE *ur = fopen("/dev/urandom", "rb");
-	if (!ur || fread(sym_key, 1, 32, ur) != 32) {
-		if (ur)
-			fclose(ur);
-		free(pt);
-		free(kem_pk);
-		return SHYAKE_ERR_CRYPTO;
-	}
-	fclose(ur);
+	ret = SHYAKE_ERR_CRYPTO;
+	OQS_KEM *kem = NULL;
+	u8 *kem_ct = NULL, *ss = NULL, *ct = NULL;
+	u8 sym_key[32], ek[32], nonce[12], mac[16];
+	if (!fill_random(sym_key, sizeof(sym_key)))
+		goto done;
 
-	/* KEM encapsulate */
-	OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
-	if (!kem || kem_pk_len != kem->length_public_key) {
-		if (kem)
-			OQS_KEM_free(kem);
-		free(pt);
-		free(kem_pk);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	u8 *kem_ct = malloc(kem->length_ciphertext);
-	u8 *ss = malloc(kem->length_shared_secret);
-	if (OQS_KEM_encaps(kem, kem_ct, ss, kem_pk) != OQS_SUCCESS) {
-		free(kem_ct);
-		free(ss);
-		OQS_KEM_free(kem);
-		free(pt);
-		free(kem_pk);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	u8 ek[32];
+	/* KEM encapsulate; the shared secret masks the file key */
+	kem = OQS_KEM_new("ML-KEM-768");
+	if (!kem || kem_pk_len != kem->length_public_key)
+		goto done;
+	kem_ct = malloc(kem->length_ciphertext);
+	ss = malloc(kem->length_shared_secret);
+	if (OQS_KEM_encaps(kem, kem_ct, ss, kem_pk) != OQS_SUCCESS)
+		goto done;
 	for (int i = 0; i < 32; i++)
 		ek[i] = sym_key[i] ^ ss[i];
 
-	/* generate nonce */
-	u8 nonce[12];
-	ur = fopen("/dev/urandom", "rb");
-	if (!ur || fread(nonce, 1, 12, ur) != 12) {
-		if (ur)
-			fclose(ur);
-		free(kem_ct);
-		free(ss);
-		OQS_KEM_free(kem);
-		free(pt);
-		free(kem_pk);
-		return SHYAKE_ERR_CRYPTO;
-	}
-	fclose(ur);
-
 	/* encrypt */
-	u8 *ct = malloc(pt_len);
-	u8 mac[16];
+	if (!fill_random(nonce, sizeof(nonce)))
+		goto done;
+	ct = malloc(pt_len);
 	if (chacha20_poly1305_encrypt(sym_key, nonce, pt, pt_len, NULL, 0, ct,
-				      mac) != 0) {
-		free(ct);
-		free(kem_ct);
-		free(ss);
-		OQS_KEM_free(kem);
-		free(pt);
-		free(kem_pk);
-		return SHYAKE_ERR_CRYPTO;
-	}
+				      mac) != 0)
+		goto done;
 
-	/* determine output path */
 	char derived_path[640];
 	const char *dest = out_path;
 	if (!dest) {
 		snprintf(derived_path, sizeof(derived_path), "%s.enc", in_path);
 		dest = derived_path;
 	}
-
-	FILE *out = fopen(dest, "wb");
-	if (!out) {
+	FILE *f = fopen(dest, "wb");
+	if (!f) {
 		set_error(ctx, "Cannot write %s.", dest);
-		free(ct);
-		free(kem_ct);
-		free(ss);
-		OQS_KEM_free(kem);
-		free(pt);
-		free(kem_pk);
-		return SHYAKE_ERR;
+		ret = SHYAKE_ERR;
+		goto done;
 	}
+	write_u32le(f, (u32)kem->length_ciphertext);
+	fwrite(kem_ct, 1, kem->length_ciphertext, f);
+	write_u32le(f, 32);
+	fwrite(ek, 1, 32, f);
+	write_u32le(f, (u32)pt_len);
+	fwrite(nonce, 1, 12, f);
+	fwrite(ct, 1, pt_len, f);
+	fwrite(mac, 1, 16, f);
+	fclose(f);
 
-	write_u32le(out, (u32)kem->length_ciphertext);
-	fwrite(kem_ct, 1, kem->length_ciphertext, out);
-	write_u32le(out, 32);
-	fwrite(ek, 1, 32, out);
-	write_u32le(out, (u32)pt_len);
-	fwrite(nonce, 1, 12, out);
-	fwrite(ct, 1, pt_len, out);
-	fwrite(mac, 1, 16, out);
-	fclose(out);
-
+	if (out_used_path)
+		*out_used_path = strdup(dest);
+	ret = SHYAKE_OK;
+done:
 	free(ct);
 	free(kem_ct);
 	free(ss);
 	OQS_KEM_free(kem);
 	free(pt);
 	free(kem_pk);
+	return ret;
+}
 
-	if (out_used_path)
-		*out_used_path = strdup(dest);
+/* the fields of a .enc file, in file order */
+struct enc_file {
+	u32 kem_ct_len;
+	u8 *kem_ct;
+	u8 ek[32];
+	u32 pt_len;
+	u8 nonce[12];
+	u8 *ct;
+	u8 mac[16];
+};
+
+static int read_enc_file(FILE *in, struct enc_file *e)
+{
+	e->kem_ct_len = read_u32le(in);
+	e->kem_ct = malloc(e->kem_ct_len);
+	if (fread(e->kem_ct, 1, e->kem_ct_len, in) != e->kem_ct_len)
+		return -1;
+	if (read_u32le(in) != 32 || fread(e->ek, 1, 32, in) != 32)
+		return -1;
+	e->pt_len = read_u32le(in);
+	if (fread(e->nonce, 1, 12, in) != 12)
+		return -1;
+	e->ct = malloc(e->pt_len);
+	if (fread(e->ct, 1, e->pt_len, in) != e->pt_len)
+		return -1;
+	if (fread(e->mac, 1, 16, in) != 16)
+		return -1;
+	return 0;
+}
+
+/* plaintext to out_path, or to stdout without one */
+static shyake_err write_output(shyake_ctx *ctx, const char *out_path,
+			       const u8 *pt, usize len)
+{
+	if (!out_path) {
+		fwrite(pt, 1, len, stdout);
+		return SHYAKE_OK;
+	}
+	FILE *out = fopen(out_path, "wb");
+	if (!out) {
+		set_error(ctx, "Cannot write %s.", out_path);
+		return SHYAKE_ERR;
+	}
+	fwrite(pt, 1, len, out);
+	fclose(out);
 	return SHYAKE_OK;
 }
 
@@ -212,106 +222,50 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 		set_error(ctx, "Cannot open %s.", in_path);
 		return SHYAKE_ERR;
 	}
-
-	u32 kem_ct_len = read_u32le(in);
-	u8 *kem_ct = malloc(kem_ct_len);
-	if (fread(kem_ct, 1, kem_ct_len, in) != kem_ct_len)
-		goto bad_format;
-
-	u32 ek_len = read_u32le(in);
-	if (ek_len != 32)
-		goto bad_format;
-	u8 ek[32];
-	if (fread(ek, 1, 32, in) != 32)
-		goto bad_format;
-
-	u32 pt_len = read_u32le(in);
-	u8 nonce[12];
-	if (fread(nonce, 1, 12, in) != 12)
-		goto bad_format;
-	u8 *ct = malloc(pt_len);
-	if (fread(ct, 1, pt_len, in) != pt_len) {
-		free(ct);
-		goto bad_format;
-	}
-	u8 mac[16];
-	if (fread(mac, 1, 16, in) != 16) {
-		free(ct);
-		goto bad_format;
-	}
+	struct enc_file e = { 0 };
+	int bad = read_enc_file(in, &e);
 	fclose(in);
+	if (bad) {
+		free(e.kem_ct);
+		free(e.ct);
+		set_error(ctx, "The file is not a valid .enc file.");
+		return SHYAKE_ERR;
+	}
 
-	/* load own KEM secret key */
+	shyake_err ret = SHYAKE_ERR_CRYPTO;
+	OQS_KEM *kem = NULL;
+	u8 *ss = NULL, *pt = NULL;
+	u8 sym_key[32];
 	char ksk_path[512];
 	usize ksk_len;
 	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
 	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
-	if (!ksk) {
-		free(kem_ct);
-		free(ct);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
-	if (!kem) {
-		free(kem_ct);
-		free(ct);
-		free(ksk);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	u8 *ss = malloc(kem->length_shared_secret);
-	if (OQS_KEM_decaps(kem, ss, kem_ct, ksk) != OQS_SUCCESS) {
-		free(ss);
-		free(kem_ct);
-		free(ct);
-		free(ksk);
-		OQS_KEM_free(kem);
+	if (!ksk)
+		goto done;
+	kem = OQS_KEM_new("ML-KEM-768");
+	if (!kem)
+		goto done;
+	ss = malloc(kem->length_shared_secret);
+	if (OQS_KEM_decaps(kem, ss, e.kem_ct, ksk) != OQS_SUCCESS) {
 		set_error(ctx, "The file is not encrypted to your key.");
-		return SHYAKE_ERR_CRYPTO;
+		goto done;
 	}
-
-	u8 sym_key[32];
 	for (int i = 0; i < 32; i++)
-		sym_key[i] = ek[i] ^ ss[i];
+		sym_key[i] = e.ek[i] ^ ss[i];
 
+	pt = malloc(e.pt_len);
+	if (chacha20_poly1305_decrypt(sym_key, e.nonce, e.ct, e.pt_len, NULL, 0,
+				      e.mac, pt) != 0) {
+		set_error(ctx, "The file is damaged or was changed.");
+		goto done;
+	}
+	ret = write_output(ctx, out_path, pt, e.pt_len);
+done:
+	free(pt);
 	free(ss);
-	free(kem_ct);
 	free(ksk);
 	OQS_KEM_free(kem);
-
-	u8 *pt = malloc(pt_len);
-	if (chacha20_poly1305_decrypt(sym_key, nonce, ct, pt_len, NULL, 0, mac,
-				      pt) != 0) {
-		free(pt);
-		free(ct);
-		set_error(ctx, "The file is damaged or was changed.");
-		return SHYAKE_ERR_CRYPTO;
-	}
-	free(ct);
-
-	FILE *out;
-	if (out_path) {
-		out = fopen(out_path, "wb");
-		if (!out) {
-			set_error(ctx, "Cannot write %s.", out_path);
-			free(pt);
-			return SHYAKE_ERR;
-		}
-	} else {
-		out = stdout;
-	}
-
-	fwrite(pt, 1, pt_len, out);
-	if (out_path)
-		fclose(out);
-
-	free(pt);
-	return SHYAKE_OK;
-
-bad_format:
-	fclose(in);
-	free(kem_ct);
-	set_error(ctx, "The file is not a valid .enc file.");
-	return SHYAKE_ERR;
+	free(e.kem_ct);
+	free(e.ct);
+	return ret;
 }

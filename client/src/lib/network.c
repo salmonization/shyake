@@ -8,7 +8,13 @@
 #include "vendor/cJSON/cJSON.h"
 #include "lib_internal.h"
 
-usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp)
+/* libcurl response buffer */
+struct curl_response {
+	char *data;
+	usize size;
+};
+
+static usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp)
 {
 	usize realsize = size * nmemb;
 	struct curl_response *mem = (struct curl_response *)userp;
@@ -76,19 +82,6 @@ shyake_err http_send(shyake_ctx *ctx, const char *method, const char *endpoint,
 	return SHYAKE_OK;
 }
 
-/* header-signed request as the context's user (SPEC 3.3) */
-shyake_err http_send_signed(shyake_ctx *ctx, const char *method,
-			    const char *endpoint, const char *body,
-			    struct http_reply *r)
-{
-	struct curl_slist *headers = create_signed_headers_body(
-		ctx, method, endpoint, ctx->username, (const u8 *)body,
-		body ? strlen(body) : 0);
-	if (!headers)
-		return SHYAKE_ERR;
-	return http_send(ctx, method, endpoint, headers, body, r);
-}
-
 void http_reply_free(struct http_reply *r)
 {
 	free(r->body);
@@ -103,11 +96,10 @@ void http_reply_free(struct http_reply *r)
  *
  * The digest binds the exact body bytes (protocol 2, SPEC 3.3).
  */
-struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
-					      const char *method,
-					      const char *endpoint,
-					      const char *username,
-					      const u8 *body, usize body_len)
+static struct curl_slist *signed_headers(shyake_ctx *ctx, const char *method,
+					 const char *endpoint,
+					 const char *username, const u8 *body,
+					 usize body_len)
 {
 	// sign request with given method and mint PoW
 	time_t now = time(NULL);
@@ -168,18 +160,17 @@ struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
 	return headers;
 }
 
-struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
-					 const char *endpoint,
-					 const char *username)
+/* header-signed request as the context's user (SPEC 3.3) */
+shyake_err http_send_signed(shyake_ctx *ctx, const char *method,
+			    const char *endpoint, const char *body,
+			    struct http_reply *r)
 {
-	return create_signed_headers_body(ctx, method, endpoint, username, NULL,
-					  0);
-}
-
-struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
-				       const char *username)
-{
-	return create_signed_headers(ctx, "GET", endpoint, username);
+	struct curl_slist *headers =
+		signed_headers(ctx, method, endpoint, ctx->username,
+			       (const u8 *)body, body ? strlen(body) : 0);
+	if (!headers)
+		return SHYAKE_ERR;
+	return http_send(ctx, method, endpoint, headers, body, r);
 }
 
 /*

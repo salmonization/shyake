@@ -27,12 +27,6 @@ void set_error(shyake_ctx *ctx, const char *fmt, ...)
 	__attribute__((format(printf, 2, 3)));
 void clear_error(shyake_ctx *ctx);
 
-/* libcurl response buffer */
-struct curl_response {
-	char *data;
-	usize size;
-};
-
 /* answer of the instance to one request */
 struct http_reply {
 	long code; /* HTTP status */
@@ -40,7 +34,6 @@ struct http_reply {
 };
 
 /* network.c */
-usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp);
 shyake_err http_send(shyake_ctx *ctx, const char *method, const char *endpoint,
 		     struct curl_slist *headers, const char *body,
 		     struct http_reply *r);
@@ -48,16 +41,6 @@ shyake_err http_send_signed(shyake_ctx *ctx, const char *method,
 			    const char *endpoint, const char *body,
 			    struct http_reply *r);
 void http_reply_free(struct http_reply *r);
-struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
-					 const char *endpoint,
-					 const char *username);
-struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
-					      const char *method,
-					      const char *endpoint,
-					      const char *username,
-					      const u8 *body, usize body_len);
-struct curl_slist *create_auth_headers(shyake_ctx *ctx, const char *endpoint,
-				       const char *username);
 char *fetch_recipient_pubkey(shyake_ctx *ctx, const char *recipient,
 			     shyake_err *err);
 int http_error_is(const char *body, const char *text);

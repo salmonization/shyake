@@ -2,7 +2,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <oqs/oqs.h>
-#include <curl/curl.h>
 #include "vendor/cJSON/cJSON.h"
 #include "lib_internal.h"
 

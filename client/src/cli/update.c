@@ -141,6 +141,29 @@ int cli_version_cmp(const char *a, const char *b)
 	return 0;
 }
 
+/* version info from the JSON of the version endpoint */
+static cli_version_info *parse_version_info(const char *body)
+{
+	cJSON *json = cJSON_Parse(body);
+	if (!json)
+		return NULL;
+	cJSON *rel = cJSON_GetObjectItem(json, "release");
+	cJSON *pre = cJSON_GetObjectItem(json, "pre_release");
+	char asset[64];
+	snprintf(asset, sizeof(asset), "%s.tar.gz", platform_artifact());
+
+	cli_version_info *info = calloc(1, sizeof(cli_version_info));
+	if (cJSON_IsString(rel))
+		info->release = strdup(rel->valuestring);
+	if (cJSON_IsString(pre))
+		info->pre_release = strdup(pre->valuestring);
+	info->release_digest = extract_digest(json, "release_digests", asset);
+	info->pre_release_digest =
+		extract_digest(json, "pre_release_digests", asset);
+	cJSON_Delete(json);
+	return info;
+}
+
 cli_version_info *cli_get_latest_version(const char *version_url, int debug)
 {
 	if (!version_url)
@@ -162,39 +185,11 @@ cli_version_info *cli_get_latest_version(const char *version_url, int debug)
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
 	CURLcode res = curl_easy_perform(curl);
-	cli_version_info *info = NULL;
-
-	if (res == CURLE_OK) {
-		long http_code;
+	long http_code = 0;
+	if (res == CURLE_OK)
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			cJSON *json = cJSON_Parse(resp.data);
-			if (json) {
-				cJSON *rel =
-					cJSON_GetObjectItem(json, "release");
-				cJSON *pre = cJSON_GetObjectItem(json,
-								 "pre_release");
-
-				char asset[64];
-				snprintf(asset, sizeof(asset), "%s.tar.gz",
-					 platform_artifact());
-
-				info = calloc(1, sizeof(cli_version_info));
-				if (rel && cJSON_IsString(rel))
-					info->release =
-						strdup(rel->valuestring);
-				if (pre && cJSON_IsString(pre))
-					info->pre_release =
-						strdup(pre->valuestring);
-				info->release_digest = extract_digest(
-					json, "release_digests", asset);
-				info->pre_release_digest = extract_digest(
-					json, "pre_release_digests", asset);
-
-				cJSON_Delete(json);
-			}
-		}
-	}
+	cli_version_info *info =
+		http_code == 200 ? parse_version_info(resp.data) : NULL;
 
 	free(resp.data);
 	curl_easy_cleanup(curl);
@@ -266,6 +261,79 @@ static int verify_sha256(const char *file_path, const char *expected_hex)
 	return strcasecmp(expected_hex, actual) == 0 ? 0 : -1;
 }
 
+/* path of the running binary into buf; -1 when it cannot be found */
+static int find_self_path(char *buf, usize len)
+{
+	memset(buf, 0, len);
+#if defined(__linux__)
+	readlink("/proc/self/exe", buf, len - 1);
+#elif defined(__APPLE__)
+	u32 sz = (u32)len;
+	_NSGetExecutablePath(buf, &sz);
+#endif
+	if (buf[0] == '\0') {
+		FILE *wp = popen("which shyake", "r");
+		if (wp) {
+			fgets(buf, (int)len, wp);
+			pclose(wp);
+		}
+		usize l = strlen(buf);
+		if (l > 0 && buf[l - 1] == '\n')
+			buf[l - 1] = '\0';
+	}
+	return buf[0] ? 0 : -1;
+}
+
+/* download target, check it against digest, replace this binary */
+static int install_release(const char *target, const char *digest, int debug)
+{
+	const char *artifact = platform_artifact();
+	char asset[64];
+	snprintf(asset, sizeof(asset), "%s.tar.gz", artifact);
+	char dl_url[512];
+	snprintf(dl_url, sizeof(dl_url),
+		 "https://github.com/salmonization/shyake/releases/download"
+		 "/%s/%s",
+		 target, asset);
+
+	fprintf(stderr, "Downloading %s %s...\n", target, asset);
+	char *tar_path = download_to_tmp(dl_url, asset, debug);
+	if (!tar_path) {
+		fprintf(stderr,
+			"Update failed. Cannot download the release.\n");
+		return -1;
+	}
+
+	/* archive layout: <artifact>/shyake */
+	const char *why = NULL;
+	char self_path[512];
+	char extract_cmd[1024];
+	int cmd_len = 0;
+	if (verify_sha256(tar_path, digest) != 0)
+		why = "The download does not match its checksum.";
+	else if (find_self_path(self_path, sizeof(self_path)) != 0)
+		why = "Cannot find the shyake binary.";
+	else
+		cmd_len = snprintf(
+			extract_cmd, sizeof(extract_cmd),
+			"tar xzf '%s' -C /tmp && cp '/tmp/%s/shyake' "
+			"'%s' && chmod 755 '%s' && rm -rf '/tmp/%s'",
+			tar_path, artifact, self_path, self_path, artifact);
+	if (!why && (cmd_len < 0 || (usize)cmd_len >= sizeof(extract_cmd)))
+		why = "The install path is too long. Reinstall manually.";
+	else if (!why && system(extract_cmd) != 0)
+		why = "Cannot install the new binary.";
+
+	remove(tar_path);
+	free(tar_path);
+	if (why) {
+		fprintf(stderr, "Update failed. %s\n", why);
+		return -1;
+	}
+	printf("Updated to %s.\n", target);
+	return 0;
+}
+
 int cli_self_update(const char *version_url, const char *current_version,
 		    cli_update_channel channel, int debug)
 {
@@ -276,145 +344,35 @@ int cli_self_update(const char *version_url, const char *current_version,
 		return -1;
 	}
 
+	int preview = channel == CLI_UPDATE_PREVIEW;
+	const char *target = preview ? info->pre_release : info->release;
+	const char *digest = preview ? info->pre_release_digest :
+				       info->release_digest;
+	const char *channel_name = preview ? "preview" : "stable";
+	int ret = -1;
+
 	if (!info->release) {
-		cli_free_version_info(info);
 		fprintf(stderr, "Update failed. Stable release not found.\n");
-		return -1;
-	}
-
-	const char *target = (channel == CLI_UPDATE_PREVIEW) ?
-				     info->pre_release :
-				     info->release;
-	const char *channel_name = (channel == CLI_UPDATE_PREVIEW) ? "preview" :
-								     "stable";
-
-	if (!target) {
+	} else if (!target) {
 		fprintf(stderr,
 			"Update failed. Release not found on the %s "
 			"channel.\n",
 			channel_name);
-		cli_free_version_info(info);
-		return -1;
-	}
-
-	/* reject preview that is not newer than stable */
-	if (channel == CLI_UPDATE_PREVIEW &&
-	    cli_version_cmp(info->pre_release, info->release) <= 0) {
-		fprintf(stderr,
-			"Update failed. No preview release is newer than "
-			"stable.\n");
-		cli_free_version_info(info);
-		return -1;
-	}
-
-	/* already on the requested target */
-	if (current_version && strcmp(current_version, target) == 0) {
+	} else if (preview &&
+		   cli_version_cmp(info->pre_release, info->release) <= 0) {
+		/* reject preview that is not newer than stable */
+		fprintf(stderr, "Update failed. No preview release is newer "
+				"than stable.\n");
+	} else if (current_version && strcmp(current_version, target) == 0) {
 		printf("Already on the latest %s release.\n", channel_name);
-		cli_free_version_info(info);
-		return 0;
+		ret = 0;
+	} else if (!digest) {
+		fprintf(stderr, "Update failed. The release has no checksum "
+				"for this platform.\n");
+	} else {
+		ret = install_release(target, digest, debug);
 	}
 
-	const char *digest = (channel == CLI_UPDATE_PREVIEW) ?
-				     info->pre_release_digest :
-				     info->release_digest;
-	if (!digest) {
-		fprintf(stderr,
-			"Update failed. The release has no checksum for this "
-			"platform.\n");
-		cli_free_version_info(info);
-		return -1;
-	}
-
-	const char *artifact = platform_artifact();
-	char asset[64];
-	snprintf(asset, sizeof(asset), "%s.tar.gz", artifact);
-
-	char dl_url[512];
-	snprintf(dl_url, sizeof(dl_url),
-		 "https://github.com/salmonization/shyake/releases/download"
-		 "/%s/%s",
-		 target, asset);
-
-	fprintf(stderr, "Downloading %s %s...\n", target, asset);
-
-	char *tar_path = download_to_tmp(dl_url, asset, debug);
-	if (!tar_path) {
-		fprintf(stderr,
-			"Update failed. Cannot download the release.\n");
-		cli_free_version_info(info);
-		return -1;
-	}
-
-	/* verify sha256 */
-	if (verify_sha256(tar_path, digest) != 0) {
-		fprintf(stderr,
-			"Update failed. The download does not match its "
-			"checksum.\n");
-		remove(tar_path);
-		free(tar_path);
-		cli_free_version_info(info);
-		return -1;
-	}
-
-	/* find current binary path */
-	char self_path[512] = { 0 };
-#if defined(__linux__)
-	readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
-#elif defined(__APPLE__)
-	u32 sz = sizeof(self_path);
-	_NSGetExecutablePath(self_path, &sz);
-#endif
-
-	if (self_path[0] == '\0') {
-		FILE *wp = popen("which shyake", "r");
-		if (wp) {
-			fgets(self_path, sizeof(self_path), wp);
-			pclose(wp);
-		}
-		usize l = strlen(self_path);
-		if (l > 0 && self_path[l - 1] == '\n')
-			self_path[l - 1] = '\0';
-	}
-
-	if (self_path[0] == '\0') {
-		fprintf(stderr,
-			"Update failed. Cannot find the shyake binary.\n");
-		remove(tar_path);
-		free(tar_path);
-		cli_free_version_info(info);
-		return -1;
-	}
-
-	/* archive layout: <artifact>/shyake */
-	char extract_cmd[1024];
-	int cmd_len = snprintf(extract_cmd, sizeof(extract_cmd),
-			       "tar xzf '%s' -C /tmp && cp '/tmp/%s/shyake' "
-			       "'%s' && chmod 755 '%s' && rm -rf '/tmp/%s'",
-			       tar_path, artifact, self_path, self_path,
-			       artifact);
-	if (cmd_len < 0 || (usize)cmd_len >= sizeof(extract_cmd)) {
-		fprintf(stderr, "Update failed. The install path is too long. "
-				"Reinstall manually.\n");
-		remove(tar_path);
-		free(tar_path);
-		cli_free_version_info(info);
-		return -1;
-	}
-	int ext_ret = system(extract_cmd);
-
-	char installed_ver[64];
-	snprintf(installed_ver, sizeof(installed_ver), "%s", target);
-
-	remove(tar_path);
-	free(tar_path);
 	cli_free_version_info(info);
-
-	if (ext_ret != 0) {
-		fprintf(stderr,
-			"Update failed. Cannot install the new binary.\n");
-		return -1;
-	}
-
-	printf("Updated to %s.\n", installed_ver);
-	return 0;
+	return ret;
 }
