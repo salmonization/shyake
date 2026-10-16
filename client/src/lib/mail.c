@@ -4,6 +4,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <unistd.h>
 #include <oqs/oqs.h>
 #include <openssl/sha.h>
 #include <curl/curl.h>
@@ -68,8 +69,7 @@ static char *sig_ref(const char *signature)
 	char *hex = malloc(REF_LEN + 1);
 	if (!hex)
 		return NULL;
-	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		snprintf(hex + i * 2, 3, "%02x", sum[i]);
+	hex_encode(sum, sizeof(sum), hex);
 	return hex;
 }
 
@@ -102,6 +102,272 @@ const char *shyake_reply_recipient(shyake_ctx *ctx, const shyake_mail_detail *d)
 }
 
 /* ------------------------------------------------------------------ */
+/* Opening a mail                                                     */
+/* ------------------------------------------------------------------ */
+
+/* the account's KEM secret key, decrypted */
+static u8 *load_kem_sk(shyake_ctx *ctx)
+{
+	char path[512];
+	usize len;
+	snprintf(path, sizeof(path), "%s/kem_sk.bin", ctx->config_dir);
+	return load_sk_decrypted(ctx, path, &len);
+}
+
+/* the wrapped mail key meant for us: as its sender or recipient */
+static const char *key_field(shyake_ctx *ctx, const char *sender)
+{
+	return strcmp(ctx->username, sender) == 0 ? "enc_key_sender" :
+						    "enc_key_recipient";
+}
+
+static const char *json_str(cJSON *json, const char *name)
+{
+	return cJSON_GetObjectItem(json, name)->valuestring;
+}
+
+static int json_int(cJSON *json, const char *name)
+{
+	return cJSON_GetObjectItem(json, name)->valueint;
+}
+
+/* decrypted parts of a mail; each NULL when it cannot be read */
+struct mail_text {
+	char *subject;
+	char *body;
+	char *reply_ref;
+};
+
+/*
+ * Unwrap the mail key in key_field with ksk, then decrypt the
+ * subject, the body when with_body, and the reply reference.
+ */
+static struct mail_text open_mail(const u8 *ksk, cJSON *json,
+				  const char *key_field, int with_body)
+{
+	struct mail_text t = { 0 };
+	if (!ksk)
+		return t;
+	u8 *sym = kem_decapsulate_key(json_str(json, key_field), ksk);
+	if (!sym)
+		return t;
+	t.subject = decrypt_from_b64(sym, json_str(json, "enc_subject"));
+	cJSON *body = cJSON_GetObjectItem(json, "enc_body");
+	if (with_body && body && body->valuestring)
+		t.body = decrypt_from_b64(sym, body->valuestring);
+	t.reply_ref = open_reply_ref(sym, json);
+	free(sym);
+	return t;
+}
+
+/* a mail detail from the full JSON of one mail */
+static shyake_mail_detail *detail_from_json(shyake_ctx *ctx, const u8 *ksk,
+					    const char *mail_id, cJSON *json,
+					    int with_body)
+{
+	const char *sender = json_str(json, "sender");
+	struct mail_text t =
+		open_mail(ksk, json, key_field(ctx, sender), with_body);
+
+	shyake_mail_detail *d = calloc(1, sizeof(shyake_mail_detail));
+	d->mail_id = strdup(mail_id);
+	d->sender = strdup(sender);
+	d->recipient = strdup(json_str(json, "recipient"));
+	d->subject = t.subject;
+	d->body = t.body;
+	d->timestamp = (i64)json_int(json, "timestamp");
+	d->size = json_int(json, "size");
+	d->ref = json_ref(json);
+	d->reply_ref = t.reply_ref;
+	return d;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sending                                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The recipient's KEM public key, checked against known_hosts: a
+ * new name is trusted on first use, a changed key is refused.
+ * fp_hex receives the key's fingerprint.
+ */
+static shyake_err recipient_key(shyake_ctx *ctx, const char *recipient, u8 **pk,
+				usize *pk_len, char *fp_hex)
+{
+	shyake_err lookup;
+	char *pk_b64 = fetch_recipient_pubkey(ctx, recipient, &lookup);
+	if (!pk_b64)
+		return lookup;
+	*pk = base64_decode(pk_b64, pk_len);
+	if (!*pk) {
+		free(pk_b64);
+		return SHYAKE_ERR_CRYPTO;
+	}
+	u8 fp[SHA256_DIGEST_LENGTH];
+	SHA256(*pk, *pk_len, fp);
+	hex_encode(fp, sizeof(fp), fp_hex);
+
+	char *known_b64 = get_known_host(ctx->config_dir, recipient);
+	if (!known_b64)
+		add_known_host(ctx->config_dir, recipient, fp_hex, pk_b64);
+	free(pk_b64);
+	if (!known_b64)
+		return SHYAKE_OK;
+
+	usize known_len;
+	u8 *known = base64_decode(known_b64, &known_len);
+	free(known_b64);
+	if (!known)
+		return SHYAKE_OK;
+	u8 known_fp[SHA256_DIGEST_LENGTH];
+	SHA256(known, known_len, known_fp);
+	free(known);
+	if (memcmp(known_fp, fp, sizeof(fp)) == 0)
+		return SHYAKE_OK;
+
+	set_error(ctx, "The public key of %s has changed.", recipient);
+	free(*pk);
+	*pk = NULL;
+	return SHYAKE_ERR_KEY_MISMATCH;
+}
+
+/* sender as the recipient sees it: user@domain across instances */
+static void sender_name(shyake_ctx *ctx, const char *recipient, char *out,
+			usize out_len)
+{
+	if (!strchr(recipient, '@')) {
+		snprintf(out, out_len, "%s", ctx->username);
+		return;
+	}
+	const char *d = strstr(ctx->instance_url, "://");
+	d = d ? d + 3 : ctx->instance_url;
+	const char *sl = strchr(d, '/');
+	int ln = sl ? (int)(sl - d) : (int)strlen(d);
+	if (ln > 127)
+		ln = 127;
+	snprintf(out, out_len, "%s@%.*s", ctx->username, ln, d);
+}
+
+/* what goes into a mail, encrypted and signed */
+struct outgoing {
+	const char *recipient;
+	const char *reply_ref;
+	const char *subject;
+	const u8 *body;
+	usize body_len;
+	const char *fp_hex; /* recipient key fingerprint */
+};
+
+/*
+ * The POST /api/mail payload: the signed fields (SPEC 5), the mail
+ * key wrapped for both parties, the signature and a proof of work.
+ */
+static char *mail_payload(shyake_ctx *ctx, const struct outgoing *m,
+			  const u8 *recip_pk, usize recip_pk_len,
+			  const u8 *my_kpk, usize my_kpk_len, const u8 *my_ssk)
+{
+	u8 sym_key[32];
+	if (!fill_random(sym_key, sizeof(sym_key)))
+		return NULL;
+
+	char *enc_subject = encrypt_to_b64(sym_key, (const u8 *)m->subject,
+					   m->subject ? strlen(m->subject) : 0);
+	char *enc_body = encrypt_to_b64(sym_key, m->body, m->body_len);
+	char *enc_reply_to =
+		m->reply_ref ? encrypt_to_b64(sym_key, (const u8 *)m->reply_ref,
+					      REF_LEN) :
+			       NULL;
+	char *enc_key_recipient =
+		kem_encapsulate_key(recip_pk, recip_pk_len, sym_key);
+	char *enc_key_sender = kem_encapsulate_key(my_kpk, my_kpk_len, sym_key);
+
+	char *payload = NULL;
+	if (!enc_key_recipient || !enc_key_sender ||
+	    (m->reply_ref && !enc_reply_to))
+		goto out;
+
+	char sender[256];
+	sender_name(ctx, m->recipient, sender, sizeof(sender));
+	char timestamp[32];
+	snprintf(timestamp, sizeof(timestamp), "%ld", time(NULL));
+
+	cJSON *obj = cJSON_CreateObject();
+	cJSON_AddStringToObject(obj, "sender", sender);
+	cJSON_AddStringToObject(obj, "recipient", m->recipient);
+	cJSON_AddStringToObject(obj, "recipient_kem_fingerprint", m->fp_hex);
+	cJSON_AddStringToObject(obj, "enc_subject",
+				enc_subject ? enc_subject : "");
+	cJSON_AddStringToObject(obj, "enc_body", enc_body);
+	if (enc_reply_to)
+		cJSON_AddStringToObject(obj, "enc_reply_to", enc_reply_to);
+	cJSON_AddStringToObject(obj, "timestamp", timestamp);
+	cJSON_AddNumberToObject(obj, "size", m->body_len);
+
+	char *signed_raw = cJSON_PrintUnformatted(obj);
+	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
+	u8 *signature = malloc(sig->length_signature);
+	usize sig_len;
+	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)signed_raw,
+		     strlen(signed_raw), my_ssk);
+	char *sig_b64 = base64_encode(signature, sig_len);
+	char *pow = shyake_mint_pow(sender, 20);
+
+	cJSON_AddStringToObject(obj, "enc_key_sender", enc_key_sender);
+	cJSON_AddStringToObject(obj, "enc_key_recipient", enc_key_recipient);
+	cJSON_AddStringToObject(obj, "signature", sig_b64);
+	cJSON_AddStringToObject(obj, "pow", pow);
+	payload = cJSON_PrintUnformatted(obj);
+
+	free(signed_raw);
+	free(signature);
+	free(sig_b64);
+	free(pow);
+	OQS_SIG_free(sig);
+	cJSON_Delete(obj);
+out:
+	free(enc_subject);
+	free(enc_body);
+	free(enc_reply_to);
+	free(enc_key_recipient);
+	free(enc_key_sender);
+	return payload;
+}
+
+/* why the instance refused a mail */
+static shyake_err send_refused(shyake_ctx *ctx, const struct outgoing *m,
+			       long code, const char *body)
+{
+	const char *at = strchr(m->recipient, '@');
+	if (code == 409) {
+		set_error(ctx, "The public key of %s has changed.",
+			  m->recipient);
+		return SHYAKE_ERR_KEY_MISMATCH;
+	}
+	if (code == 410) {
+		set_error(ctx, "%s no longer exists.", m->recipient);
+		return SHYAKE_ERR_GONE;
+	}
+	if (code == 403 &&
+	    http_error_is(body, "Recipient has blocked this sender")) {
+		set_error(ctx, "You are blocked by %s.", m->recipient);
+		return SHYAKE_ERR_BLOCKED;
+	}
+	if (code == 502 && at)
+		set_error(ctx, "Cannot reach %s.", at + 1);
+	else if (code == 422 && at &&
+		 http_error_is(body,
+			       "Recipient instance does not support replies"))
+		set_error(ctx,
+			  "%s does not accept replies yet. "
+			  "It must run server v0.4.0 or later.",
+			  at + 1);
+	else if (m->reply_ref && code == 401 && instance_protocol(ctx) < 3)
+		set_error(ctx, "Your instance must run server "
+			       "v0.4.0 or later to send replies.");
+	else
+		set_server_error(ctx, code, body);
+	return SHYAKE_ERR_HTTP;
+}
 
 static shyake_err send_mail(shyake_ctx *ctx, const char *recipient,
 			    const char *reply_ref, const char *subject,
@@ -115,52 +381,14 @@ static shyake_err send_mail(shyake_ctx *ctx, const char *recipient,
 		return SHYAKE_ERR;
 	}
 
-	/* Fetch recipient public key */
-	shyake_err lookup;
-	char *recip_pk_b64 = fetch_recipient_pubkey(ctx, recipient, &lookup);
-	if (!recip_pk_b64)
-		return lookup;
-
+	char fp_hex[REF_LEN + 1];
+	u8 *recip_pk = NULL;
 	usize recip_pk_len;
-	u8 *recip_pk = base64_decode(recip_pk_b64, &recip_pk_len);
-	if (!recip_pk) {
-		free(recip_pk_b64);
-		return SHYAKE_ERR_CRYPTO;
-	}
+	shyake_err ret =
+		recipient_key(ctx, recipient, &recip_pk, &recip_pk_len, fp_hex);
+	if (ret != SHYAKE_OK)
+		return ret;
 
-	/* Compute recipient fingerprint */
-	unsigned char fp_raw[SHA256_DIGEST_LENGTH];
-	SHA256(recip_pk, recip_pk_len, fp_raw);
-	char fp_hex[SHA256_DIGEST_LENGTH * 2 + 1];
-	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		snprintf(fp_hex + (i * 2), 3, "%02x", fp_raw[i]);
-
-	/* Check known_hosts */
-	char *known_pk_b64 = get_known_host(ctx->config_dir, recipient);
-	if (known_pk_b64) {
-		usize known_pk_len;
-		u8 *known_pk = base64_decode(known_pk_b64, &known_pk_len);
-		free(known_pk_b64);
-		if (known_pk) {
-			unsigned char known_fp[SHA256_DIGEST_LENGTH];
-			SHA256(known_pk, known_pk_len, known_fp);
-			free(known_pk);
-			if (memcmp(known_fp, fp_raw, SHA256_DIGEST_LENGTH) !=
-			    0) {
-				free(recip_pk_b64);
-				free(recip_pk);
-				set_error(ctx,
-					  "The public key of %s has changed.",
-					  recipient);
-				return SHYAKE_ERR_KEY_MISMATCH;
-			}
-		}
-	} else {
-		add_known_host(ctx->config_dir, recipient, fp_hex,
-			       recip_pk_b64);
-	}
-
-	/* Load own keys */
 	usize my_kpk_len, my_ssk_len;
 	char path[512];
 	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
@@ -168,206 +396,26 @@ static shyake_err send_mail(shyake_ctx *ctx, const char *recipient,
 	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
 	u8 *my_ssk = load_sk_decrypted(ctx, path, &my_ssk_len);
 
-	if (!my_kpk || !my_ssk) {
-		free(recip_pk_b64);
-		free(recip_pk);
-		free(my_kpk);
-		free(my_ssk);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	/* Generate symmetric key */
-	u8 sym_key[32];
-	usize read_bytes = 0;
-	FILE *urandom = fopen("/dev/urandom", "rb");
-	if (urandom) {
-		read_bytes = fread(sym_key, 1, 32, urandom);
-		fclose(urandom);
-	}
-	if (read_bytes != 32) {
-		free(recip_pk_b64);
-		free(recip_pk);
-		free(my_kpk);
-		free(my_ssk);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	char *enc_subject = encrypt_to_b64(sym_key, (const u8 *)subject,
-					   subject ? strlen(subject) : 0);
-	char *enc_body = encrypt_to_b64(sym_key, body, body_len);
-	char *enc_reply_to = reply_ref ? encrypt_to_b64(sym_key,
-							(const u8 *)reply_ref,
-							REF_LEN) :
-					 NULL;
-	char *enc_key_recipient =
-		kem_encapsulate_key(recip_pk, recip_pk_len, sym_key);
-	char *enc_key_sender = kem_encapsulate_key(my_kpk, my_kpk_len, sym_key);
-
-	if (!enc_key_recipient || !enc_key_sender ||
-	    (reply_ref && !enc_reply_to)) {
-		free(recip_pk_b64);
-		free(recip_pk);
-		free(my_kpk);
-		free(my_ssk);
-		free(enc_subject);
-		free(enc_body);
-		free(enc_reply_to);
-		free(enc_key_recipient);
-		free(enc_key_sender);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	/* Resolve sender string */
-	char sender_buf[256];
-	const char *sender = ctx->username;
-	if (strchr(recipient, '@') != NULL) {
-		const char *d = strstr(ctx->instance_url, "://");
-		d = d ? d + 3 : ctx->instance_url;
-		char domain[128];
-		const char *sl = strchr(d, '/');
-		usize ln = sl ? (usize)(sl - d) : strlen(d);
-		if (ln >= sizeof(domain))
-			ln = sizeof(domain) - 1;
-		memcpy(domain, d, ln);
-		domain[ln] = '\0';
-		snprintf(sender_buf, sizeof(sender_buf), "%s@%s", ctx->username,
-			 domain);
-		sender = sender_buf;
-	}
-
-	time_t now = time(NULL);
-	char timestamp[32];
-	snprintf(timestamp, sizeof(timestamp), "%ld", now);
-
-	cJSON *signed_obj = cJSON_CreateObject();
-	cJSON_AddStringToObject(signed_obj, "sender", sender);
-	cJSON_AddStringToObject(signed_obj, "recipient", recipient);
-	cJSON_AddStringToObject(signed_obj, "recipient_kem_fingerprint",
-				fp_hex);
-	cJSON_AddStringToObject(signed_obj, "enc_subject",
-				enc_subject ? enc_subject : "");
-	cJSON_AddStringToObject(signed_obj, "enc_body", enc_body);
-	if (enc_reply_to)
-		cJSON_AddStringToObject(signed_obj, "enc_reply_to",
-					enc_reply_to);
-	cJSON_AddStringToObject(signed_obj, "timestamp", timestamp);
-	cJSON_AddNumberToObject(signed_obj, "size", body_len);
-
-	char *json_raw = cJSON_PrintUnformatted(signed_obj);
-
-	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
-	u8 *signature = malloc(sig->length_signature);
-	usize sig_len;
-	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)json_raw, strlen(json_raw),
-		     my_ssk);
-	char *sig_b64 = base64_encode(signature, sig_len);
-
-	char *pow = shyake_mint_pow(sender, 20);
-
-	cJSON *root = cJSON_Duplicate(signed_obj, 1);
-	cJSON_AddStringToObject(root, "enc_key_sender", enc_key_sender);
-	cJSON_AddStringToObject(root, "enc_key_recipient", enc_key_recipient);
-	cJSON_AddStringToObject(root, "signature", sig_b64);
-	cJSON_AddStringToObject(root, "pow", pow);
-	char *payload = cJSON_PrintUnformatted(root);
-
-	shyake_err ret = SHYAKE_OK;
-	CURL *curl = curl_easy_init();
-	if (curl) {
-		if (ctx->debug)
-			curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-		char url[512];
-		snprintf(url, sizeof(url), "%s/api/mail", ctx->instance_url);
-
-		struct curl_slist *headers = NULL;
-		headers = curl_slist_append(headers,
-					    "Content-Type: application/json");
-
-		struct curl_response resp = { .data = malloc(1), .size = 0 };
-		resp.data[0] = '\0';
-
-		curl_easy_setopt(curl, CURLOPT_URL, url);
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
-		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-		CURLcode res = curl_easy_perform(curl);
-		if (res != CURLE_OK) {
-			set_network_error(ctx, res);
-			ret = SHYAKE_ERR_NETWORK;
-		} else {
-			long http_code = 0;
-			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,
-					  &http_code);
-			if (http_code == 200 || http_code == 201) {
-				ret = SHYAKE_OK;
-			} else if (http_code == 409) {
-				set_error(ctx,
-					  "The public key of %s has changed.",
-					  recipient);
-				ret = SHYAKE_ERR_KEY_MISMATCH;
-			} else if (http_code == 410) {
-				set_error(ctx, "%s no longer exists.",
-					  recipient);
-				ret = SHYAKE_ERR_GONE;
-			} else if (http_code == 403 &&
-				   http_error_is(resp.data,
-						 "Recipient has blocked "
-						 "this sender")) {
-				set_error(ctx, "You are blocked by %s.",
-					  recipient);
-				ret = SHYAKE_ERR_BLOCKED;
-			} else if (http_code == 502 && strchr(recipient, '@')) {
-				set_error(ctx, "Cannot reach %s.",
-					  strchr(recipient, '@') + 1);
-				ret = SHYAKE_ERR_HTTP;
-			} else if (http_code == 422 && strchr(recipient, '@') &&
-				   http_error_is(resp.data,
-						 "Recipient instance does not "
-						 "support replies")) {
-				set_error(ctx,
-					  "%s does not accept replies yet. "
-					  "It must run server v0.4.0 or later.",
-					  strchr(recipient, '@') + 1);
-				ret = SHYAKE_ERR_HTTP;
-			} else if (reply_ref && http_code == 401 &&
-				   instance_protocol(ctx) < 3) {
-				set_error(ctx, "Your instance must run server "
-					       "v0.4.0 or later to send "
-					       "replies.");
-				ret = SHYAKE_ERR_HTTP;
-			} else {
-				set_server_error(ctx, http_code, resp.data);
-				ret = SHYAKE_ERR_HTTP;
-			}
-		}
-
-		free(resp.data);
-		curl_slist_free_all(headers);
-		curl_easy_cleanup(curl);
-	} else {
-		ret = SHYAKE_ERR;
-	}
-
-	free(recip_pk_b64);
+	struct outgoing m = { recipient, reply_ref, subject,
+			      body,	 body_len,  fp_hex };
+	char *payload = my_kpk && my_ssk ?
+				mail_payload(ctx, &m, recip_pk, recip_pk_len,
+					     my_kpk, my_kpk_len, my_ssk) :
+				NULL;
 	free(recip_pk);
 	free(my_kpk);
 	free(my_ssk);
-	free(enc_subject);
-	free(enc_body);
-	free(enc_reply_to);
-	free(enc_key_recipient);
-	free(enc_key_sender);
-	free(json_raw);
+	if (!payload)
+		return SHYAKE_ERR_CRYPTO;
+
+	struct http_reply r;
+	ret = http_send(ctx, "POST", "/api/mail", NULL, payload, &r);
 	free(payload);
-	free(signature);
-	free(sig_b64);
-	free(pow);
-	cJSON_Delete(root);
-	cJSON_Delete(signed_obj);
-	OQS_SIG_free(sig);
+	if (ret != SHYAKE_OK)
+		return ret;
+	if (r.code != 200 && r.code != 201)
+		ret = send_refused(ctx, &m, r.code, r.body);
+	http_reply_free(&r);
 	return ret;
 }
 
@@ -387,456 +435,133 @@ shyake_err shyake_send_reply(shyake_ctx *ctx, const char *recipient,
 }
 
 /* ------------------------------------------------------------------ */
+/* Mail on the instance                                               */
+/* ------------------------------------------------------------------ */
+
+/* one row of GET /api/mail */
+static void fill_entry(shyake_mail_entry *e, cJSON *item, const u8 *ksk,
+		       int is_sent)
+{
+	struct mail_text t = open_mail(
+		ksk, item, is_sent ? "enc_key_sender" : "enc_key_recipient", 0);
+	e->mail_id = strdup(json_str(item, "mail_id"));
+	e->party = strdup(json_str(item, is_sent ? "recipient" : "sender"));
+	e->subject = t.subject ? t.subject : strdup("(decryption failed)");
+	e->reply_ref = t.reply_ref;
+	e->size = json_int(item, "size");
+	e->timestamp = (i64)json_int(item, "timestamp");
+	e->is_sent = is_sent;
+	cJSON *sh = cJSON_GetObjectItem(item, "sig_hash");
+	if (cJSON_IsString(sh) && is_ref(sh->valuestring))
+		e->ref = strdup(sh->valuestring);
+}
+
+/* mailbox list from the answer to GET /api/mail */
+static shyake_mail_list *parse_mail_list(shyake_ctx *ctx, const char *body,
+					 int is_sent)
+{
+	cJSON *json = cJSON_Parse(body);
+	cJSON *arr = json ? cJSON_GetObjectItem(json, "mail") : NULL;
+	if (!cJSON_IsArray(arr)) {
+		cJSON_Delete(json);
+		return NULL;
+	}
+
+	int count = cJSON_GetArraySize(arr);
+	shyake_mail_list *list = calloc(1, sizeof(shyake_mail_list));
+	list->count = count;
+	list->entries = calloc(count, sizeof(shyake_mail_entry));
+	u8 *ksk = load_kem_sk(ctx);
+	for (int i = 0; i < count; i++)
+		fill_entry(&list->entries[i], cJSON_GetArrayItem(arr, i), ksk,
+			   is_sent);
+	free(ksk);
+	cJSON_Delete(json);
+	return list;
+}
 
 shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 {
 	if (!ctx || !type)
 		return NULL;
 	clear_error(ctx);
-	const char *username = ctx->username;
 
 	char endpoint[128];
 	snprintf(endpoint, sizeof(endpoint), "/api/mail?type=%s", type);
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
+	struct http_reply r;
+	if (http_send_signed(ctx, "GET", endpoint, NULL, &r) != SHYAKE_OK)
 		return NULL;
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-	struct curl_slist *headers =
-		create_auth_headers(ctx, endpoint, username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return NULL;
-	}
-
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_mail_list *result = NULL;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			cJSON *json = cJSON_Parse(resp.data);
-			if (json) {
-				cJSON *mail_arr =
-					cJSON_GetObjectItem(json, "mail");
-				if (cJSON_IsArray(mail_arr)) {
-					int count =
-						cJSON_GetArraySize(mail_arr);
-					result = calloc(
-						1, sizeof(shyake_mail_list));
-					result->count = count;
-					result->entries = calloc(
-						count,
-						sizeof(shyake_mail_entry));
-
-					int is_sent =
-						(strcmp(type, "sent") == 0);
-
-					/* load KEM secret key for decryption */
-					char path[512];
-					usize ksk_len;
-					snprintf(path, sizeof(path),
-						 "%s/kem_sk.bin",
-						 ctx->config_dir);
-					u8 *ksk = load_sk_decrypted(ctx, path,
-								    &ksk_len);
-
-					for (int i = 0; i < count; i++) {
-						cJSON *item =
-							cJSON_GetArrayItem(
-								mail_arr, i);
-						const char *id =
-							cJSON_GetObjectItem(
-								item, "mail_id")
-								->valuestring;
-						const char *party =
-							is_sent ?
-								cJSON_GetObjectItem(
-									item,
-									"recipient")
-									->valuestring :
-								cJSON_GetObjectItem(
-									item,
-									"sender")
-									->valuestring;
-						int sz = cJSON_GetObjectItem(
-								 item, "size")
-								 ->valueint;
-						int ts = cJSON_GetObjectItem(
-								 item,
-								 "timestamp")
-								 ->valueint;
-
-						const char *ekf =
-							is_sent ?
-								"enc_key_sender" :
-								"enc_key_recipient";
-						const char *enc_key =
-							cJSON_GetObjectItem(
-								item, ekf)
-								->valuestring;
-						const char *enc_sub =
-							cJSON_GetObjectItem(
-								item,
-								"enc_subject")
-								->valuestring;
-
-						char *sub = NULL, *rref = NULL;
-						if (ksk) {
-							u8 *sym =
-								kem_decapsulate_key(
-									enc_key,
-									ksk);
-							if (sym) {
-								sub = decrypt_from_b64(
-									sym,
-									enc_sub);
-								rref = open_reply_ref(
-									sym,
-									item);
-								free(sym);
-							}
-						}
-
-						shyake_mail_entry *e =
-							&result->entries[i];
-						e->reply_ref = rref;
-						e->mail_id = strdup(id);
-						e->party = strdup(party);
-						e->subject =
-							sub ? sub :
-							      strdup("(decryption failed)");
-						e->size = sz;
-						e->timestamp = (i64)ts;
-						e->is_sent = is_sent;
-						cJSON *sh = cJSON_GetObjectItem(
-							item, "sig_hash");
-						if (cJSON_IsString(sh) &&
-						    is_ref(sh->valuestring))
-							e->ref = strdup(
-								sh->valuestring);
-					}
-					free(ksk);
-				}
-				cJSON_Delete(json);
-			}
-		} else {
-			set_server_error(ctx, http_code, resp.data);
-		}
-	} else {
-		set_network_error(ctx, res);
-	}
-
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
-	return result;
+	shyake_mail_list *list = NULL;
+	if (r.code == 200)
+		list = parse_mail_list(ctx, r.body, strcmp(type, "sent") == 0);
+	else
+		set_server_error(ctx, r.code, r.body);
+	http_reply_free(&r);
+	return list;
 }
 
-/* ------------------------------------------------------------------ */
+/* one mail from the instance, its body decrypted when with_body */
+static shyake_mail_detail *get_mail(shyake_ctx *ctx, const char *mail_id,
+				    int with_body)
+{
+	if (!ctx || !mail_id)
+		return NULL;
+	clear_error(ctx);
+
+	char endpoint[128];
+	snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
+	struct http_reply r;
+	if (http_send_signed(ctx, "GET", endpoint, NULL, &r) != SHYAKE_OK)
+		return NULL;
+	shyake_mail_detail *d = NULL;
+	cJSON *json = NULL;
+	if (r.code != 200)
+		set_server_error(ctx, r.code, r.body);
+	else
+		json = cJSON_Parse(r.body);
+	if (json) {
+		u8 *ksk = load_kem_sk(ctx);
+		d = detail_from_json(ctx, ksk, mail_id, json, with_body);
+		free(ksk);
+		cJSON_Delete(json);
+	}
+	http_reply_free(&r);
+	return d;
+}
 
 shyake_mail_detail *shyake_fetch(shyake_ctx *ctx, const char *mail_id)
 {
-	if (!ctx || !mail_id)
-		return NULL;
-	clear_error(ctx);
-	const char *username = ctx->username;
-
-	char endpoint[128];
-	snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
-		return NULL;
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-	struct curl_slist *headers =
-		create_auth_headers(ctx, endpoint, username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return NULL;
-	}
-
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_mail_detail *result = NULL;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			cJSON *json = cJSON_Parse(resp.data);
-			if (json) {
-				const char *snd =
-					cJSON_GetObjectItem(json, "sender")
-						->valuestring;
-				const char *rec =
-					cJSON_GetObjectItem(json, "recipient")
-						->valuestring;
-				int ts = cJSON_GetObjectItem(json, "timestamp")
-						 ->valueint;
-
-				const char *ekf = (strcmp(username, snd) == 0) ?
-							  "enc_key_sender" :
-							  "enc_key_recipient";
-				const char *enc_key =
-					cJSON_GetObjectItem(json, ekf)
-						->valuestring;
-				const char *enc_sub =
-					cJSON_GetObjectItem(json, "enc_subject")
-						->valuestring;
-				const char *enc_bdy =
-					cJSON_GetObjectItem(json, "enc_body")
-						->valuestring;
-
-				char path[512];
-				usize ksk_len;
-				snprintf(path, sizeof(path), "%s/kem_sk.bin",
-					 ctx->config_dir);
-				u8 *ksk =
-					load_sk_decrypted(ctx, path, &ksk_len);
-
-				char *sub = NULL;
-				char *bdy = NULL;
-				char *rref = NULL;
-				if (ksk) {
-					u8 *sym = kem_decapsulate_key(enc_key,
-								      ksk);
-					if (sym) {
-						sub = decrypt_from_b64(sym,
-								       enc_sub);
-						bdy = decrypt_from_b64(sym,
-								       enc_bdy);
-						rref = open_reply_ref(sym,
-								      json);
-						free(sym);
-					}
-					free(ksk);
-				}
-
-				result = calloc(1, sizeof(shyake_mail_detail));
-				result->mail_id = strdup(mail_id);
-				result->sender = strdup(snd);
-				result->recipient = strdup(rec);
-				result->subject = sub;
-				result->body = bdy;
-				result->timestamp = (i64)ts;
-				result->size = 0;
-				result->ref = json_ref(json);
-				result->reply_ref = rref;
-
-				cJSON_Delete(json);
-			}
-		} else {
-			set_server_error(ctx, http_code, resp.data);
-		}
-	} else {
-		set_network_error(ctx, res);
-	}
-
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
-	return result;
+	shyake_mail_detail *d = get_mail(ctx, mail_id, 1);
+	/* fetch has never reported a size */
+	if (d)
+		d->size = 0;
+	return d;
 }
-
-/* ------------------------------------------------------------------ */
 
 shyake_mail_detail *shyake_check_one(shyake_ctx *ctx, const char *mail_id)
 {
-	if (!ctx || !mail_id)
-		return NULL;
-	clear_error(ctx);
-	const char *username = ctx->username;
-
-	char endpoint[128];
-	snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
-		return NULL;
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-	struct curl_slist *headers =
-		create_auth_headers(ctx, endpoint, username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return NULL;
-	}
-
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_mail_detail *result = NULL;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			cJSON *json = cJSON_Parse(resp.data);
-			if (json) {
-				const char *snd =
-					cJSON_GetObjectItem(json, "sender")
-						->valuestring;
-				const char *rec =
-					cJSON_GetObjectItem(json, "recipient")
-						->valuestring;
-				int ts = cJSON_GetObjectItem(json, "timestamp")
-						 ->valueint;
-				int sz = cJSON_GetObjectItem(json, "size")
-						 ->valueint;
-
-				const char *ekf = (strcmp(username, snd) == 0) ?
-							  "enc_key_sender" :
-							  "enc_key_recipient";
-				const char *enc_key =
-					cJSON_GetObjectItem(json, ekf)
-						->valuestring;
-				const char *enc_sub =
-					cJSON_GetObjectItem(json, "enc_subject")
-						->valuestring;
-
-				char path[512];
-				usize ksk_len;
-				snprintf(path, sizeof(path), "%s/kem_sk.bin",
-					 ctx->config_dir);
-				u8 *ksk =
-					load_sk_decrypted(ctx, path, &ksk_len);
-				char *sub = NULL;
-				char *rref = NULL;
-				if (ksk) {
-					u8 *sym = kem_decapsulate_key(enc_key,
-								      ksk);
-					if (sym) {
-						sub = decrypt_from_b64(sym,
-								       enc_sub);
-						rref = open_reply_ref(sym,
-								      json);
-						free(sym);
-					}
-					free(ksk);
-				}
-
-				result = calloc(1, sizeof(shyake_mail_detail));
-				result->mail_id = strdup(mail_id);
-				result->sender = strdup(snd);
-				result->recipient = strdup(rec);
-				result->subject = sub;
-				result->body = NULL;
-				result->timestamp = (i64)ts;
-				result->size = sz;
-				result->ref = json_ref(json);
-				result->reply_ref = rref;
-
-				cJSON_Delete(json);
-			}
-		} else {
-			set_server_error(ctx, http_code, resp.data);
-		}
-	} else {
-		set_network_error(ctx, res);
-	}
-
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
-	return result;
+	return get_mail(ctx, mail_id, 0);
 }
-
-/* ------------------------------------------------------------------ */
 
 shyake_err shyake_burn(shyake_ctx *ctx, const char *mail_id)
 {
 	if (!ctx || !mail_id)
 		return SHYAKE_ERR;
 	clear_error(ctx);
-	const char *username = ctx->username;
 
 	char endpoint[128];
 	snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
-		return SHYAKE_ERR;
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-	struct curl_slist *headers =
-		create_signed_headers(ctx, "DELETE", endpoint, username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return SHYAKE_ERR;
+	struct http_reply r;
+	shyake_err ret = http_send_signed(ctx, "DELETE", endpoint, NULL, &r);
+	if (ret != SHYAKE_OK)
+		return ret;
+	if (r.code != 200) {
+		set_server_error(ctx, r.code, r.body);
+		ret = r.code == 404 ? SHYAKE_ERR_NOT_FOUND :
+		      r.code == 403 ? SHYAKE_ERR_FORBIDDEN :
+				      SHYAKE_ERR_HTTP;
 	}
-
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_err ret = SHYAKE_OK;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			ret = SHYAKE_OK;
-		} else {
-			set_server_error(ctx, http_code, resp.data);
-			ret = http_code == 404 ? SHYAKE_ERR_NOT_FOUND :
-			      http_code == 403 ? SHYAKE_ERR_FORBIDDEN :
-						 SHYAKE_ERR_HTTP;
-		}
-	} else {
-		set_network_error(ctx, res);
-		ret = SHYAKE_ERR_NETWORK;
-	}
-
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
+	http_reply_free(&r);
 	return ret;
 }
 
@@ -855,6 +580,27 @@ static int ensure_saved_dir(const char *config_dir)
 			return -1;
 	}
 	return 0;
+}
+
+/* length of the mail ID in a saved file name, 0 if not <id>.json */
+static usize saved_id_len(const char *name)
+{
+	usize nl = strlen(name);
+	if (nl <= 5 || strcmp(name + nl - 5, ".json") != 0)
+		return 0;
+	return nl - 5;
+}
+
+/* a saved file, parsed; NULL when it cannot be read */
+static cJSON *load_json(const char *path)
+{
+	usize len;
+	u8 *raw = load_file(path, &len);
+	if (!raw)
+		return NULL;
+	cJSON *json = cJSON_ParseWithLength((const char *)raw, len);
+	free(raw);
+	return json;
 }
 
 void shyake_free_saved_list(shyake_saved_list *list)
@@ -887,153 +633,92 @@ shyake_err shyake_save_mail(shyake_ctx *ctx, const char *mail_id)
 
 	char endpoint[128];
 	snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
-		return SHYAKE_ERR;
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-	struct curl_slist *headers =
-		create_auth_headers(ctx, endpoint, ctx->username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return SHYAKE_ERR;
+	struct http_reply r;
+	shyake_err ret = http_send_signed(ctx, "GET", endpoint, NULL, &r);
+	if (ret != SHYAKE_OK)
+		return ret;
+	if (r.code != 200) {
+		set_server_error(ctx, r.code, r.body);
+		ret = r.code == 404 ? SHYAKE_ERR_NOT_FOUND : SHYAKE_ERR_HTTP;
+		http_reply_free(&r);
+		return ret;
 	}
 
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_err ret = SHYAKE_OK;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			/* write raw JSON to saved/<id>.json */
-			char save_path[640];
-			snprintf(save_path, sizeof(save_path),
-				 "%s/saved/%s.json", ctx->config_dir, mail_id);
-			FILE *f = fopen(save_path, "w");
-			if (f) {
-				fputs(resp.data, f);
-				fclose(f);
-			} else {
-				set_error(ctx, "Cannot write %s.", save_path);
-				ret = SHYAKE_ERR;
-			}
-		} else {
-			set_server_error(ctx, http_code, resp.data);
-			ret = http_code == 404 ? SHYAKE_ERR_NOT_FOUND :
-						 SHYAKE_ERR_HTTP;
-		}
+	/* write raw JSON to saved/<id>.json */
+	char save_path[640];
+	snprintf(save_path, sizeof(save_path), "%s/saved/%s.json",
+		 ctx->config_dir, mail_id);
+	FILE *f = fopen(save_path, "w");
+	if (f) {
+		fputs(r.body, f);
+		fclose(f);
 	} else {
-		set_network_error(ctx, res);
-		ret = SHYAKE_ERR_NETWORK;
+		set_error(ctx, "Cannot write %s.", save_path);
+		ret = SHYAKE_ERR;
 	}
-
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
+	http_reply_free(&r);
 	return ret;
 }
 
-/* parse a saved JSON file and decrypt; body_out controls body decrypt */
-static shyake_mail_detail *
-parse_saved_json(shyake_ctx *ctx, const char *mail_id, int decrypt_body)
+/* a saved mail, its body decrypted when with_body */
+static shyake_mail_detail *read_saved(shyake_ctx *ctx, const char *mail_id,
+				      int with_body)
 {
+	if (!ctx || !mail_id)
+		return NULL;
+	clear_error(ctx);
+
 	char path[640];
 	snprintf(path, sizeof(path), "%s/saved/%s.json", ctx->config_dir,
 		 mail_id);
-
-	FILE *f = fopen(path, "r");
-	if (!f) {
+	if (access(path, R_OK) != 0) {
 		set_error(ctx, "Saved mail %s not found.", mail_id);
 		return NULL;
 	}
-	fseek(f, 0, SEEK_END);
-	long flen = ftell(f);
-	fseek(f, 0, SEEK_SET);
-	char *raw = malloc(flen + 1);
-	fread(raw, 1, flen, f);
-	raw[flen] = '\0';
-	fclose(f);
-
-	cJSON *json = cJSON_Parse(raw);
-	free(raw);
+	cJSON *json = load_json(path);
 	if (!json)
 		return NULL;
-
-	const char *snd = cJSON_GetObjectItem(json, "sender")->valuestring;
-	const char *rec = cJSON_GetObjectItem(json, "recipient")->valuestring;
-	int ts = cJSON_GetObjectItem(json, "timestamp")->valueint;
-	int sz = cJSON_GetObjectItem(json, "size")->valueint;
-
-	const char *ekf = (strcmp(ctx->username, snd) == 0) ?
-				  "enc_key_sender" :
-				  "enc_key_recipient";
-	const char *enc_key = cJSON_GetObjectItem(json, ekf)->valuestring;
-	const char *enc_sub =
-		cJSON_GetObjectItem(json, "enc_subject")->valuestring;
-	const char *enc_bdy =
-		cJSON_GetObjectItem(json, "enc_body")->valuestring;
-
-	char ksk_path[512];
-	usize ksk_len;
-	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
-	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
-
-	char *sub = NULL, *bdy = NULL, *rref = NULL;
-	if (ksk) {
-		u8 *sym = kem_decapsulate_key(enc_key, ksk);
-		if (sym) {
-			sub = decrypt_from_b64(sym, enc_sub);
-			if (decrypt_body && enc_bdy)
-				bdy = decrypt_from_b64(sym, enc_bdy);
-			rref = open_reply_ref(sym, json);
-			free(sym);
-		}
-		free(ksk);
-	}
-
-	shyake_mail_detail *result = calloc(1, sizeof(shyake_mail_detail));
-	result->mail_id = strdup(mail_id);
-	result->sender = strdup(snd);
-	result->recipient = strdup(rec);
-	result->subject = sub;
-	result->body = bdy;
-	result->timestamp = (i64)ts;
-	result->size = sz;
-	result->ref = json_ref(json);
-	result->reply_ref = rref;
-
+	u8 *ksk = load_kem_sk(ctx);
+	shyake_mail_detail *d =
+		detail_from_json(ctx, ksk, mail_id, json, with_body);
+	free(ksk);
 	cJSON_Delete(json);
-	return result;
+	return d;
 }
 
 shyake_mail_detail *shyake_read_saved(shyake_ctx *ctx, const char *mail_id)
 {
-	if (!ctx || !mail_id)
-		return NULL;
-	clear_error(ctx);
-	return parse_saved_json(ctx, mail_id, 1);
+	return read_saved(ctx, mail_id, 1);
 }
 
 shyake_mail_detail *shyake_check_saved_one(shyake_ctx *ctx, const char *mail_id)
 {
-	if (!ctx || !mail_id)
-		return NULL;
-	clear_error(ctx);
-	return parse_saved_json(ctx, mail_id, 0);
+	return read_saved(ctx, mail_id, 0);
+}
+
+/* one row of the saved list, from saved/<name> */
+static int fill_saved_entry(shyake_ctx *ctx, shyake_saved_entry *e,
+			    const char *dir, const char *name, usize id_len,
+			    const u8 *ksk)
+{
+	char path[768];
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	cJSON *json = load_json(path);
+	if (!json)
+		return -1;
+
+	const char *sender = json_str(json, "sender");
+	struct mail_text t = open_mail(ksk, json, key_field(ctx, sender), 0);
+	e->ref = json_ref(json);
+	e->reply_ref = t.reply_ref;
+	e->mail_id = strndup(name, id_len < 255 ? id_len : 255);
+	e->sender = strdup(sender);
+	e->recipient = strdup(json_str(json, "recipient"));
+	e->subject = t.subject ? t.subject : strdup("(decryption failed)");
+	e->timestamp = (i64)json_int(json, "timestamp");
+	e->size = json_int(json, "size");
+	cJSON_Delete(json);
+	return 0;
 }
 
 shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
@@ -1044,7 +729,6 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 
 	char saved_dir[512];
 	snprintf(saved_dir, sizeof(saved_dir), "%s/saved", ctx->config_dir);
-
 	DIR *d = opendir(saved_dir);
 	if (!d)
 		return NULL;
@@ -1052,11 +736,9 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 	/* count .json files */
 	int count = 0;
 	struct dirent *ent;
-	while ((ent = readdir(d)) != NULL) {
-		usize nl = strlen(ent->d_name);
-		if (nl > 5 && strcmp(ent->d_name + nl - 5, ".json") == 0)
+	while ((ent = readdir(d)) != NULL)
+		if (saved_id_len(ent->d_name))
 			count++;
-	}
 	rewinddir(d);
 
 	shyake_saved_list *list = calloc(1, sizeof(shyake_saved_list));
@@ -1064,85 +746,18 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 		closedir(d);
 		return list;
 	}
-
 	list->entries = calloc(count, sizeof(shyake_saved_entry));
 
 	/* load KEM secret key once */
-	char ksk_path[512];
-	usize ksk_len;
-	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
-	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
-
+	u8 *ksk = load_kem_sk(ctx);
 	int idx = 0;
 	while ((ent = readdir(d)) != NULL && idx < count) {
-		usize nl = strlen(ent->d_name);
-		if (nl <= 5 || strcmp(ent->d_name + nl - 5, ".json") != 0)
-			continue;
-
-		/* derive mail_id from filename (strip .json) */
-		char mail_id[256];
-		usize id_len = nl - 5;
-		if (id_len >= sizeof(mail_id))
-			id_len = sizeof(mail_id) - 1;
-		memcpy(mail_id, ent->d_name, id_len);
-		mail_id[id_len] = '\0';
-
-		char fpath[768];
-		snprintf(fpath, sizeof(fpath), "%s/%s", saved_dir, ent->d_name);
-		FILE *f = fopen(fpath, "r");
-		if (!f)
-			continue;
-		fseek(f, 0, SEEK_END);
-		long flen = ftell(f);
-		fseek(f, 0, SEEK_SET);
-		char *raw = malloc(flen + 1);
-		fread(raw, 1, flen, f);
-		raw[flen] = '\0';
-		fclose(f);
-
-		cJSON *json = cJSON_Parse(raw);
-		free(raw);
-		if (!json)
-			continue;
-
-		const char *snd =
-			cJSON_GetObjectItem(json, "sender")->valuestring;
-		const char *rec =
-			cJSON_GetObjectItem(json, "recipient")->valuestring;
-		int ts = cJSON_GetObjectItem(json, "timestamp")->valueint;
-		int sz = cJSON_GetObjectItem(json, "size")->valueint;
-		const char *ekf = (strcmp(ctx->username, snd) == 0) ?
-					  "enc_key_sender" :
-					  "enc_key_recipient";
-		const char *enc_key =
-			cJSON_GetObjectItem(json, ekf)->valuestring;
-		const char *enc_sub =
-			cJSON_GetObjectItem(json, "enc_subject")->valuestring;
-
-		char *sub = NULL, *rref = NULL;
-		if (ksk) {
-			u8 *sym = kem_decapsulate_key(enc_key, ksk);
-			if (sym) {
-				sub = decrypt_from_b64(sym, enc_sub);
-				rref = open_reply_ref(sym, json);
-				free(sym);
-			}
-		}
-
-		shyake_saved_entry *e = &list->entries[idx];
-		e->ref = json_ref(json);
-		e->reply_ref = rref;
-		e->mail_id = strdup(mail_id);
-		e->sender = strdup(snd);
-		e->recipient = strdup(rec);
-		e->subject = sub ? sub : strdup("(decryption failed)");
-		e->timestamp = (i64)ts;
-		e->size = sz;
-		idx++;
-
-		cJSON_Delete(json);
+		usize id_len = saved_id_len(ent->d_name);
+		if (id_len &&
+		    fill_saved_entry(ctx, &list->entries[idx], saved_dir,
+				     ent->d_name, id_len, ksk) == 0)
+			idx++;
 	}
-
 	list->count = idx;
 	free(ksk);
 	closedir(d);
@@ -1181,25 +796,15 @@ static char *find_ref_in_saved(shyake_ctx *ctx, const char *ref)
 	char *id = NULL;
 	struct dirent *ent;
 	while (!id && (ent = readdir(d)) != NULL) {
-		usize nl = strlen(ent->d_name);
-		if (nl <= 5 || strcmp(ent->d_name + nl - 5, ".json") != 0)
+		usize id_len = saved_id_len(ent->d_name);
+		if (!id_len)
 			continue;
 		char path[768];
 		snprintf(path, sizeof(path), "%s/%s", dir_path, ent->d_name);
-		usize len;
-		u8 *raw = load_file(path, &len);
-		if (!raw)
-			continue;
-		cJSON *json = cJSON_ParseWithLength((const char *)raw, len);
-		free(raw);
+		cJSON *json = load_json(path);
 		char *r = json ? json_ref(json) : NULL;
-		if (r && strcmp(r, ref) == 0) {
-			id = malloc(nl - 4);
-			if (id) {
-				memcpy(id, ent->d_name, nl - 5);
-				id[nl - 5] = '\0';
-			}
-		}
+		if (r && strcmp(r, ref) == 0)
+			id = strndup(ent->d_name, id_len);
 		free(r);
 		cJSON_Delete(json);
 	}

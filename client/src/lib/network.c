@@ -23,6 +23,79 @@ usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp)
 }
 
 /*
+ * One exchange with the instance at endpoint. The request takes
+ * ownership of headers. A body is sent as JSON. Returns SHYAKE_OK
+ * once the instance answered, whatever the status; the caller reads
+ * r->code and r->body and releases them with http_reply_free().
+ * Without an answer, records why and returns SHYAKE_ERR_NETWORK.
+ */
+shyake_err http_send(shyake_ctx *ctx, const char *method, const char *endpoint,
+		     struct curl_slist *headers, const char *body,
+		     struct http_reply *r)
+{
+	r->code = 0;
+	r->body = NULL;
+	CURL *curl = curl_easy_init();
+	struct curl_response resp = { .data = calloc(1, 1), .size = 0 };
+	if (!curl || !resp.data) {
+		if (curl)
+			curl_easy_cleanup(curl);
+		free(resp.data);
+		curl_slist_free_all(headers);
+		return SHYAKE_ERR;
+	}
+	if (body)
+		headers = curl_slist_append(headers,
+					    "Content-Type: application/json");
+
+	char url[512];
+	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
+	if (ctx->debug)
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	if (strcmp(method, "GET") != 0)
+		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
+	if (body)
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+
+	CURLcode res = curl_easy_perform(curl);
+	if (res == CURLE_OK)
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &r->code);
+	curl_easy_cleanup(curl);
+	curl_slist_free_all(headers);
+
+	if (res != CURLE_OK) {
+		free(resp.data);
+		set_network_error(ctx, res);
+		return SHYAKE_ERR_NETWORK;
+	}
+	r->body = resp.data;
+	return SHYAKE_OK;
+}
+
+/* header-signed request as the context's user (SPEC 3.3) */
+shyake_err http_send_signed(shyake_ctx *ctx, const char *method,
+			    const char *endpoint, const char *body,
+			    struct http_reply *r)
+{
+	struct curl_slist *headers = create_signed_headers_body(
+		ctx, method, endpoint, ctx->username, (const u8 *)body,
+		body ? strlen(body) : 0);
+	if (!headers)
+		return SHYAKE_ERR;
+	return http_send(ctx, method, endpoint, headers, body, r);
+}
+
+void http_reply_free(struct http_reply *r)
+{
+	free(r->body);
+	r->body = NULL;
+}
+
+/*
  * Signed string of a header-authenticated request:
  *
  *   METHOD:endpoint:username:timestamp               no request body
@@ -53,8 +126,7 @@ struct curl_slist *create_signed_headers_body(shyake_ctx *ctx,
 		u8 md[SHA256_DIGEST_LENGTH];
 		SHA256(body, body_len, md);
 		digest[0] = ':';
-		for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-			snprintf(digest + 1 + 2 * i, 3, "%02x", md[i]);
+		hex_encode(md, sizeof(md), digest + 1);
 	}
 
 	char message[640];

@@ -48,16 +48,6 @@ static u32 read_u32le(const u8 *buf)
 	       ((u32)buf[3] << 24);
 }
 
-static int fill_random(u8 *buf, usize len)
-{
-	FILE *f = fopen("/dev/urandom", "rb");
-	if (!f)
-		return 0;
-	int ok = (fread(buf, 1, len, f) == len);
-	fclose(f);
-	return ok;
-}
-
 static int derive_key(const char *passphrase, const u8 *salt, u32 N, u32 r,
 		      u32 p, u8 *out)
 {

@@ -11,66 +11,23 @@ shyake_err shyake_block(shyake_ctx *ctx, const char *target, int unblock)
 	if (!ctx || !target)
 		return SHYAKE_ERR;
 	clear_error(ctx);
-	const char *username = ctx->username;
-	const char *method = unblock ? "DELETE" : "POST";
-	const char *endpoint = "/api/block";
-
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
-		return SHYAKE_ERR;
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
 	cJSON *body_json = cJSON_CreateObject();
 	cJSON_AddStringToObject(body_json, "target", target);
-	char *body_str = cJSON_PrintUnformatted(body_json);
+	char *body = cJSON_PrintUnformatted(body_json);
 	cJSON_Delete(body_json);
 
-	struct curl_slist *headers = create_signed_headers_body(
-		ctx, method, endpoint, username, (const u8 *)body_str,
-		strlen(body_str));
-	if (!headers) {
-		free(body_str);
-		curl_easy_cleanup(curl);
-		return SHYAKE_ERR;
+	struct http_reply r;
+	shyake_err ret = http_send_signed(ctx, unblock ? "DELETE" : "POST",
+					  "/api/block", body, &r);
+	free(body);
+	if (ret != SHYAKE_OK)
+		return ret;
+	if (r.code != 200 && r.code != 201) {
+		set_signed_body_error(ctx, r.code, r.body);
+		ret = SHYAKE_ERR_HTTP;
 	}
-	headers = curl_slist_append(headers, "Content-Type: application/json");
-
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body_str);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_err ret = SHYAKE_OK;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200 || http_code == 201) {
-			ret = SHYAKE_OK;
-		} else {
-			set_signed_body_error(ctx, http_code, resp.data);
-			ret = SHYAKE_ERR_HTTP;
-		}
-	} else {
-		set_network_error(ctx, res);
-		ret = SHYAKE_ERR_NETWORK;
-	}
-
-	free(body_str);
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
+	http_reply_free(&r);
 	return ret;
 }
 
@@ -84,92 +41,111 @@ void shyake_free_block_list(shyake_block_list *list)
 	free(list);
 }
 
+/* block list from the answer to GET /api/block */
+static shyake_block_list *parse_blocks(const char *body)
+{
+	cJSON *json = cJSON_Parse(body);
+	cJSON *arr = json ? cJSON_GetObjectItem(json, "blocks") : NULL;
+	if (!cJSON_IsArray(arr)) {
+		cJSON_Delete(json);
+		return NULL;
+	}
+
+	int count = cJSON_GetArraySize(arr);
+	shyake_block_list *list = calloc(1, sizeof(shyake_block_list));
+	list->count = count;
+	list->entries = calloc(count, sizeof(shyake_block_entry));
+	for (int i = 0; i < count; i++) {
+		cJSON *item = cJSON_GetArrayItem(arr, i);
+		cJSON *tgt = cJSON_GetObjectItem(item, "blocked");
+		cJSON *ts = cJSON_GetObjectItem(item, "created_at");
+		shyake_block_entry *e = &list->entries[i];
+		e->target = strdup(cJSON_IsString(tgt) ? tgt->valuestring : "");
+		e->created = cJSON_IsNumber(ts) ? (i64)ts->valuedouble : 0;
+	}
+	cJSON_Delete(json);
+	return list;
+}
+
 shyake_block_list *shyake_list_blocks(shyake_ctx *ctx)
 {
 	if (!ctx)
 		return NULL;
 	clear_error(ctx);
-	const char *username = ctx->username;
-	const char *endpoint = "/api/block";
 
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
+	struct http_reply r;
+	if (http_send_signed(ctx, "GET", "/api/block", NULL, &r) != SHYAKE_OK)
 		return NULL;
+	shyake_block_list *list = NULL;
+	if (r.code == 200)
+		list = parse_blocks(r.body);
+	else
+		set_server_error(ctx, r.code, r.body);
+	http_reply_free(&r);
+	return list;
+}
 
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+/* fresh key pairs for rotate */
+struct key_pairs {
+	OQS_KEM *kem;
+	OQS_SIG *sig;
+	u8 *kpk, *ksk, *spk, *ssk;
+};
 
-	struct curl_slist *headers =
-		create_signed_headers(ctx, "GET", endpoint, username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return NULL;
-	}
+static void free_key_pairs(struct key_pairs *k)
+{
+	free(k->kpk);
+	free(k->ksk);
+	free(k->spk);
+	free(k->ssk);
+	OQS_KEM_free(k->kem);
+	OQS_SIG_free(k->sig);
+}
 
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
+static int make_key_pairs(struct key_pairs *k)
+{
+	k->kem = OQS_KEM_new("ML-KEM-768");
+	k->sig = OQS_SIG_new("ML-DSA-65");
+	if (!k->kem || !k->sig)
+		return -1;
+	k->kpk = malloc(k->kem->length_public_key);
+	k->ksk = malloc(k->kem->length_secret_key);
+	k->spk = malloc(k->sig->length_public_key);
+	k->ssk = malloc(k->sig->length_secret_key);
+	if (OQS_KEM_keypair(k->kem, k->kpk, k->ksk) != OQS_SUCCESS ||
+	    OQS_SIG_keypair(k->sig, k->spk, k->ssk) != OQS_SUCCESS)
+		return -1;
+	return 0;
+}
 
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
+/* POST /api/rotate body: the new public keys */
+static char *rotate_body(const struct key_pairs *k)
+{
+	char *kpk_b64 = base64_encode(k->kpk, k->kem->length_public_key);
+	char *spk_b64 = base64_encode(k->spk, k->sig->length_public_key);
+	cJSON *json = cJSON_CreateObject();
+	cJSON_AddStringToObject(json, "new_kem_pubkey", kpk_b64);
+	cJSON_AddStringToObject(json, "new_sig_pubkey", spk_b64);
+	char *body = cJSON_PrintUnformatted(json);
+	cJSON_Delete(json);
+	free(kpk_b64);
+	free(spk_b64);
+	return body;
+}
 
-	CURLcode res = curl_easy_perform(curl);
-	shyake_block_list *result = NULL;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			cJSON *json = cJSON_Parse(resp.data);
-			if (json) {
-				cJSON *arr =
-					cJSON_GetObjectItem(json, "blocks");
-				if (cJSON_IsArray(arr)) {
-					int count = cJSON_GetArraySize(arr);
-					result = calloc(
-						1, sizeof(shyake_block_list));
-					result->count = count;
-					result->entries = calloc(
-						count,
-						sizeof(shyake_block_entry));
-
-					for (int i = 0; i < count; i++) {
-						cJSON *item =
-							cJSON_GetArrayItem(arr,
-									   i);
-						cJSON *tgt = cJSON_GetObjectItem(
-							item, "blocked");
-						cJSON *ts = cJSON_GetObjectItem(
-							item, "created_at");
-						shyake_block_entry *e =
-							&result->entries[i];
-						e->target = strdup(
-							cJSON_IsString(tgt) ?
-								tgt->valuestring :
-								"");
-						e->created =
-							cJSON_IsNumber(ts) ?
-								(i64)ts->valuedouble :
-								0;
-					}
-				}
-				cJSON_Delete(json);
-			}
-		} else {
-			set_server_error(ctx, http_code, resp.data);
-		}
-	} else {
-		set_network_error(ctx, res);
-	}
-
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
-	return result;
+/* replace the key files, secret keys under the new passphrase */
+static void save_key_pairs(shyake_ctx *ctx, const struct key_pairs *k)
+{
+	const char *pp = ctx->new_passphrase;
+	char path[512];
+	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+	save_file(path, k->kpk, k->kem->length_public_key);
+	snprintf(path, sizeof(path), "%s/kem_sk.bin", ctx->config_dir);
+	save_sk_encrypted(path, pp, k->ksk, k->kem->length_secret_key);
+	snprintf(path, sizeof(path), "%s/sig_pk.bin", ctx->config_dir);
+	save_file(path, k->spk, k->sig->length_public_key);
+	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
+	save_sk_encrypted(path, pp, k->ssk, k->sig->length_secret_key);
 }
 
 shyake_err shyake_rotate(shyake_ctx *ctx)
@@ -177,140 +153,30 @@ shyake_err shyake_rotate(shyake_ctx *ctx)
 	if (!ctx)
 		return SHYAKE_ERR;
 	clear_error(ctx);
-	const char *username = ctx->username;
 
-	OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
-	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
-	if (!kem || !sig) {
-		if (kem)
-			OQS_KEM_free(kem);
-		if (sig)
-			OQS_SIG_free(sig);
+	struct key_pairs k = { 0 };
+	if (make_key_pairs(&k) != 0) {
+		free_key_pairs(&k);
 		return SHYAKE_ERR_CRYPTO;
 	}
-
-	u8 *new_kpk = malloc(kem->length_public_key);
-	u8 *new_ksk = malloc(kem->length_secret_key);
-	u8 *new_spk = malloc(sig->length_public_key);
-	u8 *new_ssk = malloc(sig->length_secret_key);
-
-	if (OQS_KEM_keypair(kem, new_kpk, new_ksk) != OQS_SUCCESS ||
-	    OQS_SIG_keypair(sig, new_spk, new_ssk) != OQS_SUCCESS) {
-		free(new_kpk);
-		free(new_ksk);
-		free(new_spk);
-		free(new_ssk);
-		OQS_KEM_free(kem);
-		OQS_SIG_free(sig);
-		return SHYAKE_ERR_CRYPTO;
-	}
-
-	char *kpk_b64 = base64_encode(new_kpk, kem->length_public_key);
-	char *spk_b64 = base64_encode(new_spk, sig->length_public_key);
-
-	char endpoint[128];
-	snprintf(endpoint, sizeof(endpoint), "/api/rotate");
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl) {
-		free(new_kpk);
-		free(new_ksk);
-		free(new_spk);
-		free(new_ssk);
-		free(kpk_b64);
-		free(spk_b64);
-		OQS_KEM_free(kem);
-		OQS_SIG_free(sig);
-		return SHYAKE_ERR;
-	}
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-	cJSON *body_json = cJSON_CreateObject();
-	cJSON_AddStringToObject(body_json, "new_kem_pubkey", kpk_b64);
-	cJSON_AddStringToObject(body_json, "new_sig_pubkey", spk_b64);
-	char *body_str = cJSON_PrintUnformatted(body_json);
-	cJSON_Delete(body_json);
 
 	/* signed with the OLD private key currently on disk; the digest
 	 * binds the new public keys to that signature */
-	struct curl_slist *headers = create_signed_headers_body(
-		ctx, "POST", endpoint, username, (const u8 *)body_str,
-		strlen(body_str));
-	if (!headers) {
-		free(body_str);
-		curl_easy_cleanup(curl);
-		free(new_kpk);
-		free(new_ksk);
-		free(new_spk);
-		free(new_ssk);
-		free(kpk_b64);
-		free(spk_b64);
-		OQS_KEM_free(kem);
-		OQS_SIG_free(sig);
-		return SHYAKE_ERR;
-	}
-	headers = curl_slist_append(headers, "Content-Type: application/json");
-
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body_str);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_err ret = SHYAKE_OK;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200 || http_code == 201) {
-			/* save new keys locally only after server confirmed */
-			const char *new_pp = ctx->new_passphrase;
-			char path[512];
-			snprintf(path, sizeof(path), "%s/kem_pk.bin",
-				 ctx->config_dir);
-			save_file(path, new_kpk, kem->length_public_key);
-			snprintf(path, sizeof(path), "%s/kem_sk.bin",
-				 ctx->config_dir);
-			save_sk_encrypted(path, new_pp, new_ksk,
-					  kem->length_secret_key);
-			snprintf(path, sizeof(path), "%s/sig_pk.bin",
-				 ctx->config_dir);
-			save_file(path, new_spk, sig->length_public_key);
-			snprintf(path, sizeof(path), "%s/sig_sk.bin",
-				 ctx->config_dir);
-			save_sk_encrypted(path, new_pp, new_ssk,
-					  sig->length_secret_key);
+	char *body = rotate_body(&k);
+	struct http_reply r;
+	shyake_err ret = http_send_signed(ctx, "POST", "/api/rotate", body, &r);
+	free(body);
+	if (ret == SHYAKE_OK) {
+		/* save new keys locally only after server confirmed */
+		if (r.code == 200 || r.code == 201) {
+			save_key_pairs(ctx, &k);
 		} else {
-			set_signed_body_error(ctx, http_code, resp.data);
+			set_signed_body_error(ctx, r.code, r.body);
 			ret = SHYAKE_ERR_HTTP;
 		}
-	} else {
-		set_network_error(ctx, res);
-		ret = SHYAKE_ERR_NETWORK;
+		http_reply_free(&r);
 	}
-
-	free(body_str);
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
-
-	free(new_kpk);
-	free(new_ksk);
-	free(new_spk);
-	free(new_ssk);
-	free(kpk_b64);
-	free(spk_b64);
-	OQS_KEM_free(kem);
-	OQS_SIG_free(sig);
+	free_key_pairs(&k);
 	return ret;
 }
 
@@ -319,55 +185,16 @@ shyake_err shyake_destroy(shyake_ctx *ctx)
 	if (!ctx)
 		return SHYAKE_ERR;
 	clear_error(ctx);
-	const char *username = ctx->username;
 
-	char endpoint[128];
-	snprintf(endpoint, sizeof(endpoint), "/api/destroy");
-	char url[512];
-	snprintf(url, sizeof(url), "%s%s", ctx->instance_url, endpoint);
-
-	CURL *curl = curl_easy_init();
-	if (!curl)
-		return SHYAKE_ERR;
-
-	if (ctx->debug)
-		curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-	struct curl_slist *headers =
-		create_signed_headers(ctx, "DELETE", endpoint, username);
-	if (!headers) {
-		curl_easy_cleanup(curl);
-		return SHYAKE_ERR;
+	struct http_reply r;
+	shyake_err ret =
+		http_send_signed(ctx, "DELETE", "/api/destroy", NULL, &r);
+	if (ret != SHYAKE_OK)
+		return ret;
+	if (r.code != 200) {
+		set_server_error(ctx, r.code, r.body);
+		ret = SHYAKE_ERR_HTTP;
 	}
-
-	struct curl_response resp = { .data = malloc(1), .size = 0 };
-	resp.data[0] = '\0';
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&resp);
-
-	CURLcode res = curl_easy_perform(curl);
-	shyake_err ret = SHYAKE_OK;
-
-	if (res == CURLE_OK) {
-		long http_code;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code == 200) {
-			ret = SHYAKE_OK;
-		} else {
-			set_server_error(ctx, http_code, resp.data);
-			ret = SHYAKE_ERR_HTTP;
-		}
-	} else {
-		set_network_error(ctx, res);
-		ret = SHYAKE_ERR_NETWORK;
-	}
-
-	free(resp.data);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
+	http_reply_free(&r);
 	return ret;
 }

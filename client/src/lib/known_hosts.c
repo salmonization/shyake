@@ -40,6 +40,21 @@ void add_known_host(const char *config_dir, const char *username,
 	fclose(f);
 }
 
+/* copy every known_hosts entry but username's */
+static void copy_other_hosts(FILE *in, FILE *out, const char *username)
+{
+	char line[8192];
+	while (fgets(line, sizeof(line), in)) {
+		char user[256];
+		char fp_scan[256];
+		char pk_scan[8192];
+		if (sscanf(line, "%255s %255s %8191s", user, fp_scan,
+			   pk_scan) == 3 &&
+		    strcmp(user, username) != 0)
+			fprintf(out, "%s %s %s\n", user, fp_scan, pk_scan);
+	}
+}
+
 void update_known_host(const char *config_dir, const char *username,
 		       const char *fp, const char *pk_b64)
 {
@@ -59,18 +74,7 @@ void update_known_host(const char *config_dir, const char *username,
 	}
 
 	if (f) {
-		char line[8192];
-		while (fgets(line, sizeof(line), f)) {
-			char user[256];
-			char fp_scan[256];
-			char pk_scan[8192];
-			if (sscanf(line, "%255s %255s %8191s", user, fp_scan,
-				   pk_scan) == 3) {
-				if (strcmp(user, username) != 0)
-					fprintf(ftmp, "%s %s %s\n", user,
-						fp_scan, pk_scan);
-			}
-		}
+		copy_other_hosts(f, ftmp, username);
 		fclose(f);
 	}
 
@@ -127,8 +131,7 @@ shyake_fp_result *shyake_fingerprint(shyake_ctx *ctx, const char *target_user,
 	free(recip_pk);
 
 	char fp_hex[SHA256_DIGEST_LENGTH * 2 + 1];
-	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		snprintf(fp_hex + (i * 2), 3, "%02x", result->remote_fp[i]);
+	hex_encode(result->remote_fp, SHA256_DIGEST_LENGTH, fp_hex);
 
 	char *local_pk_b64 = get_known_host(ctx->config_dir, target_user);
 	if (local_pk_b64) {

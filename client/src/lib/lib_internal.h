@@ -33,8 +33,21 @@ struct curl_response {
 	usize size;
 };
 
+/* answer of the instance to one request */
+struct http_reply {
+	long code; /* HTTP status */
+	char *body; /* NUL-terminated */
+};
+
 /* network.c */
 usize curl_write_cb(void *contents, usize size, usize nmemb, void *userp);
+shyake_err http_send(shyake_ctx *ctx, const char *method, const char *endpoint,
+		     struct curl_slist *headers, const char *body,
+		     struct http_reply *r);
+shyake_err http_send_signed(shyake_ctx *ctx, const char *method,
+			    const char *endpoint, const char *body,
+			    struct http_reply *r);
+void http_reply_free(struct http_reply *r);
 struct curl_slist *create_signed_headers(shyake_ctx *ctx, const char *method,
 					 const char *endpoint,
 					 const char *username);
@@ -53,9 +66,11 @@ void set_network_error(shyake_ctx *ctx, CURLcode res);
 int instance_protocol(shyake_ctx *ctx);
 void set_signed_body_error(shyake_ctx *ctx, long code, const char *body);
 
-/* libshyake.c (file I/O & base64) */
+/* libshyake.c (file I/O, randomness, hex) */
 int save_file(const char *path, const u8 *data, usize len);
 u8 *load_file(const char *path, usize *len);
+int fill_random(u8 *buf, usize len);
+void hex_encode(const u8 *in, usize len, char *out);
 
 /* passphrase.c */
 void zero_memory(void *buf, usize len);

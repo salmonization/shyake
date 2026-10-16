@@ -72,6 +72,28 @@ u8 *load_file(const char *path, usize *len)
 	return data;
 }
 
+/* len bytes from the system's random source; 0 on failure */
+int fill_random(u8 *buf, usize len)
+{
+	FILE *f = fopen("/dev/urandom", "rb");
+	if (!f)
+		return 0;
+	int ok = (fread(buf, 1, len, f) == len);
+	fclose(f);
+	return ok;
+}
+
+/* lowercase hex of len bytes into out, which holds 2 * len + 1 */
+void hex_encode(const u8 *in, usize len, char *out)
+{
+	static const char digits[] = "0123456789abcdef";
+	for (usize i = 0; i < len; i++) {
+		out[2 * i] = digits[in[i] >> 4];
+		out[2 * i + 1] = digits[in[i] & 0x0f];
+	}
+	out[2 * len] = '\0';
+}
+
 /* ------------------------------------------------------------------ */
 /* Base64                                                             */
 /* ------------------------------------------------------------------ */
@@ -196,57 +218,46 @@ void shyake_set_new_passphrase(shyake_ctx *ctx, const char *passphrase)
 /* Key generation                                                     */
 /* ------------------------------------------------------------------ */
 
+/* write one key pair unless its public key exists; -1 on failure */
+static int generate_pair(shyake_ctx *ctx, const char *name, int is_kem)
+{
+	char path_pk[512], path_sk[512];
+	snprintf(path_pk, sizeof(path_pk), "%s/%s_pk.bin", ctx->config_dir,
+		 name);
+	snprintf(path_sk, sizeof(path_sk), "%s/%s_sk.bin", ctx->config_dir,
+		 name);
+	struct stat st = { 0 };
+	if (stat(path_pk, &st) == 0)
+		return 0;
+
+	OQS_KEM *kem = is_kem ? OQS_KEM_new("ML-KEM-768") : NULL;
+	OQS_SIG *sig = is_kem ? NULL : OQS_SIG_new("ML-DSA-65");
+	if (!kem && !sig)
+		return -1;
+	usize pk_len = kem ? kem->length_public_key : sig->length_public_key;
+	usize sk_len = kem ? kem->length_secret_key : sig->length_secret_key;
+	u8 *pk = malloc(pk_len);
+	u8 *sk = malloc(sk_len);
+	OQS_STATUS rc = kem ? OQS_KEM_keypair(kem, pk, sk) :
+			      OQS_SIG_keypair(sig, pk, sk);
+	if (rc == OQS_SUCCESS) {
+		save_file(path_pk, pk, pk_len);
+		save_sk_encrypted(path_sk, ctx->passphrase, sk, sk_len);
+	}
+	free(pk);
+	free(sk);
+	OQS_KEM_free(kem);
+	OQS_SIG_free(sig);
+	return rc == OQS_SUCCESS ? 0 : -1;
+}
+
 int shyake_generate_keys(shyake_ctx *ctx)
 {
 	if (!ctx || !ctx->config_dir)
 		return -1;
-
-	char path_pk[512], path_sk[512];
-	struct stat st = { 0 };
-	int ret = 0;
-
-	snprintf(path_pk, sizeof(path_pk), "%s/kem_pk.bin", ctx->config_dir);
-	if (stat(path_pk, &st) == -1) {
-		OQS_KEM *kem = OQS_KEM_new("ML-KEM-768");
-		if (kem) {
-			u8 *pk = malloc(kem->length_public_key);
-			u8 *sk = malloc(kem->length_secret_key);
-			if (OQS_KEM_keypair(kem, pk, sk) == OQS_SUCCESS) {
-				snprintf(path_sk, sizeof(path_sk),
-					 "%s/kem_sk.bin", ctx->config_dir);
-				save_file(path_pk, pk, kem->length_public_key);
-				save_sk_encrypted(path_sk, ctx->passphrase, sk,
-						  kem->length_secret_key);
-			} else
-				ret = -1;
-			free(pk);
-			free(sk);
-			OQS_KEM_free(kem);
-		} else
-			ret = -1;
-	}
-
-	snprintf(path_pk, sizeof(path_pk), "%s/sig_pk.bin", ctx->config_dir);
-	if (stat(path_pk, &st) == -1) {
-		OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
-		if (sig) {
-			u8 *pk = malloc(sig->length_public_key);
-			u8 *sk = malloc(sig->length_secret_key);
-			if (OQS_SIG_keypair(sig, pk, sk) == OQS_SUCCESS) {
-				snprintf(path_sk, sizeof(path_sk),
-					 "%s/sig_sk.bin", ctx->config_dir);
-				save_file(path_pk, pk, sig->length_public_key);
-				save_sk_encrypted(path_sk, ctx->passphrase, sk,
-						  sig->length_secret_key);
-			} else
-				ret = -1;
-			free(pk);
-			free(sk);
-			OQS_SIG_free(sig);
-		} else
-			ret = -1;
-	}
-	return ret;
+	int kem = generate_pair(ctx, "kem", 1);
+	int sig = generate_pair(ctx, "sig", 0);
+	return kem == 0 && sig == 0 ? 0 : -1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,35 +326,28 @@ char *shyake_mint_pow(const char *resource, int bits)
 /* Registration                                                       */
 /* ------------------------------------------------------------------ */
 
-shyake_err shyake_register(shyake_ctx *ctx, const char *username)
+/* signed POST /api/register body (SPEC 4.1) */
+static char *register_payload(shyake_ctx *ctx, const char *username)
 {
-	if (!ctx || !username)
-		return SHYAKE_ERR;
-	clear_error(ctx);
-
 	usize kpk_len, spk_len, ssk_len;
 	char path[512];
-
 	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
 	u8 *kpk = load_file(path, &kpk_len);
 	snprintf(path, sizeof(path), "%s/sig_pk.bin", ctx->config_dir);
 	u8 *spk = load_file(path, &spk_len);
 	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
 	u8 *ssk = load_sk_decrypted(ctx, path, &ssk_len);
-
 	if (!kpk || !spk || !ssk) {
 		free(kpk);
 		free(spk);
 		free(ssk);
-		return SHYAKE_ERR_CRYPTO;
+		return NULL;
 	}
 
 	char *kpk_b64 = base64_encode(kpk, kpk_len);
 	char *spk_b64 = base64_encode(spk, spk_len);
-
-	time_t now = time(NULL);
 	char timestamp[32];
-	snprintf(timestamp, sizeof(timestamp), "%ld", now);
+	snprintf(timestamp, sizeof(timestamp), "%ld", time(NULL));
 
 	cJSON *root = cJSON_CreateObject();
 	cJSON_AddStringToObject(root, "username", username);
@@ -352,74 +356,19 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username)
 	cJSON_AddStringToObject(root, "timestamp", timestamp);
 
 	char *json_raw = cJSON_PrintUnformatted(root);
-
 	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
 	u8 *signature = malloc(sig->length_signature);
 	usize sig_len;
 	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)json_raw, strlen(json_raw),
 		     ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
-
 	char *pow = shyake_mint_pow(username, 20);
 
 	cJSON_AddStringToObject(root, "signature", sig_b64);
 	cJSON_AddStringToObject(root, "pow", pow);
 	char *payload = cJSON_PrintUnformatted(root);
 
-	shyake_err ret = SHYAKE_OK;
-	if (ctx->instance_url) {
-		CURL *curl = curl_easy_init();
-		if (curl) {
-			if (ctx->debug)
-				curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-			char url[512];
-			snprintf(url, sizeof(url), "%s/api/register",
-				 ctx->instance_url);
-
-			struct curl_slist *headers = NULL;
-			headers = curl_slist_append(
-				headers, "Content-Type: application/json");
-
-			struct curl_response resp = { .data = malloc(1),
-						      .size = 0 };
-			resp.data[0] = '\0';
-
-			curl_easy_setopt(curl, CURLOPT_URL, url);
-			curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
-			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
-					 curl_write_cb);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA,
-					 (void *)&resp);
-
-			CURLcode res = curl_easy_perform(curl);
-			if (res != CURLE_OK) {
-				set_network_error(ctx, res);
-				ret = SHYAKE_ERR_NETWORK;
-			} else {
-				long http_code = 0;
-				curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,
-						  &http_code);
-				if (http_code == 200 || http_code == 201) {
-					ret = SHYAKE_OK;
-				} else {
-					set_server_error(ctx, http_code,
-							 resp.data);
-					ret = SHYAKE_ERR_HTTP;
-				}
-			}
-
-			free(resp.data);
-			curl_slist_free_all(headers);
-			curl_easy_cleanup(curl);
-		}
-	} else {
-		ret = SHYAKE_ERR_NO_INSTANCE;
-	}
-
 	free(json_raw);
-	free(payload);
 	free(signature);
 	free(sig_b64);
 	free(pow);
@@ -430,5 +379,33 @@ shyake_err shyake_register(shyake_ctx *ctx, const char *username)
 	free(ssk);
 	cJSON_Delete(root);
 	OQS_SIG_free(sig);
+	return payload;
+}
+
+shyake_err shyake_register(shyake_ctx *ctx, const char *username)
+{
+	if (!ctx || !username)
+		return SHYAKE_ERR;
+	clear_error(ctx);
+
+	char *payload = register_payload(ctx, username);
+	if (!payload)
+		return SHYAKE_ERR_CRYPTO;
+	if (!ctx->instance_url) {
+		free(payload);
+		return SHYAKE_ERR_NO_INSTANCE;
+	}
+
+	struct http_reply r;
+	shyake_err ret =
+		http_send(ctx, "POST", "/api/register", NULL, payload, &r);
+	free(payload);
+	if (ret != SHYAKE_OK)
+		return ret;
+	if (r.code != 200 && r.code != 201) {
+		set_server_error(ctx, r.code, r.body);
+		ret = SHYAKE_ERR_HTTP;
+	}
+	http_reply_free(&r);
 	return ret;
 }
