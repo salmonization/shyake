@@ -2358,13 +2358,13 @@ reply_done:
 			free(config_dir);
 			return EXIT_FAILURE;
 		}
-		printf("WARNING: This replaces your key pairs and deletes all "
-		       "mail to and from\n");
-		printf("you on the instance. The new keys cannot decrypt your "
-		       "saved mail and\n");
-		printf("drafts. To keep them, export them first, for example "
-		       "with\n");
-		printf("'shyake read <id> --no-color > mail.txt'.\n");
+		printf("WARNING: This replaces your key pairs.\n"
+		       "  - All mail to and from you on the instance is "
+		       "deleted.\n"
+		       "  - Your saved mail and drafts stay, but the new keys "
+		       "cannot decrypt\n"
+		       "    them. Export them first, for example:\n"
+		       "      shyake read thread <id> --no-color > mail.txt\n");
 		if (!confirm_username(user)) {
 			free_app_config(app_cfg);
 			free(config_dir);
@@ -2475,13 +2475,13 @@ reply_done:
 			free(config_dir);
 			return EXIT_FAILURE;
 		}
-		printf("WARNING: This destroys your account on the instance "
-		       "and deletes all mail\n");
-		printf("to and from you there. It also deletes your local "
-		       "configuration, keys,\n");
-		printf("saved mail, and drafts. Your username stays locked on "
-		       "this instance\n");
-		printf("and cannot be registered again.\n");
+		printf("WARNING: This destroys your account.\n"
+		       "  - All mail to and from you on the instance is "
+		       "deleted.\n"
+		       "  - Your local configuration, keys, saved mail, and "
+		       "drafts are deleted.\n"
+		       "  - Your username on this instance stays locked and "
+		       "cannot be reused.\n");
 		if (!confirm_username(user)) {
 			free_app_config(app_cfg);
 			free(config_dir);

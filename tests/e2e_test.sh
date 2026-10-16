@@ -697,7 +697,7 @@ section "12. rotate"
 pk_before=$(sha256sum "$DIR_A/kem_pk.bin")
 out=$(echo "nobody" | SHYAKE_PASSPHRASE="" sh_run "$DIR_A" rotate 2>&1)
 rc=$?; assert_exit "rotate: wrong username exits 1" 1 "$rc" "$out"
-assert_contains "rotate: warns about saved mail" "cannot decrypt your saved" "$out"
+assert_contains "rotate: warns about saved mail" "new keys cannot decrypt" "$out"
 assert_exit "rotate: keys unchanged after abort" 0 \
     "$([ "$pk_before" = "$(sha256sum "$DIR_A/kem_pk.bin")" ] && echo 0 || echo 1)"
 
