@@ -144,6 +144,18 @@ cd client && make && cd ..
 bash tests/federation_test.sh
 ```
 
+`tests/thread_demo.sh` is a manual check of replies and threads on
+real instances. It registers two throwaway accounts, builds a thread
+with a branch, and runs each thread command. It stops after each step
+to let you look at the output. With a second instance, the replies
+cross instances. At the end, it asks if it must destroy the accounts:
+
+```sh
+bash tests/thread_demo.sh
+bash tests/thread_demo.sh https://shyake.caffeine.ink https://shyake.eee.coffee
+curl -fsSL https://raw.githubusercontent.com/salmonization/shyake/dev/tests/thread_demo.sh | bash
+```
+
 ### Non-interactive passphrase
 
 `SHYAKE_PASSPHRASE` skips the interactive prompt wherever a command

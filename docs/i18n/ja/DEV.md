@@ -139,6 +139,14 @@ cd client && make && cd ..
 bash tests/federation_test.sh
 ```
 
+`tests/thread_demo.sh` は、実際のインスタンスで返信とスレッドを手動で確認するためのスクリプトです。使い捨てのアカウントを 2 つ登録し、枝分かれのあるスレッドを作り、各 thread コマンドを順に実行します。各ステップの後で止まるので、出力を確認できます。2 つ目のインスタンスを指定すると、返信はインスタンスをまたいで送られます。最後に、アカウントを抹消するかどうかを確認します：
+
+```sh
+bash tests/thread_demo.sh
+bash tests/thread_demo.sh https://shyake.caffeine.ink https://shyake.eee.coffee
+curl -fsSL https://raw.githubusercontent.com/salmonization/shyake/dev/tests/thread_demo.sh | bash
+```
+
 ### 非対話的なパスフレーズ
 
 `SHYAKE_PASSPHRASE` を設定すると、秘密鍵の解錠が必要な場面で対話的プロンプトをスキップできます（`init` も初期パスフレーズとしてこれを使います）。スクリプトによるテストを想定したもので、一般ユーザー向けではありません。コマンドラインに直接書いた値はシェル履歴に残り、エクスポートした環境変数は子プロセスから見えます。

@@ -147,7 +147,9 @@ shyake/
 │       └── deploy/         # systemd unit, env example, install.sh
 ├── tests/
 │   ├── e2e_test.sh         # end-to-end test suite (bash)
-│   └── federation_test.sh  # two Go instances, relays between them
+│   ├── federation_test.sh  # two Go instances, relays between them
+│   └── thread_demo.sh      # manual reply/thread walk-through on live
+│                           #   instances (also runs via curl | bash)
 ├── webui/                  # experimental local web GUI (Bun + bun:ffi)
 │   ├── src/ffi.ts          #   bun:ffi bindings for include/shyake.h
 │   ├── src/server.ts       #   token-guarded HTTP API on 127.0.0.1

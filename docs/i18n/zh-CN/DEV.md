@@ -139,6 +139,14 @@ cd client && make && cd ..
 bash tests/federation_test.sh
 ```
 
+`tests/thread_demo.sh` 用来在真实实例上手动检查回复和会话。它注册两个临时账号，构建一个带分叉的会话，然后依次运行各个 thread 命令，每一步之后暂停，方便查看输出。指定第二个实例时，回复会跨实例发送。结束时会询问是否销毁这两个账号：
+
+```sh
+bash tests/thread_demo.sh
+bash tests/thread_demo.sh https://shyake.caffeine.ink https://shyake.eee.coffee
+curl -fsSL https://raw.githubusercontent.com/salmonization/shyake/dev/tests/thread_demo.sh | bash
+```
+
 ### 非交互式 passphrase
 
 设置 `SHYAKE_PASSPHRASE` 可以跳过所有需要解锁密钥场景下的交互式提示（`init` 也会用它作为初始 passphrase）。这是为了方便脚本化测试，并非面向普通用户。内联写在命令里的值会进入 shell 历史，导出的环境变量对子进程可见。

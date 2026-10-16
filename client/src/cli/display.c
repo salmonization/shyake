@@ -1227,8 +1227,8 @@ void cli_render_thread_mails(const shyake_thread *t,
 				print_graph(g.fork[i], -1, no_color);
 			}
 			print_graph(g.node[i], g.width, no_color);
-			printf("%s%s%s\n", c_lbl,
-			       e->mail_id ? e->mail_id : "(missing)", c_rs);
+			printf("%sID:%s    %s\n", c_lbl, c_rs,
+			       e->mail_id ? e->mail_id : "(missing)");
 		}
 		if (!e->mail_id) {
 			print_body(pre, w,
