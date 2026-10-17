@@ -194,6 +194,26 @@ static void test_file_encryption(void)
 	shyake_free_ctx(ctx);
 }
 
+/* inputs that end up in paths or URLs are refused at the door */
+static void test_input_checks(void)
+{
+	char long_dir[400];
+	memset(long_dir, 'x', sizeof(long_dir) - 1);
+	long_dir[sizeof(long_dir) - 1] = '\0';
+	shyake_config bad = { .config_dir = long_dir };
+	CHECK(shyake_init_ctx(&bad) == NULL);
+
+	shyake_config cfg = { .config_dir = tmpdir, .username = "alice" };
+	shyake_ctx *ctx = shyake_init_ctx(&cfg);
+	CHECK(shyake_read_saved(ctx, "../config") == NULL);
+	CHECK_STR(shyake_last_error(ctx), "The mail ID is not valid.");
+	CHECK(shyake_save_mail(ctx, "a/b") == SHYAKE_ERR);
+	CHECK(shyake_burn(ctx, "") == SHYAKE_ERR);
+	CHECK(shyake_check(ctx, "inbox&x=1") == NULL);
+	CHECK_STR(shyake_last_error(ctx), "There is no mailbox inbox&x=1.");
+	shyake_free_ctx(ctx);
+}
+
 int main(void)
 {
 	/* mkdtemp() is hidden on macOS under _POSIX_C_SOURCE */
@@ -212,6 +232,7 @@ int main(void)
 	test_crypto_round_trip();
 	test_malformed_saved();
 	test_file_encryption();
+	test_input_checks();
 
 	char cmd[300];
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);

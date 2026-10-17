@@ -78,6 +78,18 @@ static long numeric_draft_id(const char *name)
 	return atol(name);
 }
 
+/* a draft id is a decimal number; nothing else names a file */
+static int is_draft_id(const char *id)
+{
+	usize n = strlen(id);
+	if (n == 0 || n > 18)
+		return 0;
+	for (const char *p = id; *p; p++)
+		if (*p < '0' || *p > '9')
+			return 0;
+	return 1;
+}
+
 /* scan drafts/ for highest numeric id */
 static long max_draft_id(const char *config_dir)
 {
@@ -165,6 +177,10 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 	drafts_error[0] = '\0';
 	if (!ctx || !config_dir || !body || body_len == 0)
 		return SHYAKE_ERR;
+	if (draft_id && !is_draft_id(draft_id)) {
+		drafts_set_error("Draft %s not found.", draft_id);
+		return SHYAKE_ERR_NOT_FOUND;
+	}
 
 	if (ensure_drafts_dir(config_dir) != 0) {
 		drafts_set_error("Cannot create the drafts directory.");
@@ -278,7 +294,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 	char path[640];
 	snprintf(path, sizeof(path), "%s/drafts/%s.json", config_dir, draft_id);
 
-	char *raw = read_text_file(path);
+	char *raw = is_draft_id(draft_id) ? read_text_file(path) : NULL;
 	if (!raw) {
 		drafts_set_error("Draft %s not found.", draft_id);
 		return NULL;
@@ -484,6 +500,8 @@ shyake_err cli_delete_draft(const char *config_dir, const char *draft_id)
 	drafts_error[0] = '\0';
 	if (!config_dir || !draft_id)
 		return SHYAKE_ERR;
+	if (!is_draft_id(draft_id))
+		return SHYAKE_ERR_NOT_FOUND;
 
 	char path[640];
 	snprintf(path, sizeof(path), "%s/drafts/%s.json", config_dir, draft_id);

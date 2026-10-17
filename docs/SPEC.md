@@ -674,6 +674,7 @@ An opaque pointer hides internal state, to prevent ABI breakage:
 ```c
 typedef struct shyake_ctx shyake_ctx;
 
+/* NULL when config_dir is missing or longer than 384 bytes */
 shyake_ctx* shyake_init_ctx(const shyake_config *config);
 void        shyake_free_ctx(shyake_ctx *ctx);
 

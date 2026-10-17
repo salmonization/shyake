@@ -23,7 +23,8 @@ typedef struct {
 	int no_color; /* unused, as plain */
 } shyake_config;
 
-/* Initialize and free the context */
+/* Initialize and free the context; NULL when config_dir is missing
+ * or longer than 384 bytes */
 shyake_ctx *shyake_init_ctx(const shyake_config *config);
 void shyake_free_ctx(shyake_ctx *ctx);
 

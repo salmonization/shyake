@@ -159,6 +159,13 @@ int main(int argc, char *argv[])
 	const char *cmd = argv[1];
 	const struct command *c = find_command(cmd);
 	char *config_dir = config_dir_path(&fl);
+	if (!config_dir || strlen(config_dir) > 384) {
+		/* the library takes no longer path (shyake_init_ctx) */
+		fprintf(stderr, "The config directory path is %s.\n",
+			config_dir ? "too long" : "unknown");
+		free(config_dir);
+		return EXIT_FAILURE;
+	}
 	app_config *cfg = cli_read_config(config_dir);
 	/* the flags override the config file */
 	cfg->no_color = cfg->no_color || fl.no_color;

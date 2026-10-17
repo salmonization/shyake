@@ -163,7 +163,8 @@ u8 *base64_decode(const char *b64, usize *out_len)
 shyake_ctx *shyake_init_ctx(const shyake_config *config)
 {
 	/* initialize context */
-	if (!config || !config->config_dir)
+	if (!config || !config->config_dir ||
+	    strlen(config->config_dir) > CONFIG_DIR_MAX)
 		return NULL;
 
 	shyake_ctx *ctx = calloc(1, sizeof(shyake_ctx));

@@ -173,6 +173,8 @@ static void test_drafts(void)
 	CHECK(cli_delete_draft(tmpdir, "1") == SHYAKE_OK);
 	CHECK(cli_delete_draft(tmpdir, "1") == SHYAKE_ERR_NOT_FOUND);
 	CHECK(cli_read_draft(ctx, tmpdir, "alice", "1") == NULL);
+	CHECK(cli_read_draft(ctx, tmpdir, "alice", "../config") == NULL);
+	CHECK(cli_delete_draft(tmpdir, "../config") == SHYAKE_ERR_NOT_FOUND);
 	free(id);
 	shyake_free_ctx(ctx);
 }

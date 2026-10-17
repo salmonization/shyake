@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <time.h>
 #include <sys/stat.h>
@@ -57,6 +58,31 @@ static int is_ref(const char *s)
 		if (!strchr("0123456789abcdef", *p))
 			return 0;
 	return 1;
+}
+
+/*
+ * A mail ID as the client accepts it: 1 to 64 letters, digits, '-'
+ * or '_' (servers assign 10-character base58, SPEC 4). It goes into
+ * URLs and file names, so nothing else gets through.
+ */
+static int is_mail_id(const char *s)
+{
+	usize n = strlen(s);
+	if (n == 0 || n > 64)
+		return 0;
+	for (const char *p = s; *p; p++)
+		if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_')
+			return 0;
+	return 1;
+}
+
+/* checks a mail ID, recording why it cannot be one */
+static int check_mail_id(shyake_ctx *ctx, const char *mail_id)
+{
+	if (is_mail_id(mail_id))
+		return 1;
+	set_error(ctx, "The mail ID is not valid.");
+	return 0;
 }
 
 /* reference of a mail: hex SHA-256 of its signature string */
@@ -552,6 +578,8 @@ static shyake_mail_detail *get_mail(shyake_ctx *ctx, const char *mail_id,
 	if (!ctx || !mail_id)
 		return NULL;
 	clear_error(ctx);
+	if (!check_mail_id(ctx, mail_id))
+		return NULL;
 
 	char endpoint[128];
 	snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
@@ -597,6 +625,8 @@ shyake_err shyake_burn(shyake_ctx *ctx, const char *mail_id)
 	if (!ctx || !mail_id)
 		return SHYAKE_ERR;
 	clear_error(ctx);
+	if (!check_mail_id(ctx, mail_id))
+		return SHYAKE_ERR;
 
 	char endpoint[128];
 	snprintf(endpoint, sizeof(endpoint), "/api/mail/%s", mail_id);
@@ -674,6 +704,8 @@ shyake_err shyake_save_mail(shyake_ctx *ctx, const char *mail_id)
 	if (!ctx || !mail_id)
 		return SHYAKE_ERR;
 	clear_error(ctx);
+	if (!check_mail_id(ctx, mail_id))
+		return SHYAKE_ERR;
 
 	if (ensure_saved_dir(ctx->config_dir) != 0) {
 		set_error(ctx, "Cannot create the saved directory.");
@@ -716,6 +748,8 @@ static shyake_mail_detail *read_saved(shyake_ctx *ctx, const char *mail_id,
 	if (!ctx || !mail_id)
 		return NULL;
 	clear_error(ctx);
+	if (!check_mail_id(ctx, mail_id))
+		return NULL;
 
 	char path[640];
 	snprintf(path, sizeof(path), "%s/saved/%s.json", ctx->config_dir,

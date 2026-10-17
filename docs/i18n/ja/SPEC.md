@@ -453,6 +453,7 @@ Run 'shyake fingerprint <username>' to check the new key.
 ```c
 typedef struct shyake_ctx shyake_ctx;
 
+/* config_dir がないか 384 バイトを超えると NULL を返す */
 shyake_ctx* shyake_init_ctx(const shyake_config *config);
 void        shyake_free_ctx(shyake_ctx *ctx);
 

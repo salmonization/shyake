@@ -47,6 +47,10 @@ void set_network_error(shyake_ctx *ctx, CURLcode res);
 int instance_protocol(shyake_ctx *ctx);
 void set_signed_body_error(shyake_ctx *ctx, long code, const char *body);
 
+/* longest config_dir a context takes, so that every path built from
+ * it fits the 512- to 768-byte buffers the library uses */
+#define CONFIG_DIR_MAX 384
+
 /* proof of work every signed request carries (SPEC 3.5) */
 #define POW_BITS 20
 
