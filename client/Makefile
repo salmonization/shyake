@@ -101,11 +101,23 @@ $(OBJ_DIR)/cli/%.o: $(CLI_DIR)/%.c
 # compiler-generated header dependencies
 -include $(LIB_OBJS:.o=.d) $(CLI_OBJS:.o=.d)
 
-test: $(STATIC_LIB)
+# unit tests: the library alone, then the CLI objects without main
+TESTS = test_crypto test_lib test_cli
+CLI_TEST_OBJS = $(filter-out $(OBJ_DIR)/cli/main.o, $(CLI_OBJS))
+
+test: $(addprefix $(BIN_DIR)/, $(TESTS))
+	@for t in $(TESTS); do $(BIN_DIR)/$$t || exit 1; done
+
+$(BIN_DIR)/test_crypto $(BIN_DIR)/test_lib: $(BIN_DIR)/%: tests/%.c \
+		tests/check.h $(STATIC_LIB)
 	@mkdir -p $(BIN_DIR)
-	@$(CC) $(CFLAGS) tests/test_crypto.c $(STATIC_LIB) \
-		-o $(BIN_DIR)/test_crypto $(LDFLAGS)
-	@$(BIN_DIR)/test_crypto
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@ $(LDFLAGS)
+
+$(BIN_DIR)/test_cli: tests/test_cli.c tests/check.h $(CLI_TEST_OBJS) \
+		$(STATIC_LIB)
+	@mkdir -p $(BIN_DIR)
+	$(CC) $(CFLAGS) -I$(CLI_DIR) $< $(CLI_TEST_OBJS) $(STATIC_LIB) \
+		-o $@ $(LDFLAGS)
 
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR) $(LIB_OUT_DIR)

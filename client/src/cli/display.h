@@ -15,6 +15,13 @@ int cli_get_terminal_width(void);
 /* Text formatting */
 void cli_print_word_wrap(const char *text, int indent, int width);
 
+/* Terminal columns a UTF-8 string takes (CJK and emoji count 2) */
+int cli_utf8_width(const char *s);
+
+/* Copy src into buf cut to max_w columns, "..." marking a cut;
+ * returns the columns written */
+int cli_utf8_truncate(const char *src, char *buf, int buf_sz, int max_w);
+
 /* Format a UNIX timestamp to a string */
 #define TZ_AUTO (0x7FFFFFFF)
 void cli_format_timestamp(i64 ts, int tz_hours, const char *fmt,

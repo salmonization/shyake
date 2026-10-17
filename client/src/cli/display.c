@@ -81,7 +81,7 @@ static int cp_width(int cp)
 }
 
 /* return display width of a UTF-8 string */
-static int utf8_display_width(const char *s)
+int cli_utf8_width(const char *s)
 {
 	int w = 0;
 	while (*s) {
@@ -98,7 +98,7 @@ static int utf8_display_width(const char *s)
  * depending on available space) when truncation actually occurs.
  * Returns the display width of the result written.
  */
-static int utf8_truncate(const char *src, char *buf, int buf_sz, int max_w)
+int cli_utf8_truncate(const char *src, char *buf, int buf_sz, int max_w)
 {
 	const char *ellipsis = "...";
 	int ew = 3;
@@ -107,7 +107,7 @@ static int utf8_truncate(const char *src, char *buf, int buf_sz, int max_w)
 		return 0;
 	}
 
-	int total_w = utf8_display_width(src);
+	int total_w = cli_utf8_width(src);
 	if (total_w <= max_w) {
 		int len = (int)strlen(src);
 		if (len >= buf_sz)
@@ -531,7 +531,7 @@ static void column_widths(const list_row *rows, int count, unsigned active,
 			if (!(active & (1u << c)))
 				continue;
 			const char *cell = rows[i].cell[c];
-			int l = c == C_SUBJECT ? utf8_display_width(cell) :
+			int l = c == C_SUBJECT ? cli_utf8_width(cell) :
 						 (int)strlen(cell);
 			if (l > w[c])
 				w[c] = l;
@@ -601,7 +601,8 @@ static void print_list_row(const shyake_mail_entry *e, const list_row *r,
 		} else if (c == C_SUBJECT) {
 			/* pad to the width with spaces (byte printf won't) */
 			char sub[512];
-			int dw = utf8_truncate(text, sub, sizeof(sub), w[c]);
+			int dw =
+				cli_utf8_truncate(text, sub, sizeof(sub), w[c]);
 			printf("%s%s%*s%s%s", c_w, sub, w[c] - dw, "", c_rs,
 			       sep);
 		} else {
@@ -1009,7 +1010,7 @@ void cli_render_thread_list(const shyake_thread *t, const cli_render_opts *opts)
 		w_id = l > w_id ? l : w_id;
 		l = (int)strlen(from[i]);
 		w_from = l > w_from ? l : w_from;
-		l = e->subject ? utf8_display_width(e->subject) : 0;
+		l = e->subject ? cli_utf8_width(e->subject) : 0;
 		w_sub = l > w_sub ? l : w_sub;
 		l = (int)strlen(size[i]);
 		w_sz = l > w_sz ? l : w_sz;
@@ -1051,9 +1052,9 @@ void cli_render_thread_list(const shyake_thread *t, const cli_render_opts *opts)
 			continue;
 		}
 		char sub[512];
-		int dw = utf8_truncate(e->subject ? e->subject :
-						    "<decryption failed>",
-				       sub, sizeof(sub), w_sub);
+		int dw = cli_utf8_truncate(e->subject ? e->subject :
+							"<decryption failed>",
+					   sub, sizeof(sub), w_sub);
 		printf("%-*s %s%-*s%s %s%*s %s%-*s%s %s\n", w_id, id[i], c_cy,
 		       w_from, from[i], c_rs, sub, w_sub - dw, "", c_mg, w_sz,
 		       size[i], c_rs, date[i]);

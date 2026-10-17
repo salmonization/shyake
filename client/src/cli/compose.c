@@ -211,7 +211,7 @@ char *cli_format_original(const shyake_mail_detail *d, const app_config *cfg)
 }
 
 /* the original, a scissors line, then the template */
-static char *with_scissors(const char *initial, const char *orig)
+char *cli_with_scissors(const char *initial, const char *orig)
 {
 	usize n = strlen(orig) + strlen(SCISSORS_NOTE) + strlen(SCISSORS) +
 		  strlen(initial) + 8;
@@ -238,7 +238,7 @@ static char *with_scissors(const char *initial, const char *orig)
 }
 
 /* text after the scissors line, or NULL when it is gone */
-static const char *after_scissors(const char *buf)
+const char *cli_after_scissors(const char *buf)
 {
 	for (const char *line = buf; line && *line;) {
 		const char *nl = strchr(line, '\n');
@@ -252,7 +252,7 @@ static const char *after_scissors(const char *buf)
 /* line number of the body: the line after the first "---" */
 static int body_line(const char *text)
 {
-	const char *start = after_scissors(text);
+	const char *start = cli_after_scissors(text);
 	if (!start)
 		start = text;
 	int n = 1;
@@ -273,7 +273,7 @@ char *cli_edit_draft(const app_config *cfg, const char *config_dir,
 {
 	const char *editor = resolve_editor(cfg);
 	int split = orig && is_vim(editor);
-	char *full = orig && !split ? with_scissors(initial, orig) :
+	char *full = orig && !split ? cli_with_scissors(initial, orig) :
 				      strdup(initial);
 	char draft_path[640], orig_path[640];
 	if (!full || write_temp(config_dir, "compose", full, draft_path,
@@ -303,7 +303,7 @@ char *cli_edit_draft(const app_config *cfg, const char *config_dir,
 		free(buf);
 		buf = NULL;
 	} else if (orig && !split) {
-		const char *rest = after_scissors(buf);
+		const char *rest = cli_after_scissors(buf);
 		if (rest)
 			memmove(buf, rest, strlen(rest) + 1);
 		else

@@ -118,7 +118,16 @@ cp bin/shyake /usr/local/bin/
 
 ### Testing
 
-Run the end-to-end test suite against a local server. Either server
+Unit tests need no server. `make test` builds and runs three
+programs: `test_crypto` (the crypto primitives), `test_lib` (library
+internals: base64, PoW, key files, error texts) and `test_cli`
+(config and template parsing, formatting, the drafts store):
+
+```sh
+cd client && make test
+```
+
+Run the end-to test suite against a local server. Either server
 works, and a change to the protocol must pass against both:
 
 ```sh

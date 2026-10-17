@@ -56,7 +56,7 @@ or authentication code.
 ```sh
 cd client
 make            # build bin/shyake, lib/libshyake.a, lib/libshyake.{so,dylib}
-make test       # build and run tests/test_crypto.c
+make test       # build and run the unit tests in tests/
 make clean      # remove obj/, bin/, lib/
 ```
 

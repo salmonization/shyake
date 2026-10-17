@@ -24,6 +24,13 @@ char *cli_edit_draft(const app_config *cfg, const char *config_dir,
 /* Split a To:/Subject:/---/body template in place; -1 without "---". */
 int cli_parse_compose(char *buf, char **to, char **subject, char **body);
 
+/* orig above a scissors line, then the template initial; a
+ * scissors line inside orig is indented so it cannot cut there. */
+char *cli_with_scissors(const char *initial, const char *orig);
+
+/* Text after the scissors line, or NULL when it is gone. */
+const char *cli_after_scissors(const char *buf);
+
 /* The mail answered, as fetch shows it, for the editor. */
 char *cli_format_original(const shyake_mail_detail *d, const app_config *cfg);
 

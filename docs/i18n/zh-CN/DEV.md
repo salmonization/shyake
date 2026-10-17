@@ -117,6 +117,12 @@ cp bin/shyake /usr/local/bin/
 
 ### 测试
 
+单元测试不需要服务端。`make test` 会构建并运行三个程序：`test_crypto`（密码学原语）、`test_lib`（库内部：base64、PoW、密钥文件、错误文本）和 `test_cli`（配置与模板解析、格式化、草稿存储）：
+
+```sh
+cd client && make test
+```
+
 针对本地服务端运行端到端测试套件。两个服务端都可以，涉及协议的改动必须对两者都通过：
 
 ```sh
