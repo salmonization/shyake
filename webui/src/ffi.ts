@@ -176,8 +176,8 @@ export class Session {
 
     generateKeys(): Promise<void> {
         return this.run(() => {
-            if (lib.symbols.shyake_generate_keys(this.ctx) !== 0)
-                this.fail(SHYAKE_ERR_CRYPTO);
+            const rc = lib.symbols.shyake_generate_keys(this.ctx);
+            if (rc !== SHYAKE_OK) this.fail(rc);
         });
     }
 

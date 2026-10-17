@@ -13,14 +13,14 @@
 /* Opaque pointer for the library context */
 typedef struct shyake_ctx shyake_ctx;
 
-/* Configuration options provided by the CLI caller */
+/* Configuration options provided by the client */
 typedef struct {
 	const char *instance_url;
 	const char *config_dir;
 	const char *username;
-	int plain;
-	int debug;
-	int no_color;
+	int plain; /* unused: output is the client's; kept for the layout */
+	int debug; /* libcurl logs its transfers to stderr */
+	int no_color; /* unused, as plain */
 } shyake_config;
 
 /* Initialize and free the context */
@@ -66,10 +66,16 @@ typedef enum {
  */
 const char *shyake_last_error(shyake_ctx *ctx);
 
-/* Generate local ML-KEM and ML-DSA keypairs */
-int shyake_generate_keys(shyake_ctx *ctx);
+/*
+ * Generate the ML-KEM and ML-DSA key pairs that do not exist yet in
+ * config_dir; secret keys are sealed with the context's passphrase.
+ * Returns SHYAKE_OK, SHYAKE_ERR_CRYPTO, or SHYAKE_ERR when a key
+ * file cannot be written.
+ */
+shyake_err shyake_generate_keys(shyake_ctx *ctx);
 
-/* PoW utility */
+/* Hashcash stamp over resource with bits leading zero bits (SPEC 3.5);
+ * the library mints its own, this is for clients that need one */
 char *shyake_mint_pow(const char *resource, int bits);
 
 /* Registration */
@@ -121,7 +127,7 @@ void shyake_free_mail_list(shyake_mail_list *list);
 
 /*
  * Fetch inbox or sent mail list.
- * type: "inbox" or "sent".
+ * type: "inbox" or "sent"; anything else fails with SHYAKE_ERR.
  * Returns allocated shyake_mail_list* on success, NULL on failure.
  * Caller must free with shyake_free_mail_list().
  */

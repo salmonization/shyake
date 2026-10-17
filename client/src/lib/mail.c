@@ -525,6 +525,10 @@ shyake_mail_list *shyake_check(shyake_ctx *ctx, const char *type)
 	if (!ctx || !type)
 		return NULL;
 	clear_error(ctx);
+	if (strcmp(type, "inbox") != 0 && strcmp(type, "sent") != 0) {
+		set_error(ctx, "There is no mailbox %s.", type);
+		return NULL;
+	}
 
 	char endpoint[128];
 	snprintf(endpoint, sizeof(endpoint), "/api/mail?type=%s", type);

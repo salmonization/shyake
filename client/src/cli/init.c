@@ -175,10 +175,10 @@ int cmd_init(const char *config_dir)
 	if (keys_missing(config_dir) &&
 	    ask_key_passphrase(ctx, config_dir) != 0)
 		ret = 1;
-	else if (shyake_generate_keys(ctx) == 0)
+	else if (shyake_generate_keys(ctx) == SHYAKE_OK)
 		printf("Keys generated.\n");
 	else
-		fprintf(stderr, "Init failed. Cannot generate keys.\n");
+		fprintf(stderr, "Init failed. %s\n", shyake_last_error(ctx));
 
 	shyake_free_ctx(ctx);
 	free(allocated);

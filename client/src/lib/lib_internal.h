@@ -13,9 +13,7 @@ struct shyake_ctx {
 	char *instance_url;
 	char *config_dir;
 	char *username;
-	int plain;
 	int debug;
-	int no_color;
 	char passphrase[512]; /* current passphrase for loading encrypted sk */
 	char new_passphrase[512]; /* new passphrase for saving sk (rotate only) */
 	char last_error[512]; /* detail of the last failure, "" if none */

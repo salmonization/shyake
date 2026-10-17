@@ -170,9 +170,7 @@ shyake_ctx *shyake_init_ctx(const shyake_config *config)
 	if (config->username)
 		ctx->username = strdup(config->username);
 
-	ctx->plain = config->plain;
 	ctx->debug = config->debug;
-	ctx->no_color = config->no_color;
 
 	curl_global_init(CURL_GLOBAL_ALL);
 	return ctx;
@@ -215,8 +213,8 @@ void shyake_set_new_passphrase(shyake_ctx *ctx, const char *passphrase)
 /* Key generation                                                     */
 /* ------------------------------------------------------------------ */
 
-/* write one key pair unless its public key exists; -1 on failure */
-static int generate_pair(shyake_ctx *ctx, const char *name, int is_kem)
+/* write one key pair unless its public key exists */
+static shyake_err generate_pair(shyake_ctx *ctx, const char *name, int is_kem)
 {
 	char path_pk[512], path_sk[512];
 	snprintf(path_pk, sizeof(path_pk), "%s/%s_pk.bin", ctx->config_dir,
@@ -225,36 +223,48 @@ static int generate_pair(shyake_ctx *ctx, const char *name, int is_kem)
 		 name);
 	struct stat st = { 0 };
 	if (stat(path_pk, &st) == 0)
-		return 0;
+		return SHYAKE_OK;
 
 	OQS_KEM *kem = is_kem ? OQS_KEM_new("ML-KEM-768") : NULL;
 	OQS_SIG *sig = is_kem ? NULL : OQS_SIG_new("ML-DSA-65");
-	if (!kem && !sig)
-		return -1;
+	if (!kem && !sig) {
+		set_error(ctx, "The crypto library cannot make keys.");
+		return SHYAKE_ERR_CRYPTO;
+	}
 	usize pk_len = kem ? kem->length_public_key : sig->length_public_key;
 	usize sk_len = kem ? kem->length_secret_key : sig->length_secret_key;
 	u8 *pk = malloc(pk_len);
 	u8 *sk = malloc(sk_len);
 	OQS_STATUS rc = kem ? OQS_KEM_keypair(kem, pk, sk) :
 			      OQS_SIG_keypair(sig, pk, sk);
-	if (rc == OQS_SUCCESS) {
-		save_file(path_pk, pk, pk_len);
-		save_sk_encrypted(path_sk, ctx->passphrase, sk, sk_len);
+	shyake_err ret = SHYAKE_OK;
+	if (rc != OQS_SUCCESS) {
+		set_error(ctx, "The crypto library cannot make keys.");
+		ret = SHYAKE_ERR_CRYPTO;
+	} else if (save_file(path_pk, pk, pk_len) != 0) {
+		set_error(ctx, "Cannot write %s.", path_pk);
+		ret = SHYAKE_ERR;
+	} else if (save_sk_encrypted(path_sk, ctx->passphrase, sk, sk_len) !=
+		   0) {
+		set_error(ctx, "Cannot write %s.", path_sk);
+		ret = SHYAKE_ERR;
 	}
 	free(pk);
 	free_secret(sk, sk_len);
 	OQS_KEM_free(kem);
 	OQS_SIG_free(sig);
-	return rc == OQS_SUCCESS ? 0 : -1;
+	return ret;
 }
 
-int shyake_generate_keys(shyake_ctx *ctx)
+shyake_err shyake_generate_keys(shyake_ctx *ctx)
 {
 	if (!ctx || !ctx->config_dir)
-		return -1;
-	int kem = generate_pair(ctx, "kem", 1);
-	int sig = generate_pair(ctx, "sig", 0);
-	return kem == 0 && sig == 0 ? 0 : -1;
+		return SHYAKE_ERR;
+	clear_error(ctx);
+	shyake_err ret = generate_pair(ctx, "kem", 1);
+	if (ret == SHYAKE_OK)
+		ret = generate_pair(ctx, "sig", 0);
+	return ret;
 }
 
 /* ------------------------------------------------------------------ */
