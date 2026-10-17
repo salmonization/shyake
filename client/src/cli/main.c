@@ -496,7 +496,7 @@ static int cmd_whoami(int argc, char *argv[], const app_config *cfg,
 		printf("USERNAME: %s\n", cfg->username);
 	else
 		printf("USERNAME: (not registered)\n");
-	printf("INSTANCE: %s\n", cfg->instance);
+	printf("INSTANCE: %s\n", cfg->instance ? cfg->instance : "(not set)");
 	printf("CONFIG:   %s\n", config_dir);
 	return EXIT_SUCCESS;
 }

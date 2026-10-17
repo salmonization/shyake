@@ -108,10 +108,11 @@ static int split_line(char *line, char **key, char **val)
 	return 1;
 }
 
+/* an empty value leaves the setting unset */
 static void set_str(char **field, const char *val)
 {
 	free(*field);
-	*field = strdup(val);
+	*field = val[0] ? strdup(val) : NULL;
 }
 
 /* one setting; unknown keys are ignored */

@@ -14,7 +14,8 @@ typedef struct {
 	int default_action;
 } app_config;
 
-/* Read the config file; a missing file gives the defaults. */
+/* Read the config file; a missing file gives the defaults and an
+ * empty value leaves its setting unset. */
 app_config *cli_read_config(const char *config_dir);
 void cli_free_config(app_config *config);
 
