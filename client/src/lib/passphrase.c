@@ -34,6 +34,21 @@ void zero_memory(void *buf, usize len)
 		*p++ = 0;
 }
 
+void shyake_wipe(void *buf, size_t len)
+{
+	if (buf)
+		zero_memory(buf, len);
+}
+
+/* clear secret material, then free it; NULL is fine */
+void free_secret(void *p, usize len)
+{
+	if (!p)
+		return;
+	zero_memory(p, len);
+	free(p);
+}
+
 static void write_u32le(u8 *buf, u32 v)
 {
 	buf[0] = (u8)(v);

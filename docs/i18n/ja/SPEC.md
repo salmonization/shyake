@@ -460,6 +460,9 @@ void        shyake_free_ctx(shyake_ctx *ctx);
 void shyake_set_passphrase(shyake_ctx *ctx, const char *pp);
 void shyake_set_new_passphrase(shyake_ctx *ctx, const char *pp);
 
+/* 呼び出し側が持つパスフレーズや鍵をゼロ化する。コンパイラに省かれない */
+void shyake_wipe(void *buf, size_t len);
+
 /* このコンテキストの直近の失敗の詳細、なければ "" */
 const char* shyake_last_error(shyake_ctx *ctx);
 ```

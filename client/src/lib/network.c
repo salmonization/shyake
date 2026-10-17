@@ -127,7 +127,7 @@ static struct curl_slist *signed_headers(shyake_ctx *ctx, const char *method,
 
 	OQS_SIG *sig = OQS_SIG_new("ML-DSA-65");
 	if (!sig) {
-		free(ssk);
+		free_secret(ssk, ssk_len);
 		return NULL;
 	}
 	u8 *signature = malloc(sig->length_signature);
@@ -152,7 +152,7 @@ static struct curl_slist *signed_headers(shyake_ctx *ctx, const char *method,
 	snprintf(header_buf, sizeof(header_buf), "X-Shyake-Pow: %s", pow);
 	headers = curl_slist_append(headers, header_buf);
 
-	free(ssk);
+	free_secret(ssk, ssk_len);
 	free(signature);
 	free(sig_b64);
 	free(pow);

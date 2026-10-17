@@ -115,8 +115,8 @@ static int ask_key_passphrase(shyake_ctx *ctx, const char *config_dir)
 		fflush(stderr);
 	}
 	char pp1[512], pp2[512];
-	memset(pp1, 0, sizeof(pp1));
-	memset(pp2, 0, sizeof(pp2));
+	shyake_wipe(pp1, sizeof(pp1));
+	shyake_wipe(pp2, sizeof(pp2));
 	int ret = -1;
 	if (read_passphrase("Enter passphrase (empty for no passphrase): ", pp1,
 			    sizeof(pp1)) != 0)
@@ -132,8 +132,8 @@ static int ask_key_passphrase(shyake_ctx *ctx, const char *config_dir)
 	shyake_set_passphrase(ctx, pp1);
 	ret = 0;
 out:
-	memset(pp1, 0, sizeof(pp1));
-	memset(pp2, 0, sizeof(pp2));
+	shyake_wipe(pp1, sizeof(pp1));
+	shyake_wipe(pp2, sizeof(pp2));
 	return ret;
 }
 

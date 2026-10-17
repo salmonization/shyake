@@ -85,11 +85,11 @@ int prompt_passphrase(shyake_ctx *ctx, const char *config_dir)
 
 	char buf[512];
 	if (read_passphrase(prompt_str, buf, sizeof(buf)) != 0) {
-		memset(buf, 0, sizeof(buf));
+		shyake_wipe(buf, sizeof(buf));
 		return -1;
 	}
 	shyake_set_passphrase(ctx, buf);
-	memset(buf, 0, sizeof(buf));
+	shyake_wipe(buf, sizeof(buf));
 	return 0;
 }
 
@@ -106,7 +106,7 @@ int prompt_new_passphrase(shyake_ctx *ctx, const char *config_dir)
 	char pp1[512], pp2[512];
 	if (read_passphrase("Enter passphrase (empty for no passphrase): ", pp1,
 			    sizeof(pp1)) != 0) {
-		memset(pp1, 0, sizeof(pp1));
+		shyake_wipe(pp1, sizeof(pp1));
 		return -1;
 	}
 
@@ -117,21 +117,21 @@ int prompt_new_passphrase(shyake_ctx *ctx, const char *config_dir)
 
 	if (read_passphrase("Enter same passphrase again: ", pp2,
 			    sizeof(pp2)) != 0) {
-		memset(pp1, 0, sizeof(pp1));
-		memset(pp2, 0, sizeof(pp2));
+		shyake_wipe(pp1, sizeof(pp1));
+		shyake_wipe(pp2, sizeof(pp2));
 		return -1;
 	}
 
 	if (strcmp(pp1, pp2) != 0) {
 		fprintf(stderr, "Passphrases do not match.\n");
-		memset(pp1, 0, sizeof(pp1));
-		memset(pp2, 0, sizeof(pp2));
+		shyake_wipe(pp1, sizeof(pp1));
+		shyake_wipe(pp2, sizeof(pp2));
 		return -1;
 	}
 
 	shyake_set_new_passphrase(ctx, pp1);
-	memset(pp1, 0, sizeof(pp1));
-	memset(pp2, 0, sizeof(pp2));
+	shyake_wipe(pp1, sizeof(pp1));
+	shyake_wipe(pp2, sizeof(pp2));
 	return 0;
 }
 

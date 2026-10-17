@@ -36,13 +36,6 @@
 #include "drafts.h"
 
 /* zero a symmetric key after use */
-static void wipe_key(u8 key[32])
-{
-	volatile u8 *p = key;
-	for (int i = 0; i < 32; i++)
-		p[i] = 0;
-}
-
 /* detail of the last drafts failure, "" if none */
 static char drafts_error[256];
 
@@ -218,7 +211,7 @@ shyake_err cli_save_draft(shyake_ctx *ctx, const char *config_dir,
 		enc_re = shyake_seal_b64(sym_key, (const u8 *)reply_ref,
 					 strlen(reply_ref));
 	enc_bdy = shyake_seal_b64(sym_key, body, body_len);
-	wipe_key(sym_key);
+	shyake_wipe(sym_key, sizeof(sym_key));
 
 	if (!enc_bdy || (recipient && recipient[0] && !enc_rec) ||
 	    (subject && subject[0] && !enc_sub) || (reply_ref && !enc_re)) {
@@ -333,7 +326,7 @@ parse_draft_json(shyake_ctx *ctx, const char *config_dir, const char *username,
 			re = shyake_unseal_b64(sym, jre->valuestring);
 		if (decrypt_body)
 			bdy = shyake_unseal_b64(sym, jbdy->valuestring);
-		wipe_key(sym);
+		shyake_wipe(sym, sizeof(sym));
 	}
 	shyake_selfdec_free(sd);
 	if (!have_sym || (decrypt_body && !bdy) ||
@@ -407,7 +400,7 @@ static int fill_draft_entry(shyake_saved_entry *e, shyake_selfdec *sd,
 	if (shyake_selfdec_key(sd, jkey->valuestring, sym) == SHYAKE_OK) {
 		rec = decrypt_field(sym, jrec ? jrec->valuestring : NULL);
 		sub = decrypt_field(sym, jsub ? jsub->valuestring : NULL);
-		wipe_key(sym);
+		shyake_wipe(sym, sizeof(sym));
 	}
 
 	char id_buf[32];

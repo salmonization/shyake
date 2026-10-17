@@ -57,6 +57,7 @@ void hex_encode(const u8 *in, usize len, char *out);
 
 /* passphrase.c */
 void zero_memory(void *buf, usize len);
+void free_secret(void *p, usize len);
 int save_sk_encrypted(const char *path, const char *passphrase, const u8 *sk,
 		      usize sk_len);
 u8 *load_sk_decrypted(shyake_ctx *ctx, const char *path, usize *out_len);

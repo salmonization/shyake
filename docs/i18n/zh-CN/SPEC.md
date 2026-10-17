@@ -460,6 +460,9 @@ void        shyake_free_ctx(shyake_ctx *ctx);
 void shyake_set_passphrase(shyake_ctx *ctx, const char *pp);
 void shyake_set_new_passphrase(shyake_ctx *ctx, const char *pp);
 
+/* 清零调用方持有的 passphrase 或密钥；不会被编译器省略 */
+void shyake_wipe(void *buf, size_t len);
+
 /* 本上下文最近一次失败的详细信息，无则为 "" */
 const char* shyake_last_error(shyake_ctx *ctx);
 ```

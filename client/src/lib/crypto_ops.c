@@ -82,8 +82,7 @@ char *kem_encapsulate_key(const u8 *kem_pk, usize kem_pk_len, const u8 *sym_key)
 
 	if (OQS_KEM_encaps(kem, ct, ss, kem_pk) != OQS_SUCCESS) {
 		free(ct);
-		zero_memory(ss, kem->length_shared_secret);
-		free(ss);
+		free_secret(ss, kem->length_shared_secret);
 		OQS_KEM_free(kem);
 		return NULL;
 	}
@@ -101,8 +100,7 @@ char *kem_encapsulate_key(const u8 *kem_pk, usize kem_pk_len, const u8 *sym_key)
 
 	free(ct);
 	zero_memory(ek, sizeof(ek));
-	zero_memory(ss, kem->length_shared_secret);
-	free(ss);
+	free_secret(ss, kem->length_shared_secret);
 	free(packed);
 	OQS_KEM_free(kem);
 	return b64;
@@ -158,10 +156,7 @@ void shyake_selfdec_free(shyake_selfdec *sd)
 {
 	if (!sd)
 		return;
-	if (sd->ksk) {
-		zero_memory(sd->ksk, sd->ksk_len);
-		free(sd->ksk);
-	}
+	free_secret(sd->ksk, sd->ksk_len);
 	free(sd);
 }
 
@@ -174,8 +169,7 @@ shyake_err shyake_selfdec_key(shyake_selfdec *sd, const char *enc_key_b64,
 	if (!sym)
 		return SHYAKE_ERR_CRYPTO;
 	memcpy(sym_key, sym, 32);
-	zero_memory(sym, 32);
-	free(sym);
+	free_secret(sym, 32);
 	return SHYAKE_OK;
 }
 
@@ -210,8 +204,7 @@ u8 *kem_decapsulate_key(const char *enc_key_b64, const u8 *my_sk)
 
 	u8 *ss = malloc(kem->length_shared_secret);
 	if (OQS_KEM_decaps(kem, ss, packed, my_sk) != OQS_SUCCESS) {
-		zero_memory(ss, kem->length_shared_secret);
-		free(ss);
+		free_secret(ss, kem->length_shared_secret);
 		free(packed);
 		OQS_KEM_free(kem);
 		return NULL;
@@ -222,8 +215,7 @@ u8 *kem_decapsulate_key(const char *enc_key_b64, const u8 *my_sk)
 	for (int i = 0; i < 32; i++)
 		sym_key[i] = ek[i] ^ ss[i];
 
-	zero_memory(ss, kem->length_shared_secret);
-	free(ss);
+	free_secret(ss, kem->length_shared_secret);
 	zero_memory(packed, packed_len); /* trailing 32 B are ek */
 	free(packed);
 	OQS_KEM_free(kem);

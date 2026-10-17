@@ -242,7 +242,7 @@ static int generate_pair(shyake_ctx *ctx, const char *name, int is_kem)
 		save_sk_encrypted(path_sk, ctx->passphrase, sk, sk_len);
 	}
 	free(pk);
-	free(sk);
+	free_secret(sk, sk_len);
 	OQS_KEM_free(kem);
 	OQS_SIG_free(sig);
 	return rc == OQS_SUCCESS ? 0 : -1;
@@ -326,7 +326,7 @@ char *shyake_mint_pow(const char *resource, int bits)
 /* signed POST /api/register body (SPEC 4.1) */
 static char *register_payload(shyake_ctx *ctx, const char *username)
 {
-	usize kpk_len, spk_len, ssk_len;
+	usize kpk_len, spk_len, ssk_len = 0;
 	char path[512];
 	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
 	u8 *kpk = load_file(path, &kpk_len);
@@ -337,7 +337,7 @@ static char *register_payload(shyake_ctx *ctx, const char *username)
 	if (!kpk || !spk || !ssk) {
 		free(kpk);
 		free(spk);
-		free(ssk);
+		free_secret(ssk, ssk_len);
 		return NULL;
 	}
 
@@ -373,7 +373,7 @@ static char *register_payload(shyake_ctx *ctx, const char *username)
 	free(spk_b64);
 	free(kpk);
 	free(spk);
-	free(ssk);
+	free_secret(ssk, ssk_len);
 	cJSON_Delete(root);
 	OQS_SIG_free(sig);
 	return payload;

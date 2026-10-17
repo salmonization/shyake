@@ -94,9 +94,11 @@ struct key_pairs {
 static void free_key_pairs(struct key_pairs *k)
 {
 	free(k->kpk);
-	free(k->ksk);
 	free(k->spk);
-	free(k->ssk);
+	if (k->kem)
+		free_secret(k->ksk, k->kem->length_secret_key);
+	if (k->sig)
+		free_secret(k->ssk, k->sig->length_secret_key);
 	OQS_KEM_free(k->kem);
 	OQS_SIG_free(k->sig);
 }

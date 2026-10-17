@@ -153,9 +153,11 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 		*out_used_path = strdup(dest);
 	ret = SHYAKE_OK;
 done:
+	zero_memory(sym_key, sizeof(sym_key));
+	zero_memory(ek, sizeof(ek));
 	free(ct);
 	free(kem_ct);
-	free(ss);
+	free_secret(ss, kem ? kem->length_shared_secret : 0);
 	OQS_KEM_free(kem);
 	free(pt);
 	free(kem_pk);
@@ -258,7 +260,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 	u8 *ss = NULL, *pt = NULL;
 	u8 sym_key[32];
 	char ksk_path[512];
-	usize ksk_len;
+	usize ksk_len = 0;
 	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
 	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
 	if (!ksk)
@@ -282,9 +284,10 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 	}
 	ret = write_output(ctx, out_path, pt, e.pt_len);
 done:
+	zero_memory(sym_key, sizeof(sym_key));
 	free(pt);
-	free(ss);
-	free(ksk);
+	free_secret(ss, kem ? kem->length_shared_secret : 0);
+	free_secret(ksk, ksk_len);
 	OQS_KEM_free(kem);
 	free(e.kem_ct);
 	free(e.ct);

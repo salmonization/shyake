@@ -681,6 +681,9 @@ void        shyake_free_ctx(shyake_ctx *ctx);
 void shyake_set_passphrase(shyake_ctx *ctx, const char *pp);
 void shyake_set_new_passphrase(shyake_ctx *ctx, const char *pp);
 
+/* zero a passphrase or key the caller holds; never skipped */
+void shyake_wipe(void *buf, size_t len);
+
 /* detail of the last failure on this ctx, "" if none */
 const char* shyake_last_error(shyake_ctx *ctx);
 ```

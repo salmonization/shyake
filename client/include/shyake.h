@@ -27,6 +27,10 @@ void shyake_set_passphrase(shyake_ctx *ctx, const char *passphrase);
 /* Set the passphrase used when saving new secret keys during rotate */
 void shyake_set_new_passphrase(shyake_ctx *ctx, const char *passphrase);
 
+/* Zero len bytes at buf in a way the compiler cannot skip; for
+ * passphrases and keys a client holds */
+void shyake_wipe(void *buf, size_t len);
+
 /*
  * Semantic error codes returned by lib functions.
  * SHYAKE_OK = 0 so existing `ret == 0` checks still work.

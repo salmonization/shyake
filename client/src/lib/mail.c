@@ -105,12 +105,12 @@ const char *shyake_reply_recipient(shyake_ctx *ctx, const shyake_mail_detail *d)
 /* ------------------------------------------------------------------ */
 
 /* the account's KEM secret key, decrypted */
-static u8 *load_kem_sk(shyake_ctx *ctx)
+static u8 *load_kem_sk(shyake_ctx *ctx, usize *len)
 {
 	char path[512];
-	usize len;
+	*len = 0;
 	snprintf(path, sizeof(path), "%s/kem_sk.bin", ctx->config_dir);
-	return load_sk_decrypted(ctx, path, &len);
+	return load_sk_decrypted(ctx, path, len);
 }
 
 /*
@@ -189,7 +189,7 @@ static struct mail_text open_mail(const u8 *ksk, const struct wire_mail *m,
 	if (with_body && m->enc_body)
 		t.body = decrypt_from_b64(sym, m->enc_body);
 	t.reply_ref = open_reply_ref(sym, m->json);
-	free(sym);
+	free_secret(sym, 32);
 	return t;
 }
 
@@ -356,6 +356,7 @@ static char *mail_payload(shyake_ctx *ctx, const struct outgoing *m,
 	OQS_SIG_free(sig);
 	cJSON_Delete(obj);
 out:
+	zero_memory(sym_key, sizeof(sym_key));
 	free(enc_subject);
 	free(enc_body);
 	free(enc_reply_to);
@@ -420,7 +421,7 @@ static shyake_err send_mail(shyake_ctx *ctx, const char *recipient,
 	if (ret != SHYAKE_OK)
 		return ret;
 
-	usize my_kpk_len, my_ssk_len;
+	usize my_kpk_len, my_ssk_len = 0;
 	char path[512];
 	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
 	u8 *my_kpk = load_file(path, &my_kpk_len);
@@ -435,7 +436,7 @@ static shyake_err send_mail(shyake_ctx *ctx, const char *recipient,
 				NULL;
 	free(recip_pk);
 	free(my_kpk);
-	free(my_ssk);
+	free_secret(my_ssk, my_ssk_len);
 	if (!payload)
 		return SHYAKE_ERR_CRYPTO;
 
@@ -505,7 +506,8 @@ static shyake_mail_list *parse_mail_list(shyake_ctx *ctx, const char *body,
 	int count = cJSON_GetArraySize(arr);
 	shyake_mail_list *list = calloc(1, sizeof(shyake_mail_list));
 	list->entries = calloc(count, sizeof(shyake_mail_entry));
-	u8 *ksk = load_kem_sk(ctx);
+	usize ksk_len;
+	u8 *ksk = load_kem_sk(ctx, &ksk_len);
 	/* a malformed row is left out rather than shown half-read */
 	int n = 0;
 	for (int i = 0; i < count; i++)
@@ -513,7 +515,7 @@ static shyake_mail_list *parse_mail_list(shyake_ctx *ctx, const char *body,
 			       ksk, is_sent) == 0)
 			n++;
 	list->count = n;
-	free(ksk);
+	free_secret(ksk, ksk_len);
 	cJSON_Delete(json);
 	return list;
 }
@@ -559,9 +561,10 @@ static shyake_mail_detail *get_mail(shyake_ctx *ctx, const char *mail_id,
 		json = cJSON_Parse(r.body);
 	struct wire_mail m;
 	if (json && parse_wire_mail(json, &m) == 0) {
-		u8 *ksk = load_kem_sk(ctx);
+		usize ksk_len;
+		u8 *ksk = load_kem_sk(ctx, &ksk_len);
 		d = detail_from_wire(ctx, ksk, mail_id, &m, with_body);
-		free(ksk);
+		free_secret(ksk, ksk_len);
 	} else if (r.code == 200) {
 		set_error(ctx, "The instance sent a malformed mail.");
 	}
@@ -723,10 +726,11 @@ static shyake_mail_detail *read_saved(shyake_ctx *ctx, const char *mail_id,
 		cJSON_Delete(json);
 		return NULL;
 	}
-	u8 *ksk = load_kem_sk(ctx);
+	usize ksk_len;
+	u8 *ksk = load_kem_sk(ctx, &ksk_len);
 	shyake_mail_detail *d =
 		detail_from_wire(ctx, ksk, mail_id, &m, with_body);
-	free(ksk);
+	free_secret(ksk, ksk_len);
 	cJSON_Delete(json);
 	return d;
 }
@@ -796,7 +800,8 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 	list->entries = calloc(count, sizeof(shyake_saved_entry));
 
 	/* load KEM secret key once */
-	u8 *ksk = load_kem_sk(ctx);
+	usize ksk_len;
+	u8 *ksk = load_kem_sk(ctx, &ksk_len);
 	int idx = 0;
 	while ((ent = readdir(d)) != NULL && idx < count) {
 		usize id_len = saved_id_len(ent->d_name);
@@ -806,7 +811,7 @@ shyake_saved_list *shyake_list_saved(shyake_ctx *ctx)
 			idx++;
 	}
 	list->count = idx;
-	free(ksk);
+	free_secret(ksk, ksk_len);
 	closedir(d);
 	return list;
 }
