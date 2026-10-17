@@ -173,19 +173,40 @@ struct enc_file {
 	u8 mac[16];
 };
 
-static int read_enc_file(FILE *in, struct enc_file *e)
+/*
+ * Read a .enc file. Lengths come from the file, so each is checked
+ * before use: the KEM ciphertext must be kem_ct_len bytes, and the
+ * ciphertext must be exactly what remains before the MAC.
+ */
+static int read_enc_file(FILE *in, usize kem_ct_len, struct enc_file *e)
 {
+	if (fseek(in, 0, SEEK_END) != 0)
+		return -1;
+	long size = ftell(in);
+	rewind(in);
+	if (size < 0)
+		return -1;
+	usize left = (usize)size;
+
 	e->kem_ct_len = read_u32le(in);
+	if (e->kem_ct_len != kem_ct_len || left < 4 + (usize)e->kem_ct_len)
+		return -1;
+	left -= 4 + e->kem_ct_len;
 	e->kem_ct = malloc(e->kem_ct_len);
-	if (fread(e->kem_ct, 1, e->kem_ct_len, in) != e->kem_ct_len)
+	if (!e->kem_ct ||
+	    fread(e->kem_ct, 1, e->kem_ct_len, in) != e->kem_ct_len)
 		return -1;
-	if (read_u32le(in) != 32 || fread(e->ek, 1, 32, in) != 32)
+	if (left < 4 + 32 + 4 || read_u32le(in) != 32 ||
+	    fread(e->ek, 1, 32, in) != 32)
 		return -1;
+	left -= 4 + 32 + 4;
 	e->pt_len = read_u32le(in);
+	if (left != 12 + (usize)e->pt_len + 16)
+		return -1;
 	if (fread(e->nonce, 1, 12, in) != 12)
 		return -1;
-	e->ct = malloc(e->pt_len);
-	if (fread(e->ct, 1, e->pt_len, in) != e->pt_len)
+	e->ct = malloc(e->pt_len ? e->pt_len : 1);
+	if (!e->ct || fread(e->ct, 1, e->pt_len, in) != e->pt_len)
 		return -1;
 	if (fread(e->mac, 1, 16, in) != 16)
 		return -1;
@@ -223,7 +244,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 		return SHYAKE_ERR;
 	}
 	struct enc_file e = { 0 };
-	int bad = read_enc_file(in, &e);
+	int bad = read_enc_file(in, OQS_KEM_ml_kem_768_length_ciphertext, &e);
 	fclose(in);
 	if (bad) {
 		free(e.kem_ct);
