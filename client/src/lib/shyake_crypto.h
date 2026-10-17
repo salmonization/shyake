@@ -19,4 +19,4 @@ int chacha20_poly1305_decrypt(const u8 *key, const u8 *nonce,
 			      const u8 *aad, usize aad_len, const u8 *mac,
 			      u8 *plaintext);
 
-#endif // SHYAKE_CRYPTO_H
+#endif /* SHYAKE_CRYPTO_H */

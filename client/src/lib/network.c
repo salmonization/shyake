@@ -101,7 +101,7 @@ static struct curl_slist *signed_headers(shyake_ctx *ctx, const char *method,
 					 const char *username, const u8 *body,
 					 usize body_len)
 {
-	// sign request with given method and mint PoW
+	/* sign request with given method and mint PoW */
 	time_t now = time(NULL);
 	char timestamp[32];
 	snprintf(timestamp, sizeof(timestamp), "%ld", now);

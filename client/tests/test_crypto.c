@@ -94,11 +94,11 @@ int test_chacha20_poly1305(void)
 		return 1;
 	}
 
-	// Test tamper
+	/* Test tamper */
 	ciphertext[0] ^= 1;
 	if (chacha20_poly1305_decrypt(key, nonce, ciphertext, plaintext_len,
 				      aad, aad_len, mac, decrypted) == 0) {
-		return 1; // should fail
+		return 1; /* should fail */
 	}
 
 	return 0;

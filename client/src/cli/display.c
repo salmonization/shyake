@@ -150,7 +150,7 @@ static int saved_stdout = -1;
 
 void cli_setup_pager(int disable_pager)
 {
-	// spawn less pager if stdout is TTY
+	/* spawn less pager if stdout is TTY */
 	if (disable_pager || !isatty(STDOUT_FILENO))
 		return;
 
@@ -185,7 +185,7 @@ int cli_pager_active(void)
 
 void cli_wait_pager(void)
 {
-	// wait for less pager process
+	/* wait for less pager process */
 	if (pager_pid > 0) {
 		fflush(stdout);
 		close(STDOUT_FILENO);
@@ -205,7 +205,7 @@ void cli_wait_pager(void)
 
 int cli_get_terminal_width(void)
 {
-	// get current terminal width
+	/* get current terminal width */
 	struct winsize w;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0)
 		return w.ws_col;
@@ -218,7 +218,7 @@ int cli_get_terminal_width(void)
 
 void cli_print_word_wrap(const char *text, int indent, int width)
 {
-	// word-wrap text with UTF-8 display width awareness
+	/* word-wrap text with UTF-8 display width awareness */
 	int avail = width - indent;
 	if (avail < 20)
 		avail = 20;
@@ -240,7 +240,7 @@ void cli_print_word_wrap(const char *text, int indent, int width)
 			}
 			int cw = cp > 0 ? cp_width(cp) : 0;
 			if (accum + cw > avail) {
-				p = before; // rewind to just before this codepoint
+				p = before; /* rewind to just before this codepoint */
 				break;
 			}
 			accum += cw;
@@ -273,7 +273,7 @@ void cli_print_word_wrap(const char *text, int indent, int width)
 void cli_format_timestamp(i64 ts, int tz_hours, const char *fmt,
 			  const char *fmt_recent, char *buf, int buf_len)
 {
-	// convert UNIX ts to broken-down time with optional tz offset
+	/* convert UNIX ts to broken-down time with optional tz offset */
 	const char *f = fmt ? fmt : "%Y-%m-%d %H:%M";
 	time_t t = (time_t)ts;
 	struct tm tmbuf;
@@ -303,7 +303,7 @@ void cli_format_timestamp(i64 ts, int tz_hours, const char *fmt,
 
 void cli_format_party(const char *party, char *buf, int buf_len)
 {
-	// for remote parties keep username@ only
+	/* for remote parties keep username@ only */
 	const char *at = strchr(party, '@');
 	if (at) {
 		int name_len = (int)(at - party);

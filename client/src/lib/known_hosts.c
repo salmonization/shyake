@@ -58,7 +58,7 @@ static void copy_other_hosts(FILE *in, FILE *out, const char *username)
 void update_known_host(const char *config_dir, const char *username,
 		       const char *fp, const char *pk_b64)
 {
-	// rewrite known_hosts removing old entry, then append new
+	/* rewrite known_hosts removing old entry, then append new */
 	char path[512];
 	snprintf(path, sizeof(path), "%s/known_hosts", config_dir);
 

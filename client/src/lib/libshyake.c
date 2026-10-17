@@ -162,7 +162,7 @@ u8 *base64_decode(const char *b64, usize *out_len)
 
 shyake_ctx *shyake_init_ctx(const shyake_config *config)
 {
-	// initialize context
+	/* initialize context */
 	if (!config || !config->config_dir)
 		return NULL;
 
