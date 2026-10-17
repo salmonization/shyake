@@ -8,6 +8,8 @@
 /* Pager */
 void cli_setup_pager(int disable_pager);
 void cli_wait_pager(void);
+/* whether output currently goes to the pager */
+int cli_pager_active(void);
 
 /* Terminal info */
 int cli_get_terminal_width(void);
