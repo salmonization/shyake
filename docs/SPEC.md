@@ -689,7 +689,8 @@ const char* shyake_last_error(shyake_ctx *ctx);
 ```
 
 Internal struct definitions live in `src/lib/lib_internal.h`.
-Callers cannot see them. The library never writes to stdout or
+Callers cannot see them, and the shared library exports only the
+functions declared in `shyake.h`. The library never writes to stdout or
 stderr. On failure, it records the reason and returns a semantic
 error code. Callers get the reason with `shyake_last_error(ctx)`. The
 reason is one or more full sentences that say why the call failed,

@@ -467,7 +467,7 @@ void shyake_wipe(void *buf, size_t len);
 const char* shyake_last_error(shyake_ctx *ctx);
 ```
 
-内部结构体定义位于 `src/lib/lib_internal.h`，不对调用者暴露。库从不向 stdout/stderr 写入任何内容：失败时它会记录失败原因（通过 `shyake_last_error(ctx)` 获取），并返回语义化错误码。原因是一到多句完整的句子，只说明为什么失败，不说明哪个操作失败，例如 `You are blocked by flat_white.`。操作名由客户端加在前面：CLI 打印 `<Action> failed. <reason>`，例如 `Send failed. You are blocked by flat_white.`。唯一的例外是收件人公钥变化，CLI 会打印 `FATAL: <reason>`（§7）。每次调用都会先清空原因，原因在同一上下文的下一次调用前有效。错误码以类型化枚举（`shyake_err`）返回，其中 `SHYAKE_OK = 0` 以保持向后兼容：
+内部结构体定义位于 `src/lib/lib_internal.h`，不对调用者暴露；共享库只导出 `shyake.h` 中声明的函数。库从不向 stdout/stderr 写入任何内容：失败时它会记录失败原因（通过 `shyake_last_error(ctx)` 获取），并返回语义化错误码。原因是一到多句完整的句子，只说明为什么失败，不说明哪个操作失败，例如 `You are blocked by flat_white.`。操作名由客户端加在前面：CLI 打印 `<Action> failed. <reason>`，例如 `Send failed. You are blocked by flat_white.`。唯一的例外是收件人公钥变化，CLI 会打印 `FATAL: <reason>`（§7）。每次调用都会先清空原因，原因在同一上下文的下一次调用前有效。错误码以类型化枚举（`shyake_err`）返回，其中 `SHYAKE_OK = 0` 以保持向后兼容：
 
 | 错误码 | 含义 |
 |---|---|

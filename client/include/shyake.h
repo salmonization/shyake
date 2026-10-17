@@ -4,6 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* only the functions declared here leave the shared library; the
+ * library itself is built with -fvisibility=hidden */
+#if defined(__GNUC__)
+#pragma GCC visibility push(default)
+#endif
+
 /* Opaque pointer for the library context */
 typedef struct shyake_ctx shyake_ctx;
 
@@ -377,5 +383,9 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
  */
 shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 			   const char *out_path);
+
+#if defined(__GNUC__)
+#pragma GCC visibility pop
+#endif
 
 #endif /* SHYAKE_H */

@@ -467,7 +467,7 @@ void shyake_wipe(void *buf, size_t len);
 const char* shyake_last_error(shyake_ctx *ctx);
 ```
 
-内部構造体の定義は `src/lib/lib_internal.h` にあり、呼び出し側には公開されない。ライブラリは stdout/stderr へ一切出力しない。失敗時には失敗の理由を記録し（`shyake_last_error(ctx)` で取得できる）、セマンティックなエラーコードを返す。理由は 1 つ以上の完全な文であり、何が失敗したかではなく、なぜ失敗したかだけを述べる。例は `You are blocked by flat_white.` である。操作名はクライアントが前に付ける。CLI は `<Action> failed. <reason>` の形で表示し、例は `Send failed. You are blocked by flat_white.` である。唯一の例外は受信者の公開鍵の変更で、CLI は `FATAL: <reason>` と表示する（§7）。呼び出しのたびに理由はクリアされ、同一コンテキストでの次の呼び出しまで有効である。エラーコードは型付き列挙型（`shyake_err`）として返され、後方互換のため `SHYAKE_OK = 0` である：
+内部構造体の定義は `src/lib/lib_internal.h` にあり、呼び出し側には公開されない。共有ライブラリがエクスポートするのは `shyake.h` で宣言された関数だけである。ライブラリは stdout/stderr へ一切出力しない。失敗時には失敗の理由を記録し（`shyake_last_error(ctx)` で取得できる）、セマンティックなエラーコードを返す。理由は 1 つ以上の完全な文であり、何が失敗したかではなく、なぜ失敗したかだけを述べる。例は `You are blocked by flat_white.` である。操作名はクライアントが前に付ける。CLI は `<Action> failed. <reason>` の形で表示し、例は `Send failed. You are blocked by flat_white.` である。唯一の例外は受信者の公開鍵の変更で、CLI は `FATAL: <reason>` と表示する（§7）。呼び出しのたびに理由はクリアされ、同一コンテキストでの次の呼び出しまで有効である。エラーコードは型付き列挙型（`shyake_err`）として返され、後方互換のため `SHYAKE_OK = 0` である：
 
 | コード | 意味 |
 |---|---|

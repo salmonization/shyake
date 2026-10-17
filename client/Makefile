@@ -23,6 +23,8 @@ ifeq ($(OS), Darwin)
     SYS_LIB  := $(BREW_PREFIX)/lib \
                 $(BREW_PREFIX)/opt/openssl@3/lib
     SHARED_EXT := dylib
+    # export only the public API from the dylib
+    SHARED_LDFLAGS := -Wl,-exported_symbol,_shyake_*
     # explicit .a path forces static linkage on Darwin
     LIBOQS_LINK := $(BREW_PREFIX)/lib/liboqs.a
 else ifeq ($(OS), Linux)
@@ -40,6 +42,8 @@ else ifeq ($(OS), Linux)
         LIBOQS_LINK := /usr/local/lib/liboqs.a
     endif
     SHARED_EXT := so
+    # keep the statically linked liboqs out of the export table
+    SHARED_LDFLAGS := -Wl,--exclude-libs,ALL
 else
     $(error Unsupported OS: $(OS))
 endif
@@ -87,15 +91,16 @@ $(STATIC_LIB): $(LIB_OBJS)
 
 $(SHARED_LIB): $(LIB_OBJS)
 	@mkdir -p $(LIB_OUT_DIR)
-	$(CC) -shared -o $@ $(LIB_OBJS) $(LDFLAGS)
+	$(CC) -shared -o $@ $(LIB_OBJS) $(LDFLAGS) $(SHARED_LDFLAGS)
 
 $(CLI_TARGET): $(CLI_OBJS) $(STATIC_LIB)
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) $(CLI_OBJS) $(STATIC_LIB) -o $@ $(LDFLAGS)
 
+# internals stay internal; include/shyake.h marks the public API
 $(OBJ_DIR)/lib/%.o: $(LIB_DIR)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -fvisibility=hidden -c $< -o $@
 
 $(OBJ_DIR)/cli/%.o: $(CLI_DIR)/%.c
 	@mkdir -p $(dir $@)
