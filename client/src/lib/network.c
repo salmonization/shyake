@@ -136,7 +136,7 @@ static struct curl_slist *signed_headers(shyake_ctx *ctx, const char *method,
 		     ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
 
-	char *pow = shyake_mint_pow(username, POW_BITS);
+	char *pow = mint_pow(username);
 
 	struct curl_slist *headers = NULL;
 	char header_buf[8192];

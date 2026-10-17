@@ -49,19 +49,19 @@ static void test_fill_random(void)
 	CHECK(memcmp(a, b, sizeof(a)) != 0);
 }
 
-/* hashcash stamp: version 1, the bits asked, the resource, and a
- * SHA-1 with that many leading zero bits */
+/* hashcash stamp: version 1, 20 bits, the resource, and a SHA-1
+ * with 20 leading zero bits */
 static void test_pow(void)
 {
-	char *stamp = shyake_mint_pow("alice", 12);
+	char *stamp = mint_pow("alice");
 	CHECK(stamp != NULL);
 	if (!stamp)
 		return;
-	CHECK(strncmp(stamp, "1:12:", 5) == 0);
+	CHECK(strncmp(stamp, "1:20:", 5) == 0);
 	CHECK(strstr(stamp, ":alice::") != NULL);
 	u8 h[SHA_DIGEST_LENGTH];
 	SHA1((const u8 *)stamp, strlen(stamp), h);
-	CHECK(h[0] == 0 && (h[1] & 0xf0) == 0);
+	CHECK(h[0] == 0 && h[1] == 0 && (h[2] & 0xf0) == 0);
 	free(stamp);
 }
 

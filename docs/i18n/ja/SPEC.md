@@ -484,7 +484,7 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_NO_INSTANCE` | インスタンス URL が未設定 |
 | `SHYAKE_ERR_BLOCKED` | HTTP 403：受信者が送信者をブロックしている |
 
-API グループ：コンテキストのライフサイクル、鍵生成、PoW 生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、返信（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、スレッド（`shyake_thread_of`、`shyake_free_thread`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`、`shyake_dec_file_buf`）。
+API グループ：コンテキストのライフサイクル、鍵生成、登録、メール（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、返信（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、スレッド（`shyake_thread_of`、`shyake_free_thread`）、ローカル保存メール（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、アカウント（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、フィンガープリント（`shyake_fingerprint`）、自己暗号化プリミティブ（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`）、単体ファイル暗号化（`shyake_enc_file`、`shyake_dec_file`、`shyake_dec_file_buf`）。
 
 メール一覧の項目とメール詳細は `ref`、すなわちそのメールの参照（§3.2）を持つ。メール詳細はさらに `reply_ref`、すなわち返信先メールの参照を持ち、返信でなければ `NULL` である。クライアントは `shyake_send_reply()` で返信を送る。その際、返信先メールの `ref` と、`shyake_reply_recipient()` が返す宛先を渡す。`shyake_find_ref()` は参照をメール ID に戻す。
 

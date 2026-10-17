@@ -277,8 +277,10 @@ shyake_err shyake_generate_keys(shyake_ctx *ctx)
 /* PoW                                                                */
 /* ------------------------------------------------------------------ */
 
-char *shyake_mint_pow(const char *resource, int bits)
+/* Hashcash stamp for resource with POW_BITS leading zero bits */
+char *mint_pow(const char *resource)
 {
+	const int bits = POW_BITS;
 	time_t now = time(NULL);
 	struct tm *tm_info = gmtime(&now);
 	char date[7];
@@ -375,7 +377,7 @@ static char *register_payload(shyake_ctx *ctx, const char *username)
 	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)json_raw, strlen(json_raw),
 		     ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
-	char *pow = shyake_mint_pow(username, POW_BITS);
+	char *pow = mint_pow(username);
 
 	cJSON_AddStringToObject(root, "signature", sig_b64);
 	cJSON_AddStringToObject(root, "pow", pow);

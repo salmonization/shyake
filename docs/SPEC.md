@@ -718,9 +718,9 @@ Error codes are a typed enum
 | `SHYAKE_ERR_NO_INSTANCE` | Instance URL not configured |
 | `SHYAKE_ERR_BLOCKED` | HTTP 403: the recipient blocks the sender |
 
-API groups: context lifecycle, key generation, PoW minting,
-registration, mail (`shyake_send`, `shyake_check`, `shyake_fetch`,
-`shyake_check_one`, `shyake_burn`), replies (`shyake_send_reply`,
+API groups: context lifecycle, key generation, registration, mail
+(`shyake_send`, `shyake_check`, `shyake_fetch`, `shyake_check_one`,
+`shyake_burn`), replies (`shyake_send_reply`,
 `shyake_reply_recipient`, `shyake_find_ref`), threads
 (`shyake_thread_of`, `shyake_free_thread`), local saved mail
 (`shyake_save_mail`, `shyake_read_saved`, `shyake_check_saved_one`,

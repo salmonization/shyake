@@ -63,6 +63,7 @@ void set_signed_body_error(shyake_ctx *ctx, long code, const char *body);
 /* libshyake.c (file I/O, randomness, hex) */
 void config_file(const char *config_dir, const char *name, char *buf,
 		 usize len);
+char *mint_pow(const char *resource);
 int save_file(const char *path, const u8 *data, usize len);
 u8 *load_file(const char *path, usize *len);
 int fill_random(u8 *buf, usize len);

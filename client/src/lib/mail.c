@@ -368,7 +368,7 @@ static char *mail_payload(shyake_ctx *ctx, const struct outgoing *m,
 	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)signed_raw,
 		     strlen(signed_raw), my_ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
-	char *pow = shyake_mint_pow(sender, POW_BITS);
+	char *pow = mint_pow(sender);
 
 	cJSON_AddStringToObject(obj, "enc_key_sender", enc_key_sender);
 	cJSON_AddStringToObject(obj, "enc_key_recipient", enc_key_recipient);

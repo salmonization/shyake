@@ -75,10 +75,6 @@ const char *shyake_last_error(shyake_ctx *ctx);
  */
 shyake_err shyake_generate_keys(shyake_ctx *ctx);
 
-/* Hashcash stamp over resource with bits leading zero bits (SPEC 3.5);
- * the library mints its own, this is for clients that need one */
-char *shyake_mint_pow(const char *resource, int bits);
-
 /* Registration */
 shyake_err shyake_register(shyake_ctx *ctx, const char *username);
 
