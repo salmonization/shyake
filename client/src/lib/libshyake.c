@@ -108,48 +108,45 @@ char *base64_encode(const u8 *data, usize len)
 	return out;
 }
 
+/*
+ * Standard or URL-safe base64, padded or not; trailing blanks and
+ * line ends are ignored. NULL when the text is not base64.
+ */
 u8 *base64_decode(const char *b64, usize *out_len)
 {
 	usize len = strlen(b64);
 	while (len > 0 && (b64[len - 1] == '\r' || b64[len - 1] == '\n' ||
 			   b64[len - 1] == ' '))
 		len--;
-
-	u8 *out = malloc(len);
-	if (!out)
+	if (len % 4 == 1)
 		return NULL;
 
-	char *std_b64 = strdup(b64);
-	for (usize i = 0; i < len; i++) {
-		if (std_b64[i] == '-')
-			std_b64[i] = '+';
-		if (std_b64[i] == '_')
-			std_b64[i] = '/';
-	}
-
-	int dec_len = EVP_DecodeBlock(out, (const unsigned char *)std_b64, len);
-	free(std_b64);
-
-	if (dec_len < 0) {
+	/* standard alphabet, padded to a whole quantum */
+	usize padded = (len + 3) / 4 * 4;
+	char *std = malloc(padded + 1);
+	u8 *out = malloc(padded / 4 * 3 + 1);
+	if (!std || !out) {
+		free(std);
 		free(out);
 		return NULL;
 	}
+	for (usize i = 0; i < len; i++)
+		std[i] = b64[i] == '-' ? '+' : b64[i] == '_' ? '/' : b64[i];
+	memset(std + len, '=', padded - len);
+	std[padded] = '\0';
 
-	int padding = 0;
-	if (len > 0 && b64[len - 1] == '=') {
-		padding++;
-		if (len > 1 && b64[len - 2] == '=')
-			padding++;
-	} else {
-		int mod = len % 4;
-		if (mod == 2)
-			padding = 2;
-		else if (mod == 3)
-			padding = 1;
+	int dec_len =
+		EVP_DecodeBlock(out, (const unsigned char *)std, (int)padded);
+	if (dec_len < 0) {
+		free(std);
+		free(out);
+		return NULL;
 	}
-	dec_len -= padding;
-
-	*out_len = dec_len;
+	/* EVP_DecodeBlock counts padding as zero bytes */
+	for (usize i = padded; i > 0 && std[i - 1] == '='; i--)
+		dec_len--;
+	free(std);
+	*out_len = (usize)dec_len;
 	return out;
 }
 
