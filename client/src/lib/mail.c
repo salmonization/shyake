@@ -113,21 +113,56 @@ static u8 *load_kem_sk(shyake_ctx *ctx)
 	return load_sk_decrypted(ctx, path, &len);
 }
 
+/*
+ * One mail's JSON, from the instance or a saved file, checked once
+ * here: every field below is set unless marked otherwise. Strings
+ * point into json.
+ */
+struct wire_mail {
+	cJSON *json;
+	const char *mail_id; /* list rows only */
+	const char *sender;
+	const char *recipient;
+	const char *enc_key_sender;
+	const char *enc_key_recipient;
+	const char *enc_subject;
+	const char *enc_body; /* full mails only */
+	i64 timestamp;
+	int size;
+};
+
+static const char *str_field(cJSON *json, const char *name)
+{
+	cJSON *v = cJSON_GetObjectItem(json, name);
+	return cJSON_IsString(v) ? v->valuestring : NULL;
+}
+
+/* -1 when a field every mail carries is missing or mistyped */
+static int parse_wire_mail(cJSON *json, struct wire_mail *m)
+{
+	cJSON *ts = cJSON_GetObjectItem(json, "timestamp");
+	cJSON *sz = cJSON_GetObjectItem(json, "size");
+	m->json = json;
+	m->mail_id = str_field(json, "mail_id");
+	m->sender = str_field(json, "sender");
+	m->recipient = str_field(json, "recipient");
+	m->enc_key_sender = str_field(json, "enc_key_sender");
+	m->enc_key_recipient = str_field(json, "enc_key_recipient");
+	m->enc_subject = str_field(json, "enc_subject");
+	m->enc_body = str_field(json, "enc_body");
+	if (!m->sender || !m->recipient || !m->enc_key_sender ||
+	    !m->enc_key_recipient || !m->enc_subject || !cJSON_IsNumber(ts))
+		return -1;
+	m->timestamp = (i64)ts->valuedouble;
+	m->size = cJSON_IsNumber(sz) ? sz->valueint : 0;
+	return 0;
+}
+
 /* the wrapped mail key meant for us: as its sender or recipient */
-static const char *key_field(shyake_ctx *ctx, const char *sender)
+static const char *our_key(shyake_ctx *ctx, const struct wire_mail *m)
 {
-	return strcmp(ctx->username, sender) == 0 ? "enc_key_sender" :
-						    "enc_key_recipient";
-}
-
-static const char *json_str(cJSON *json, const char *name)
-{
-	return cJSON_GetObjectItem(json, name)->valuestring;
-}
-
-static int json_int(cJSON *json, const char *name)
-{
-	return cJSON_GetObjectItem(json, name)->valueint;
+	return strcmp(ctx->username, m->sender) == 0 ? m->enc_key_sender :
+						       m->enc_key_recipient;
 }
 
 /* decrypted parts of a mail; each NULL when it cannot be read */
@@ -138,45 +173,42 @@ struct mail_text {
 };
 
 /*
- * Unwrap the mail key in key_field with ksk, then decrypt the
- * subject, the body when with_body, and the reply reference.
+ * Unwrap the mail key enc_key with ksk, then decrypt the subject,
+ * the body when with_body, and the reply reference.
  */
-static struct mail_text open_mail(const u8 *ksk, cJSON *json,
-				  const char *key_field, int with_body)
+static struct mail_text open_mail(const u8 *ksk, const struct wire_mail *m,
+				  const char *enc_key, int with_body)
 {
 	struct mail_text t = { 0 };
 	if (!ksk)
 		return t;
-	u8 *sym = kem_decapsulate_key(json_str(json, key_field), ksk);
+	u8 *sym = kem_decapsulate_key(enc_key, ksk);
 	if (!sym)
 		return t;
-	t.subject = decrypt_from_b64(sym, json_str(json, "enc_subject"));
-	cJSON *body = cJSON_GetObjectItem(json, "enc_body");
-	if (with_body && body && body->valuestring)
-		t.body = decrypt_from_b64(sym, body->valuestring);
-	t.reply_ref = open_reply_ref(sym, json);
+	t.subject = decrypt_from_b64(sym, m->enc_subject);
+	if (with_body && m->enc_body)
+		t.body = decrypt_from_b64(sym, m->enc_body);
+	t.reply_ref = open_reply_ref(sym, m->json);
 	free(sym);
 	return t;
 }
 
 /* a mail detail from the full JSON of one mail */
-static shyake_mail_detail *detail_from_json(shyake_ctx *ctx, const u8 *ksk,
-					    const char *mail_id, cJSON *json,
+static shyake_mail_detail *detail_from_wire(shyake_ctx *ctx, const u8 *ksk,
+					    const char *mail_id,
+					    const struct wire_mail *m,
 					    int with_body)
 {
-	const char *sender = json_str(json, "sender");
-	struct mail_text t =
-		open_mail(ksk, json, key_field(ctx, sender), with_body);
-
+	struct mail_text t = open_mail(ksk, m, our_key(ctx, m), with_body);
 	shyake_mail_detail *d = calloc(1, sizeof(shyake_mail_detail));
 	d->mail_id = strdup(mail_id);
-	d->sender = strdup(sender);
-	d->recipient = strdup(json_str(json, "recipient"));
+	d->sender = strdup(m->sender);
+	d->recipient = strdup(m->recipient);
 	d->subject = t.subject;
 	d->body = t.body;
-	d->timestamp = (i64)json_int(json, "timestamp");
-	d->size = json_int(json, "size");
-	d->ref = json_ref(json);
+	d->timestamp = m->timestamp;
+	d->size = m->size;
+	d->ref = json_ref(m->json);
 	d->reply_ref = t.reply_ref;
 	return d;
 }
@@ -437,22 +469,26 @@ shyake_err shyake_send_reply(shyake_ctx *ctx, const char *recipient,
 /* Mail on the instance                                               */
 /* ------------------------------------------------------------------ */
 
-/* one row of GET /api/mail */
-static void fill_entry(shyake_mail_entry *e, cJSON *item, const u8 *ksk,
-		       int is_sent)
+/* one row of GET /api/mail; -1 when the row is malformed */
+static int fill_entry(shyake_mail_entry *e, cJSON *item, const u8 *ksk,
+		      int is_sent)
 {
+	struct wire_mail m;
+	if (parse_wire_mail(item, &m) != 0 || !m.mail_id)
+		return -1;
 	struct mail_text t = open_mail(
-		ksk, item, is_sent ? "enc_key_sender" : "enc_key_recipient", 0);
-	e->mail_id = strdup(json_str(item, "mail_id"));
-	e->party = strdup(json_str(item, is_sent ? "recipient" : "sender"));
+		ksk, &m, is_sent ? m.enc_key_sender : m.enc_key_recipient, 0);
+	e->mail_id = strdup(m.mail_id);
+	e->party = strdup(is_sent ? m.recipient : m.sender);
 	e->subject = t.subject ? t.subject : strdup("(decryption failed)");
 	e->reply_ref = t.reply_ref;
-	e->size = json_int(item, "size");
-	e->timestamp = (i64)json_int(item, "timestamp");
+	e->size = m.size;
+	e->timestamp = m.timestamp;
 	e->is_sent = is_sent;
-	cJSON *sh = cJSON_GetObjectItem(item, "sig_hash");
-	if (cJSON_IsString(sh) && is_ref(sh->valuestring))
-		e->ref = strdup(sh->valuestring);
+	const char *sh = str_field(item, "sig_hash");
+	if (sh && is_ref(sh))
+		e->ref = strdup(sh);
+	return 0;
 }
 
 /* mailbox list from the answer to GET /api/mail */
@@ -468,12 +504,15 @@ static shyake_mail_list *parse_mail_list(shyake_ctx *ctx, const char *body,
 
 	int count = cJSON_GetArraySize(arr);
 	shyake_mail_list *list = calloc(1, sizeof(shyake_mail_list));
-	list->count = count;
 	list->entries = calloc(count, sizeof(shyake_mail_entry));
 	u8 *ksk = load_kem_sk(ctx);
+	/* a malformed row is left out rather than shown half-read */
+	int n = 0;
 	for (int i = 0; i < count; i++)
-		fill_entry(&list->entries[i], cJSON_GetArrayItem(arr, i), ksk,
-			   is_sent);
+		if (fill_entry(&list->entries[n], cJSON_GetArrayItem(arr, i),
+			       ksk, is_sent) == 0)
+			n++;
+	list->count = n;
 	free(ksk);
 	cJSON_Delete(json);
 	return list;
@@ -518,12 +557,15 @@ static shyake_mail_detail *get_mail(shyake_ctx *ctx, const char *mail_id,
 		set_server_error(ctx, r.code, r.body);
 	else
 		json = cJSON_Parse(r.body);
-	if (json) {
+	struct wire_mail m;
+	if (json && parse_wire_mail(json, &m) == 0) {
 		u8 *ksk = load_kem_sk(ctx);
-		d = detail_from_json(ctx, ksk, mail_id, json, with_body);
+		d = detail_from_wire(ctx, ksk, mail_id, &m, with_body);
 		free(ksk);
-		cJSON_Delete(json);
+	} else if (r.code == 200) {
+		set_error(ctx, "The instance sent a malformed mail.");
 	}
+	cJSON_Delete(json);
 	http_reply_free(&r);
 	return d;
 }
@@ -675,11 +717,15 @@ static shyake_mail_detail *read_saved(shyake_ctx *ctx, const char *mail_id,
 		return NULL;
 	}
 	cJSON *json = load_json(path);
-	if (!json)
+	struct wire_mail m;
+	if (!json || parse_wire_mail(json, &m) != 0) {
+		set_error(ctx, "Saved mail %s is damaged.", mail_id);
+		cJSON_Delete(json);
 		return NULL;
+	}
 	u8 *ksk = load_kem_sk(ctx);
 	shyake_mail_detail *d =
-		detail_from_json(ctx, ksk, mail_id, json, with_body);
+		detail_from_wire(ctx, ksk, mail_id, &m, with_body);
 	free(ksk);
 	cJSON_Delete(json);
 	return d;
@@ -703,19 +749,21 @@ static int fill_saved_entry(shyake_ctx *ctx, shyake_saved_entry *e,
 	char path[768];
 	snprintf(path, sizeof(path), "%s/%s", dir, name);
 	cJSON *json = load_json(path);
-	if (!json)
+	struct wire_mail m;
+	if (!json || parse_wire_mail(json, &m) != 0) {
+		cJSON_Delete(json);
 		return -1;
+	}
 
-	const char *sender = json_str(json, "sender");
-	struct mail_text t = open_mail(ksk, json, key_field(ctx, sender), 0);
+	struct mail_text t = open_mail(ksk, &m, our_key(ctx, &m), 0);
 	e->ref = json_ref(json);
 	e->reply_ref = t.reply_ref;
 	e->mail_id = strndup(name, id_len < 255 ? id_len : 255);
-	e->sender = strdup(sender);
-	e->recipient = strdup(json_str(json, "recipient"));
+	e->sender = strdup(m.sender);
+	e->recipient = strdup(m.recipient);
 	e->subject = t.subject ? t.subject : strdup("(decryption failed)");
-	e->timestamp = (i64)json_int(json, "timestamp");
-	e->size = json_int(json, "size");
+	e->timestamp = m.timestamp;
+	e->size = m.size;
 	cJSON_Delete(json);
 	return 0;
 }
