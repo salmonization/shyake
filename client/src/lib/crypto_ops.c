@@ -12,11 +12,7 @@ char *encrypt_to_b64(const u8 *key, const u8 *pt, usize pt_len)
 		return NULL;
 
 	u8 nonce[12];
-	FILE *urandom = fopen("/dev/urandom", "rb");
-	if (urandom) {
-		fread(nonce, 1, 12, urandom);
-		fclose(urandom);
-	} else
+	if (!fill_random(nonce, sizeof(nonce)))
 		return NULL;
 
 	u8 *ct = malloc(pt_len);
@@ -126,13 +122,7 @@ char *shyake_selfenc_begin(shyake_ctx *ctx, u8 sym_key[32])
 	if (!kpk)
 		return NULL;
 
-	usize read_bytes = 0;
-	FILE *urandom = fopen("/dev/urandom", "rb");
-	if (urandom) {
-		read_bytes = fread(sym_key, 1, 32, urandom);
-		fclose(urandom);
-	}
-	if (read_bytes != 32) {
+	if (!fill_random(sym_key, 32)) {
 		free(kpk);
 		return NULL;
 	}
