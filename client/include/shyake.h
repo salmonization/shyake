@@ -383,12 +383,20 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 			   char **out_used_path);
 
 /*
- * Decrypt a file using own KEM secret key.
- * out_path: NULL to write to stdout.
+ * Decrypt a file using own KEM secret key into out_path, which is
+ * required: the library never writes to stdout.
  * Returns SHYAKE_OK on success.
  */
 shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 			   const char *out_path);
+
+/*
+ * Decrypt a file using own KEM secret key into memory: *out is
+ * allocated (free() it) and holds *out_len bytes.
+ * Returns SHYAKE_OK on success.
+ */
+shyake_err shyake_dec_file_buf(shyake_ctx *ctx, const char *in_path,
+			       uint8_t **out, size_t *out_len);
 
 #if defined(__GNUC__)
 #pragma GCC visibility pop

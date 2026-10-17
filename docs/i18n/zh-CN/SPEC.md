@@ -483,7 +483,7 @@ const char* shyake_last_error(shyake_ctx *ctx);
 | `SHYAKE_ERR_NO_INSTANCE` | 未配置实例 URL |
 | `SHYAKE_ERR_BLOCKED` | HTTP 403：收件人屏蔽了发件人 |
 
-API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、回复（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、会话（`shyake_thread_of`、`shyake_free_thread`）、本地保存的邮件（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、账户（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、指纹（`shyake_fingerprint`）、自加密原语（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`），以及独立文件加密（`shyake_enc_file`、`shyake_dec_file`）。
+API 分组：上下文生命周期、密钥生成、PoW 铸造、注册、邮件（`shyake_send`、`shyake_check`、`shyake_fetch`、`shyake_check_one`、`shyake_burn`）、回复（`shyake_send_reply`、`shyake_reply_recipient`、`shyake_find_ref`）、会话（`shyake_thread_of`、`shyake_free_thread`）、本地保存的邮件（`shyake_save_mail`、`shyake_read_saved`、`shyake_check_saved_one`、`shyake_list_saved`）、账户（`shyake_block`、`shyake_list_blocks`、`shyake_rotate`、`shyake_destroy`）、指纹（`shyake_fingerprint`）、自加密原语（`shyake_selfenc_begin`、`shyake_selfdec_new`、`shyake_selfdec_key`、`shyake_selfdec_free`、`shyake_seal_b64`、`shyake_unseal_b64`），以及独立文件加密（`shyake_enc_file`、`shyake_dec_file`、`shyake_dec_file_buf`）。
 
 邮件列表项和邮件详情都带有 `ref`，即该邮件的引用（§3.2）。邮件详情还带有 `reply_ref`，即它所回复邮件的引用，不是回复时为 `NULL`。客户端用 `shyake_send_reply()` 发送回复，传入被回复邮件的 `ref`，以及 `shyake_reply_recipient()` 给出的收件人。`shyake_find_ref()` 把引用转换回邮件 ID。
 

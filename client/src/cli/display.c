@@ -7,7 +7,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <openssl/sha.h>
-#include "../lib/vendor/cJSON/cJSON.h"
+#include "cJSON.h"
 #include "display.h"
 
 /* ------------------------------------------------------------------ */

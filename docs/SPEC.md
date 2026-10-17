@@ -728,7 +728,8 @@ registration, mail (`shyake_send`, `shyake_check`, `shyake_fetch`,
 (`shyake_fingerprint`), self-encryption primitives
 (`shyake_selfenc_begin`, `shyake_selfdec_new`, `shyake_selfdec_key`,
 `shyake_selfdec_free`, `shyake_seal_b64`, `shyake_unseal_b64`), and
-standalone file encryption (`shyake_enc_file`, `shyake_dec_file`).
+standalone file encryption (`shyake_enc_file`, `shyake_dec_file`,
+`shyake_dec_file_buf`).
 
 Mail entries and details carry `ref`, the mail's reference (§3.2). A
 detail also carries `reply_ref`, the reference of the mail it

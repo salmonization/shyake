@@ -1692,7 +1692,20 @@ static int cmd_dec(int argc, char *argv[], const app_config *cfg,
 	shyake_ctx *ctx = open_ctx(&c);
 	if (!ctx)
 		return EXIT_FAILURE;
-	shyake_err ret = shyake_dec_file(ctx, in_path, out_path);
+	shyake_err ret;
+	if (out_path) {
+		ret = shyake_dec_file(ctx, in_path, out_path);
+	} else {
+		/* without -o the plaintext goes to stdout */
+		u8 *pt;
+		usize len;
+		ret = shyake_dec_file_buf(ctx, in_path, &pt, &len);
+		if (ret == SHYAKE_OK) {
+			fwrite(pt, 1, len, stdout);
+			shyake_wipe(pt, len);
+			free(pt);
+		}
+	}
 	if (ret != SHYAKE_OK)
 		print_lib_error(ctx, "Decryption failed.");
 	else if (out_path)

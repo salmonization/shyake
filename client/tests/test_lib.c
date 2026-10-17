@@ -160,6 +160,40 @@ static void test_crypto_round_trip(void)
 	CHECK(decrypt_from_b64(key, "") == NULL);
 }
 
+/* a file sealed to our own key opens into memory and into a file */
+static void test_file_encryption(void)
+{
+	shyake_config cfg = { .config_dir = tmpdir };
+	shyake_ctx *ctx = shyake_init_ctx(&cfg);
+	shyake_set_passphrase(ctx, "");
+	CHECK(shyake_generate_keys(ctx) == SHYAKE_OK);
+
+	char in[256], enc[256], out[256];
+	snprintf(in, sizeof(in), "%s/plain.txt", tmpdir);
+	snprintf(enc, sizeof(enc), "%s/plain.enc", tmpdir);
+	snprintf(out, sizeof(out), "%s/plain.out", tmpdir);
+	const char *text = "file contents\n";
+	CHECK(save_file(in, (const u8 *)text, strlen(text)) == 0);
+	char *used = NULL;
+	CHECK(shyake_enc_file(ctx, in, enc, NULL, &used) == SHYAKE_OK);
+	CHECK_STR(used, enc);
+	free(used);
+
+	u8 *pt = NULL;
+	usize len = 0;
+	CHECK(shyake_dec_file_buf(ctx, enc, &pt, &len) == SHYAKE_OK);
+	CHECK(pt && len == strlen(text) && memcmp(pt, text, len) == 0);
+	free(pt);
+	CHECK(shyake_dec_file(ctx, enc, out) == SHYAKE_OK);
+	u8 *back = load_file(out, &len);
+	CHECK(back && len == strlen(text) && memcmp(back, text, len) == 0);
+	free(back);
+	CHECK(shyake_dec_file(ctx, enc, NULL) == SHYAKE_ERR);
+	CHECK(shyake_dec_file_buf(ctx, in, &pt, &len) == SHYAKE_ERR);
+	CHECK_STR(shyake_last_error(ctx), "The file is not a valid .enc file.");
+	shyake_free_ctx(ctx);
+}
+
 int main(void)
 {
 	/* mkdtemp() is hidden on macOS under _POSIX_C_SOURCE */
@@ -177,6 +211,7 @@ int main(void)
 	test_server_errors();
 	test_crypto_round_trip();
 	test_malformed_saved();
+	test_file_encryption();
 
 	char cmd[300];
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);

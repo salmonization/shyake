@@ -216,30 +216,14 @@ static int read_enc_file(FILE *in, usize kem_ct_len, struct enc_file *e)
 	return 0;
 }
 
-/* plaintext to out_path, or to stdout without one */
-static shyake_err write_output(shyake_ctx *ctx, const char *out_path,
-			       const u8 *pt, usize len)
+shyake_err shyake_dec_file_buf(shyake_ctx *ctx, const char *in_path,
+			       uint8_t **out, size_t *out_len)
 {
-	if (!out_path) {
-		fwrite(pt, 1, len, stdout);
-		return SHYAKE_OK;
-	}
-	FILE *out = fopen(out_path, "wb");
-	if (!out) {
-		set_error(ctx, "Cannot write %s.", out_path);
-		return SHYAKE_ERR;
-	}
-	fwrite(pt, 1, len, out);
-	fclose(out);
-	return SHYAKE_OK;
-}
-
-shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
-			   const char *out_path)
-{
-	if (!ctx || !in_path)
+	if (!ctx || !in_path || !out || !out_len)
 		return SHYAKE_ERR;
 	clear_error(ctx);
+	*out = NULL;
+	*out_len = 0;
 
 	FILE *in = fopen(in_path, "rb");
 	if (!in) {
@@ -277,13 +261,17 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 	for (int i = 0; i < CHACHA20_KEY_SIZE; i++)
 		sym_key[i] = e.ek[i] ^ ss[i];
 
-	pt = malloc(e.pt_len);
-	if (chacha20_poly1305_decrypt(sym_key, e.nonce, e.ct, e.pt_len, NULL, 0,
-				      e.mac, pt) != 0) {
+	/* one spare byte so an empty plaintext is still a buffer */
+	pt = malloc((usize)e.pt_len + 1);
+	if (!pt || chacha20_poly1305_decrypt(sym_key, e.nonce, e.ct, e.pt_len,
+					     NULL, 0, e.mac, pt) != 0) {
 		set_error(ctx, "The file is damaged or was changed.");
 		goto done;
 	}
-	ret = write_output(ctx, out_path, pt, e.pt_len);
+	*out = pt;
+	*out_len = e.pt_len;
+	pt = NULL;
+	ret = SHYAKE_OK;
 done:
 	zero_memory(sym_key, sizeof(sym_key));
 	free(pt);
@@ -292,5 +280,31 @@ done:
 	OQS_KEM_free(kem);
 	free(e.kem_ct);
 	free(e.ct);
+	return ret;
+}
+
+shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
+			   const char *out_path)
+{
+	if (!ctx || !in_path)
+		return SHYAKE_ERR;
+	if (!out_path) {
+		set_error(ctx, "No output file was given.");
+		return SHYAKE_ERR;
+	}
+	u8 *pt;
+	usize len;
+	shyake_err ret = shyake_dec_file_buf(ctx, in_path, &pt, &len);
+	if (ret != SHYAKE_OK)
+		return ret;
+	FILE *out = fopen(out_path, "wb");
+	if (out) {
+		fwrite(pt, 1, len, out);
+		fclose(out);
+	} else {
+		set_error(ctx, "Cannot write %s.", out_path);
+		ret = SHYAKE_ERR;
+	}
+	free(pt);
 	return ret;
 }
