@@ -108,7 +108,7 @@ static struct curl_slist *signed_headers(shyake_ctx *ctx, const char *method,
 
 	char path[512];
 	usize ssk_len;
-	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, SIG_SK_FILE, path, sizeof(path));
 	u8 *ssk = load_sk_decrypted(ctx, path, &ssk_len);
 	if (!ssk)
 		return NULL;
@@ -136,7 +136,7 @@ static struct curl_slist *signed_headers(shyake_ctx *ctx, const char *method,
 		     ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
 
-	char *pow = shyake_mint_pow(username, 20);
+	char *pow = shyake_mint_pow(username, POW_BITS);
 
 	struct curl_slist *headers = NULL;
 	char header_buf[8192];

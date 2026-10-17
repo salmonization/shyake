@@ -9,6 +9,7 @@
 #include <openssl/sha.h>
 #include "vendor/cJSON/cJSON.h"
 #include "lib_internal.h"
+#include "shyake_crypto.h"
 
 /* ------------------------------------------------------------------ */
 
@@ -109,7 +110,7 @@ static u8 *load_kem_sk(shyake_ctx *ctx, usize *len)
 {
 	char path[512];
 	*len = 0;
-	snprintf(path, sizeof(path), "%s/kem_sk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, KEM_SK_FILE, path, sizeof(path));
 	return load_sk_decrypted(ctx, path, len);
 }
 
@@ -189,7 +190,7 @@ static struct mail_text open_mail(const u8 *ksk, const struct wire_mail *m,
 	if (with_body && m->enc_body)
 		t.body = decrypt_from_b64(sym, m->enc_body);
 	t.reply_ref = open_reply_ref(sym, m->json);
-	free_secret(sym, 32);
+	free_secret(sym, CHACHA20_KEY_SIZE);
 	return t;
 }
 
@@ -297,7 +298,7 @@ static char *mail_payload(shyake_ctx *ctx, const struct outgoing *m,
 			  const u8 *recip_pk, usize recip_pk_len,
 			  const u8 *my_kpk, usize my_kpk_len, const u8 *my_ssk)
 {
-	u8 sym_key[32];
+	u8 sym_key[CHACHA20_KEY_SIZE];
 	if (!fill_random(sym_key, sizeof(sym_key)))
 		return NULL;
 
@@ -341,7 +342,7 @@ static char *mail_payload(shyake_ctx *ctx, const struct outgoing *m,
 	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)signed_raw,
 		     strlen(signed_raw), my_ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
-	char *pow = shyake_mint_pow(sender, 20);
+	char *pow = shyake_mint_pow(sender, POW_BITS);
 
 	cJSON_AddStringToObject(obj, "enc_key_sender", enc_key_sender);
 	cJSON_AddStringToObject(obj, "enc_key_recipient", enc_key_recipient);
@@ -423,9 +424,9 @@ static shyake_err send_mail(shyake_ctx *ctx, const char *recipient,
 
 	usize my_kpk_len, my_ssk_len = 0;
 	char path[512];
-	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, KEM_PK_FILE, path, sizeof(path));
 	u8 *my_kpk = load_file(path, &my_kpk_len);
-	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, SIG_SK_FILE, path, sizeof(path));
 	u8 *my_ssk = load_sk_decrypted(ctx, path, &my_ssk_len);
 
 	struct outgoing m = { recipient, reply_ref, subject,

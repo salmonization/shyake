@@ -43,6 +43,12 @@ const char *shyake_last_error(shyake_ctx *ctx)
 /* File I/O helpers                                                   */
 /* ------------------------------------------------------------------ */
 
+/* path of a file in the config directory */
+void config_file(const char *config_dir, const char *name, char *buf, usize len)
+{
+	snprintf(buf, len, "%s/%s", config_dir, name);
+}
+
 int save_file(const char *path, const u8 *data, usize len)
 {
 	FILE *f = fopen(path, "wb");
@@ -214,13 +220,12 @@ void shyake_set_new_passphrase(shyake_ctx *ctx, const char *passphrase)
 /* ------------------------------------------------------------------ */
 
 /* write one key pair unless its public key exists */
-static shyake_err generate_pair(shyake_ctx *ctx, const char *name, int is_kem)
+static shyake_err generate_pair(shyake_ctx *ctx, const char *pk_file,
+				const char *sk_file, int is_kem)
 {
 	char path_pk[512], path_sk[512];
-	snprintf(path_pk, sizeof(path_pk), "%s/%s_pk.bin", ctx->config_dir,
-		 name);
-	snprintf(path_sk, sizeof(path_sk), "%s/%s_sk.bin", ctx->config_dir,
-		 name);
+	config_file(ctx->config_dir, pk_file, path_pk, sizeof(path_pk));
+	config_file(ctx->config_dir, sk_file, path_sk, sizeof(path_sk));
 	struct stat st = { 0 };
 	if (stat(path_pk, &st) == 0)
 		return SHYAKE_OK;
@@ -261,9 +266,9 @@ shyake_err shyake_generate_keys(shyake_ctx *ctx)
 	if (!ctx || !ctx->config_dir)
 		return SHYAKE_ERR;
 	clear_error(ctx);
-	shyake_err ret = generate_pair(ctx, "kem", 1);
+	shyake_err ret = generate_pair(ctx, KEM_PK_FILE, KEM_SK_FILE, 1);
 	if (ret == SHYAKE_OK)
-		ret = generate_pair(ctx, "sig", 0);
+		ret = generate_pair(ctx, SIG_PK_FILE, SIG_SK_FILE, 0);
 	return ret;
 }
 
@@ -338,11 +343,11 @@ static char *register_payload(shyake_ctx *ctx, const char *username)
 {
 	usize kpk_len, spk_len, ssk_len = 0;
 	char path[512];
-	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, KEM_PK_FILE, path, sizeof(path));
 	u8 *kpk = load_file(path, &kpk_len);
-	snprintf(path, sizeof(path), "%s/sig_pk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, SIG_PK_FILE, path, sizeof(path));
 	u8 *spk = load_file(path, &spk_len);
-	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, SIG_SK_FILE, path, sizeof(path));
 	u8 *ssk = load_sk_decrypted(ctx, path, &ssk_len);
 	if (!kpk || !spk || !ssk) {
 		free(kpk);
@@ -369,7 +374,7 @@ static char *register_payload(shyake_ctx *ctx, const char *username)
 	OQS_SIG_sign(sig, signature, &sig_len, (u8 *)json_raw, strlen(json_raw),
 		     ssk);
 	char *sig_b64 = base64_encode(signature, sig_len);
-	char *pow = shyake_mint_pow(username, 20);
+	char *pow = shyake_mint_pow(username, POW_BITS);
 
 	cJSON_AddStringToObject(root, "signature", sig_b64);
 	cJSON_AddStringToObject(root, "pow", pow);

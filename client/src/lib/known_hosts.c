@@ -97,7 +97,7 @@ shyake_fp_result *shyake_fingerprint(shyake_ctx *ctx, const char *target_user,
 	if (!target_user) {
 		/* Self fingerprint: compute from local kem_pk.bin */
 		char path[512];
-		snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+		config_file(ctx->config_dir, KEM_PK_FILE, path, sizeof(path));
 		usize pk_len;
 		u8 *pk = load_file(path, &pk_len);
 		if (!pk) {

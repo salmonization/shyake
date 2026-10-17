@@ -69,7 +69,7 @@ static u8 *target_kem_pk(shyake_ctx *ctx, const char *recipient, usize *len,
 	*err = SHYAKE_ERR_CRYPTO;
 	if (!recipient) {
 		char path[512];
-		snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+		config_file(ctx->config_dir, KEM_PK_FILE, path, sizeof(path));
 		return load_file(path, len);
 	}
 	char *pk_b64 = fetch_recipient_pubkey(ctx, recipient, err);
@@ -104,7 +104,8 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 	ret = SHYAKE_ERR_CRYPTO;
 	OQS_KEM *kem = NULL;
 	u8 *kem_ct = NULL, *ss = NULL, *ct = NULL;
-	u8 sym_key[32], ek[32], nonce[12], mac[16];
+	u8 sym_key[CHACHA20_KEY_SIZE], ek[CHACHA20_KEY_SIZE],
+		nonce[CHACHA20_NONCE_SIZE], mac[POLY1305_MAC_SIZE];
 	if (!fill_random(sym_key, sizeof(sym_key)))
 		goto done;
 
@@ -116,7 +117,7 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 	ss = malloc(kem->length_shared_secret);
 	if (OQS_KEM_encaps(kem, kem_ct, ss, kem_pk) != OQS_SUCCESS)
 		goto done;
-	for (int i = 0; i < 32; i++)
+	for (int i = 0; i < CHACHA20_KEY_SIZE; i++)
 		ek[i] = sym_key[i] ^ ss[i];
 
 	/* encrypt */
@@ -141,12 +142,12 @@ shyake_err shyake_enc_file(shyake_ctx *ctx, const char *in_path,
 	}
 	write_u32le(f, (u32)kem->length_ciphertext);
 	fwrite(kem_ct, 1, kem->length_ciphertext, f);
-	write_u32le(f, 32);
-	fwrite(ek, 1, 32, f);
+	write_u32le(f, sizeof(ek));
+	fwrite(ek, 1, sizeof(ek), f);
 	write_u32le(f, (u32)pt_len);
-	fwrite(nonce, 1, 12, f);
+	fwrite(nonce, 1, sizeof(nonce), f);
 	fwrite(ct, 1, pt_len, f);
-	fwrite(mac, 1, 16, f);
+	fwrite(mac, 1, sizeof(mac), f);
 	fclose(f);
 
 	if (out_used_path)
@@ -168,11 +169,11 @@ done:
 struct enc_file {
 	u32 kem_ct_len;
 	u8 *kem_ct;
-	u8 ek[32];
+	u8 ek[CHACHA20_KEY_SIZE];
 	u32 pt_len;
-	u8 nonce[12];
+	u8 nonce[CHACHA20_NONCE_SIZE];
 	u8 *ct;
-	u8 mac[16];
+	u8 mac[POLY1305_MAC_SIZE];
 };
 
 /*
@@ -198,19 +199,19 @@ static int read_enc_file(FILE *in, usize kem_ct_len, struct enc_file *e)
 	if (!e->kem_ct ||
 	    fread(e->kem_ct, 1, e->kem_ct_len, in) != e->kem_ct_len)
 		return -1;
-	if (left < 4 + 32 + 4 || read_u32le(in) != 32 ||
-	    fread(e->ek, 1, 32, in) != 32)
+	if (left < 4 + sizeof(e->ek) + 4 || read_u32le(in) != sizeof(e->ek) ||
+	    fread(e->ek, 1, sizeof(e->ek), in) != sizeof(e->ek))
 		return -1;
-	left -= 4 + 32 + 4;
+	left -= 4 + sizeof(e->ek) + 4;
 	e->pt_len = read_u32le(in);
-	if (left != 12 + (usize)e->pt_len + 16)
+	if (left != sizeof(e->nonce) + (usize)e->pt_len + sizeof(e->mac))
 		return -1;
-	if (fread(e->nonce, 1, 12, in) != 12)
+	if (fread(e->nonce, 1, sizeof(e->nonce), in) != sizeof(e->nonce))
 		return -1;
 	e->ct = malloc(e->pt_len ? e->pt_len : 1);
 	if (!e->ct || fread(e->ct, 1, e->pt_len, in) != e->pt_len)
 		return -1;
-	if (fread(e->mac, 1, 16, in) != 16)
+	if (fread(e->mac, 1, sizeof(e->mac), in) != sizeof(e->mac))
 		return -1;
 	return 0;
 }
@@ -258,10 +259,10 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 	shyake_err ret = SHYAKE_ERR_CRYPTO;
 	OQS_KEM *kem = NULL;
 	u8 *ss = NULL, *pt = NULL;
-	u8 sym_key[32];
+	u8 sym_key[CHACHA20_KEY_SIZE];
 	char ksk_path[512];
 	usize ksk_len = 0;
-	snprintf(ksk_path, sizeof(ksk_path), "%s/kem_sk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, KEM_SK_FILE, ksk_path, sizeof(ksk_path));
 	u8 *ksk = load_sk_decrypted(ctx, ksk_path, &ksk_len);
 	if (!ksk)
 		goto done;
@@ -273,7 +274,7 @@ shyake_err shyake_dec_file(shyake_ctx *ctx, const char *in_path,
 		set_error(ctx, "The file is not encrypted to your key.");
 		goto done;
 	}
-	for (int i = 0; i < 32; i++)
+	for (int i = 0; i < CHACHA20_KEY_SIZE; i++)
 		sym_key[i] = e.ek[i] ^ ss[i];
 
 	pt = malloc(e.pt_len);

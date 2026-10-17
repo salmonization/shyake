@@ -22,6 +22,9 @@
 #ifndef SHYAKE_VERSION
 #define SHYAKE_VERSION "dev"
 #endif
+/* longest subject this client sends, in bytes */
+#define SUBJECT_MAX 128
+
 #define SHYAKE_FALLBACK_VERSION_URL \
 	"https://shyake.eee.coffee/api/client/version"
 
@@ -130,7 +133,7 @@ static const char *subject_problem(const char *subject)
 {
 	if (!subject || !subject[0])
 		return "The subject cannot be empty.";
-	if (strlen(subject) > 128)
+	if (strlen(subject) > SUBJECT_MAX)
 		return "The subject cannot exceed 128 bytes.";
 	for (const char *p = subject; *p; p++)
 		if (!isspace((unsigned char)*p))
@@ -138,13 +141,13 @@ static const char *subject_problem(const char *subject)
 	return "The subject cannot be only whitespace.";
 }
 
-/* "Re: <subject>", kept within 128 bytes on a UTF-8 boundary */
+/* "Re: <subject>", kept within SUBJECT_MAX on a UTF-8 boundary */
 static char *reply_subject(const char *orig)
 {
 	const char *prefix = strncasecmp(orig, "Re:", 3) == 0 ? "" : "Re: ";
 	usize n = strlen(prefix) + strlen(orig);
-	if (n > 128) {
-		n = 128;
+	if (n > SUBJECT_MAX) {
+		n = SUBJECT_MAX;
 		while (n > strlen(prefix) &&
 		       ((u8)orig[n - strlen(prefix)] & 0xC0) == 0x80)
 			n--;
@@ -403,7 +406,7 @@ static int save_edited_draft(shyake_ctx *ctx, const char *config_dir, char *buf,
 		return EXIT_FAILURE;
 	}
 
-	if (subject && strlen(subject) > 128)
+	if (subject && strlen(subject) > SUBJECT_MAX)
 		fprintf(stderr, "WARNING: The subject exceeds 128 bytes. "
 				"Sending will fail.\n");
 	if (reply_to) {
@@ -767,7 +770,7 @@ static int send_loaded_draft(shyake_ctx *ctx, const char *config_dir,
 				"Use -s <subject>.\n");
 		return EXIT_FAILURE;
 	}
-	if (strlen(subject) > 128) {
+	if (strlen(subject) > SUBJECT_MAX) {
 		fprintf(stderr, "The subject cannot exceed 128 bytes.\n");
 		return EXIT_FAILURE;
 	}

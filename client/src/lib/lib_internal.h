@@ -47,7 +47,18 @@ void set_network_error(shyake_ctx *ctx, CURLcode res);
 int instance_protocol(shyake_ctx *ctx);
 void set_signed_body_error(shyake_ctx *ctx, long code, const char *body);
 
+/* proof of work every signed request carries (SPEC 3.5) */
+#define POW_BITS 20
+
+/* key files in the config directory */
+#define KEM_PK_FILE "kem_pk.bin"
+#define KEM_SK_FILE "kem_sk.bin"
+#define SIG_PK_FILE "sig_pk.bin"
+#define SIG_SK_FILE "sig_sk.bin"
+
 /* libshyake.c (file I/O, randomness, hex) */
+void config_file(const char *config_dir, const char *name, char *buf,
+		 usize len);
 int save_file(const char *path, const u8 *data, usize len);
 u8 *load_file(const char *path, usize *len);
 int fill_random(u8 *buf, usize len);

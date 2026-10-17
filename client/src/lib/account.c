@@ -139,13 +139,13 @@ static void save_key_pairs(shyake_ctx *ctx, const struct key_pairs *k)
 {
 	const char *pp = ctx->new_passphrase;
 	char path[512];
-	snprintf(path, sizeof(path), "%s/kem_pk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, KEM_PK_FILE, path, sizeof(path));
 	save_file(path, k->kpk, k->kem->length_public_key);
-	snprintf(path, sizeof(path), "%s/kem_sk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, KEM_SK_FILE, path, sizeof(path));
 	save_sk_encrypted(path, pp, k->ksk, k->kem->length_secret_key);
-	snprintf(path, sizeof(path), "%s/sig_pk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, SIG_PK_FILE, path, sizeof(path));
 	save_file(path, k->spk, k->sig->length_public_key);
-	snprintf(path, sizeof(path), "%s/sig_sk.bin", ctx->config_dir);
+	config_file(ctx->config_dir, SIG_SK_FILE, path, sizeof(path));
 	save_sk_encrypted(path, pp, k->ssk, k->sig->length_secret_key);
 }
 
