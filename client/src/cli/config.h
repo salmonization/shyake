@@ -9,7 +9,9 @@ typedef struct {
 	char *time_format_recent;
 	char *check_columns;
 	char *editor;
-	int no_color;
+	int no_color; /* NO_COLOR=1, --no-color, --plain or $NO_COLOR */
+	int plain; /* --plain: no pager, color or truncation */
+	int debug; /* --debug: libcurl logs to stderr */
 	int tz_hours;
 	int default_action;
 } app_config;

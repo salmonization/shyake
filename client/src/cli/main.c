@@ -29,10 +29,12 @@
 	"https://shyake.eee.coffee/api/client/version"
 
 /* global flags, taken out of argv before the command runs */
-static int global_plain = 0;
-static int global_debug = 0;
-static int global_no_color = 0;
-static const char *global_config_dir = NULL;
+struct flags {
+	int plain;
+	int debug;
+	int no_color;
+	const char *config_dir;
+};
 
 /* version endpoint on own instance, fallback when unregistered */
 static char *build_version_url(const char *instance)
@@ -169,12 +171,6 @@ static int retry_may_help(shyake_err ret)
 /* Command setup                                                      */
 /* ------------------------------------------------------------------ */
 
-/* --no-color, --plain, NO_COLOR or the config */
-static int no_color(const app_config *cfg)
-{
-	return global_no_color || cfg->no_color;
-}
-
 /* library settings; a value missing from the config is "" */
 static shyake_config lib_config(const app_config *cfg, const char *config_dir)
 {
@@ -182,9 +178,9 @@ static shyake_config lib_config(const app_config *cfg, const char *config_dir)
 		.config_dir = config_dir,
 		.instance_url = cfg->instance ? cfg->instance : "",
 		.username = cfg->username ? cfg->username : "",
-		.plain = global_plain,
-		.debug = global_debug,
-		.no_color = no_color(cfg),
+		.plain = cfg->plain,
+		.debug = cfg->debug,
+		.no_color = cfg->no_color,
 	};
 	return c;
 }
@@ -230,8 +226,8 @@ static shyake_ctx *account_ctx(const app_config *cfg, const char *config_dir)
 static cli_render_opts render_opts(const app_config *cfg)
 {
 	cli_render_opts ro = { 0 };
-	ro.no_color = no_color(cfg);
-	ro.plain = global_plain;
+	ro.no_color = cfg->no_color;
+	ro.plain = cfg->plain;
 	ro.tz_hours = cfg->tz_hours;
 	ro.time_fmt = cfg->time_format;
 	ro.time_fmt_recent = cfg->time_format_recent;
@@ -243,7 +239,7 @@ static void show_header(shyake_ctx *ctx, const shyake_mail_detail *d,
 			const app_config *cfg)
 {
 	char *re = describe_reply(ctx, d);
-	cli_render_mail_header(d, re, no_color(cfg), cfg->tz_hours,
+	cli_render_mail_header(d, re, cfg->no_color, cfg->tz_hours,
 			       cfg->time_format, cfg->time_format_recent);
 	free(re);
 }
@@ -253,7 +249,7 @@ static void show_mail(shyake_ctx *ctx, const shyake_mail_detail *d, int raw,
 		      const app_config *cfg)
 {
 	char *re = raw ? NULL : describe_reply(ctx, d);
-	cli_render_mail_detail(d, re, raw, no_color(cfg), global_plain,
+	cli_render_mail_detail(d, re, raw, cfg->no_color, cfg->plain,
 			       cfg->tz_hours, cfg->time_format,
 			       cfg->time_format_recent);
 	free(re);
@@ -1564,7 +1560,7 @@ static void show_thread_mails(shyake_ctx *ctx, const shyake_thread *t,
 		if (!d[i] && (e->where & SHYAKE_IN_SAVED))
 			d[i] = shyake_read_saved(ctx, e->mail_id);
 	}
-	cli_render_thread_mails(t, d, flat, no_color(cfg), global_plain,
+	cli_render_thread_mails(t, d, flat, cfg->no_color, cfg->plain,
 				cfg->tz_hours, cfg->time_format,
 				cfg->time_format_recent);
 	for (int i = 0; d && i < t->count; i++)
@@ -1715,10 +1711,9 @@ static int cmd_dec(int argc, char *argv[], const app_config *cfg,
 }
 
 /* update without arguments: the versions, and how to update */
-static int show_versions(const char *version_url)
+static int show_versions(const char *version_url, int debug)
 {
-	cli_version_info *info =
-		cli_get_latest_version(version_url, global_debug);
+	cli_version_info *info = cli_get_latest_version(version_url, debug);
 	if (!info) {
 		print_failure("Update failed.",
 			      "Cannot get the latest version.");
@@ -1762,13 +1757,13 @@ static int cmd_update(int argc, char *argv[], const app_config *cfg,
 
 	int ret;
 	if (argc < 3)
-		ret = show_versions(version_url);
+		ret = show_versions(version_url, cfg->debug);
 	else if (strcmp(argv[2], "stable") == 0)
 		ret = cli_self_update(version_url, SHYAKE_VERSION,
-				      CLI_UPDATE_STABLE, global_debug);
+				      CLI_UPDATE_STABLE, cfg->debug);
 	else if (strcmp(argv[2], "preview") == 0)
 		ret = cli_self_update(version_url, SHYAKE_VERSION,
-				      CLI_UPDATE_PREVIEW, global_debug);
+				      CLI_UPDATE_PREVIEW, cfg->debug);
 	else {
 		fprintf(stderr, "Usage: shyake update [stable|preview]\n");
 		ret = EXIT_FAILURE;
@@ -1829,21 +1824,21 @@ static void drop_args(int *argc, char *argv[], int i, int n)
 }
 
 /* take the global flags out of argv, wherever they are */
-static void take_global_flags(int *argc, char *argv[])
+static void take_global_flags(int *argc, char *argv[], struct flags *fl)
 {
 	for (int i = 1; i < *argc; i++) {
 		int n = 1;
 		if (strcmp(argv[i], "--plain") == 0) {
-			global_plain = 1;
-			global_no_color = 1;
+			fl->plain = 1;
+			fl->no_color = 1;
 		} else if (strcmp(argv[i], "--debug") == 0) {
-			global_debug = 1;
+			fl->debug = 1;
 		} else if (strcmp(argv[i], "--no-color") == 0) {
-			global_no_color = 1;
+			fl->no_color = 1;
 		} else if ((strcmp(argv[i], "-c") == 0 ||
 			    strcmp(argv[i], "--config") == 0) &&
 			   i + 1 < *argc) {
-			global_config_dir = argv[i + 1];
+			fl->config_dir = argv[i + 1];
 			n = 2;
 		} else {
 			continue;
@@ -1851,21 +1846,24 @@ static void take_global_flags(int *argc, char *argv[])
 		drop_args(argc, argv, i, n);
 		i--;
 	}
+	const char *env = getenv("NO_COLOR");
+	if (env && env[0])
+		fl->no_color = 1;
 }
 
-static char *config_dir_path(void)
+static char *config_dir_path(const struct flags *fl)
 {
-	return global_config_dir ? strdup(global_config_dir) : get_config_dir();
+	return fl->config_dir ? strdup(fl->config_dir) : get_config_dir();
 }
 
 /* no command: DEFAULT_ACTION picks check inbox, its count, or man */
-static char **default_argv(int *argc)
+static char **default_argv(int *argc, const struct flags *fl)
 {
 	static char *def_argv_man[] = { "shyake", "man", NULL };
 	static char *def_argv_check[] = { "shyake", "check", "inbox", NULL };
 	static char *def_argv_count[] = { "shyake", "check", "inbox", "--count",
 					  NULL };
-	char *config_dir = config_dir_path();
+	char *config_dir = config_dir_path(fl);
 	app_config *cfg = cli_read_config(config_dir);
 	int def_act = cfg->default_action;
 	cli_free_config(cfg);
@@ -1884,7 +1882,7 @@ static char **default_argv(int *argc)
 }
 
 /* commands that need no config; 1 when cmd is one, *ret its status */
-static int run_early(int argc, char *argv[], int *ret)
+static int run_early(int argc, char *argv[], const struct flags *fl, int *ret)
 {
 	const char *cmd = argv[1];
 	*ret = EXIT_SUCCESS;
@@ -1899,8 +1897,8 @@ static int run_early(int argc, char *argv[], int *ret)
 	else if (strcmp(cmd, "version") == 0)
 		printf("shyake %s\n", SHYAKE_VERSION);
 	else if (strcmp(cmd, "init") == 0)
-		*ret = cmd_init(global_config_dir) == 0 ? EXIT_SUCCESS :
-							  EXIT_FAILURE;
+		*ret = cmd_init(fl->config_dir) == 0 ? EXIT_SUCCESS :
+						       EXIT_FAILURE;
 	else
 		return 0;
 	return 1;
@@ -1908,21 +1906,23 @@ static int run_early(int argc, char *argv[], int *ret)
 
 int main(int argc, char *argv[])
 {
-	take_global_flags(&argc, argv);
-	const char *no_color_env = getenv("NO_COLOR");
-	if (no_color_env && strlen(no_color_env) > 0)
-		global_no_color = 1;
+	struct flags fl = { 0 };
+	take_global_flags(&argc, argv, &fl);
 	if (argc < 2)
-		argv = default_argv(&argc);
+		argv = default_argv(&argc, &fl);
 
 	int ret;
-	if (run_early(argc, argv, &ret))
+	if (run_early(argc, argv, &fl, &ret))
 		return ret;
 
 	const char *cmd = argv[1];
 	const struct command *c = find_command(cmd);
-	char *config_dir = config_dir_path();
+	char *config_dir = config_dir_path(&fl);
 	app_config *cfg = cli_read_config(config_dir);
+	/* the flags override the config file */
+	cfg->no_color = cfg->no_color || fl.no_color;
+	cfg->plain = fl.plain;
+	cfg->debug = fl.debug;
 	if (!c) {
 		fprintf(stderr, "Unknown command: %s\n", cmd);
 		ret = EXIT_FAILURE;
