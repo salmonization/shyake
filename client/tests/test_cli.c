@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "shyake.h"
 #include "internal.h"
 #include "config.h"
@@ -12,7 +13,7 @@
 #include "update.h"
 #include "check.h"
 
-static char tmpdir[] = "/tmp/shyake-test-cli.XXXXXX";
+static char tmpdir[64];
 
 static void write_text(const char *path, const char *text)
 {
@@ -178,8 +179,11 @@ static void test_drafts(void)
 
 int main(void)
 {
-	if (!mkdtemp(tmpdir)) {
-		perror("mkdtemp");
+	/* mkdtemp() is hidden on macOS under _POSIX_C_SOURCE */
+	snprintf(tmpdir, sizeof(tmpdir), "/tmp/shyake-test-cli.%ld",
+		 (long)getpid());
+	if (mkdir(tmpdir, 0700) != 0) {
+		perror(tmpdir);
 		return 1;
 	}
 	test_trim();

@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <openssl/sha.h>
 #include "lib_internal.h"
 #include "check.h"
 
-static char tmpdir[] = "/tmp/shyake-test-lib.XXXXXX";
+static char tmpdir[64];
 
 static void test_base64(void)
 {
@@ -122,6 +123,27 @@ static void test_server_errors(void)
 	shyake_free_ctx(ctx);
 }
 
+/* a saved mail missing fields is refused, not read half-way */
+static void test_malformed_saved(void)
+{
+	char path[256];
+	snprintf(path, sizeof(path), "%s/saved", tmpdir);
+	mkdir(path, 0700);
+	snprintf(path, sizeof(path), "%s/saved/bad.json", tmpdir);
+	const char *json = "{\"sender\":\"alice\",\"timestamp\":\"soon\"}";
+	CHECK(save_file(path, (const u8 *)json, strlen(json)) == 0);
+
+	shyake_config cfg = { .config_dir = tmpdir, .username = "alice" };
+	shyake_ctx *ctx = shyake_init_ctx(&cfg);
+	CHECK(shyake_read_saved(ctx, "bad") == NULL);
+	CHECK_STR(shyake_last_error(ctx), "Saved mail bad is damaged.");
+	CHECK(shyake_check_saved_one(ctx, "bad") == NULL);
+	shyake_saved_list *list = shyake_list_saved(ctx);
+	CHECK(list && list->count == 0);
+	shyake_free_saved_list(list);
+	shyake_free_ctx(ctx);
+}
+
 static void test_crypto_round_trip(void)
 {
 	u8 key[32];
@@ -140,8 +162,11 @@ static void test_crypto_round_trip(void)
 
 int main(void)
 {
-	if (!mkdtemp(tmpdir)) {
-		perror("mkdtemp");
+	/* mkdtemp() is hidden on macOS under _POSIX_C_SOURCE */
+	snprintf(tmpdir, sizeof(tmpdir), "/tmp/shyake-test-lib.%ld",
+		 (long)getpid());
+	if (mkdir(tmpdir, 0700) != 0) {
+		perror(tmpdir);
 		return 1;
 	}
 	test_base64();
@@ -151,6 +176,7 @@ int main(void)
 	test_files_and_keys();
 	test_server_errors();
 	test_crypto_round_trip();
+	test_malformed_saved();
 
 	char cmd[300];
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
