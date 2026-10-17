@@ -138,6 +138,8 @@ bash tests/e2e_test.sh
 
 `SHYAKE_TEST_INSTANCE` でテストスイートの接続先 URL を変えられます。
 
+CI（`.github/workflows/ci.yml`）は push と pull request のたびにこれらをすべて実行します：Linux と macOS での `-Werror` 付きクライアントビルドと単体テスト、`clang-format` と `prettier` の整形チェック、Go のテスト、そして Go サーバーに対する e2e と federation のテストです。
+
 フェデレーションのテストは Go サーバーを 2 つ自分で起動し、その間でクライアントを動かします。双方向のリレー、停止中のインスタンスへのリレー（クライアントが下書きを残し、復帰後に送信する）、リレーされたメールに対するブロックを確認します：
 
 ```sh

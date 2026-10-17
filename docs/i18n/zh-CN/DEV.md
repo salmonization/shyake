@@ -138,6 +138,8 @@ bash tests/e2e_test.sh
 
 `SHYAKE_TEST_INSTANCE` 可以让测试套件指向其他 URL。
 
+CI（`.github/workflows/ci.yml`）在每次 push 和 pull request 时运行上述全部检查：在 Linux 和 macOS 上以 `-Werror` 构建客户端并运行单元测试，`clang-format` 与 `prettier` 格式检查，Go 测试，以及针对 Go 服务端的 e2e 和 federation 测试。
+
 联邦网络测试会自行启动两个 Go 服务端，并在它们之间运行客户端。它覆盖双向中继、发往已停机实例的中继（客户端保存草稿，实例恢复后再发送），以及对中继邮件的屏蔽：
 
 ```sh

@@ -143,6 +143,11 @@ bash tests/e2e_test.sh
 
 `SHYAKE_TEST_INSTANCE` points the suite at another URL.
 
+CI (`.github/workflows/ci.yml`) runs all of these on every push and
+pull request: the client built with `-Werror` and its unit tests on
+Linux and macOS, `clang-format` and `prettier`, the Go tests, and
+the e2e and federation suites against the Go server.
+
 The federation test starts two Go servers itself and runs the client
 between them. It covers relays in both directions, a relay to an
 instance that is down (the client keeps a draft and sends it later),

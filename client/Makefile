@@ -1,4 +1,6 @@
 CC ?= gcc
+# e.g. EXTRA_CFLAGS=-Werror in CI
+EXTRA_CFLAGS ?=
 VERSION ?= v0.4.1-indev.1
 
 # detect OS and architecture
@@ -49,7 +51,8 @@ CFLAGS = -Wall -Wextra -std=c11 -pedantic \
          -Iinclude \
          -Isrc/lib \
          -Isrc/lib/vendor/cJSON \
-         $(addprefix -I, $(SYS_INC))
+         $(addprefix -I, $(SYS_INC)) \
+         $(EXTRA_CFLAGS)
 
 # liboqs always static; curl/crypto dynamic on all platforms
 LDFLAGS = $(addprefix -L, $(SYS_LIB)) \

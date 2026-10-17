@@ -1,0 +1,120 @@
+# Checks every push and pull request: the client builds without
+# warnings and passes its unit tests, formatting is clean, the Go
+# server passes its tests, and the e2e and federation suites pass
+# against the Go server.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    name: client (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y cmake libcurl4-openssl-dev libssl-dev
+          else
+            brew install openssl@3
+          fi
+
+      - uses: ./.github/actions/liboqs
+
+      - name: Build
+        run: make -C client EXTRA_CFLAGS=-Werror
+
+      - name: Unit tests
+        run: make -C client test EXTRA_CFLAGS=-Werror
+
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # vendored code is not ours to format
+      - name: clang-format
+        run: |
+          find client/src client/include client/tests \
+              -path client/src/lib/vendor -prune -o \
+              -name '*.[ch]' -print |
+            xargs clang-format --dry-run --Werror
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: prettier
+        working-directory: server/cf
+        run: |
+          npm ci --ignore-scripts
+          npm run format:check
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go/go.mod
+          cache-dependency-path: server/go/go.sum
+
+      - name: gofmt and vet
+        working-directory: server/go
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+
+      - name: Test
+        working-directory: server/go
+        run: go test ./...
+
+  e2e:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libcurl4-openssl-dev libssl-dev
+
+      - uses: ./.github/actions/liboqs
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go/go.mod
+          cache-dependency-path: server/go/go.sum
+
+      - name: Build
+        run: |
+          make -C client
+          (cd server/go && go build -o "$RUNNER_TEMP/shyake-server" ./cmd/shyake-server)
+
+      - name: e2e against the Go server
+        run: |
+          SHYAKE_INSTANCE_DOMAIN=127.0.0.1:8787 SHYAKE_LISTEN=127.0.0.1:8787 \
+          SHYAKE_DATABASE="$RUNNER_TEMP/e2e.db" \
+              "$RUNNER_TEMP/shyake-server" >"$RUNNER_TEMP/server.log" 2>&1 &
+          for _ in $(seq 50); do
+            curl -sf http://127.0.0.1:8787/health >/dev/null && break
+            sleep 0.1
+          done
+          bash tests/e2e_test.sh || { cat "$RUNNER_TEMP/server.log"; exit 1; }
+
+      - name: Federation
+        run: bash tests/federation_test.sh
