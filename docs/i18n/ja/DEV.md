@@ -234,4 +234,6 @@ cc -std=c11 -o /tmp/gen gen_vectors.c \
 
 Worker インスタンスが追うのは `main` ではなくタグです。`deploy.sh --update` は最新の `vX.Y.Z` タグに切り替えます。`main` へのマージは、タグを打つまでこれらのインスタンスには届きません。プレリリースのタグ（`vX.Y.Z-rc.1`）は決して届きません。
 
+Go サーバーは、`server/go/go.mod` の `toolchain` 行にある Go のリリースでビルドされます。Go のセキュリティリリースの後は、それを新しいリリースに変え（`go mod edit -toolchain=go1.26.N`）、サーバーをもう一度リリースしてください。
+
 クライアントに影響するサーバーの変更は、先にサーバーへ届けてください。サーバーが新しいリクエスト形式を受け付けるようになるときは、プロトコルレベル（Go サーバーの `protocol.Level`、Worker の `PROTOCOL_LEVEL`）を上げます。クライアントはそれを `GET /api/version` から読み取ります。

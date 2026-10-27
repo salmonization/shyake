@@ -234,4 +234,6 @@ cc -std=c11 -o /tmp/gen gen_vectors.c \
 
 Worker 实例跟随的是标签而不是 `main`：`deploy.sh --update` 会切换到最新的 `vX.Y.Z` 标签。合进 `main` 的改动要等打了标签才会到达这些实例；预发布标签（`vX.Y.Z-rc.1`）则永远不会。
 
+Go 服务端使用 `server/go/go.mod` 中 `toolchain` 行指定的 Go 版本构建。Go 发布安全更新后，把它改为新版本（`go mod edit -toolchain=go1.26.N`），然后重新发布服务端。
+
 影响客户端的服务端改动必须先部署到服务端。服务端开始接受新的请求格式时，要提升协议级别（Go 服务端的 `protocol.Level`、Worker 的 `PROTOCOL_LEVEL`）。客户端通过 `GET /api/version` 读取它。

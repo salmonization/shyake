@@ -2,6 +2,8 @@ module github.com/salmonization/shyake/server/go
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/cloudflare/circl v1.6.5
 	golang.org/x/sync v0.23.0

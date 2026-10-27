@@ -191,7 +191,10 @@ set `SHYAKE_GITHUB_TOKEN` ([GitHub token](#github-token-recommended)).
 
 #### Build from source
 
-You need Go 1.26 or newer.
+You need Go 1.26 or newer. The `toolchain` line in
+`server/go/go.mod` names the Go release with the newest security
+fixes. When your Go is older, `go build` downloads that release.
+`go version shyake-server` shows the Go release that built a binary.
 
 1. **Build the newest release.** The `main` branch can have changes
 that are not released. To build a pre-release, check out its tag.

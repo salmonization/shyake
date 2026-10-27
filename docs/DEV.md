@@ -272,6 +272,11 @@ Worker instances follow the tags, not `main`: `deploy.sh --update`
 checks out the newest `vX.Y.Z` tag. A merge to `main` reaches them
 only when you tag it. A pre-release tag (`vX.Y.Z-rc.1`) never does.
 
+The Go server is built with the Go release in the `toolchain` line
+of `server/go/go.mod`. After a Go security release, set it to the
+new release (`go mod edit -toolchain=go1.26.N`) and release the
+server again.
+
 A server change that affects clients must reach the servers first.
 Bump the protocol level (`protocol.Level` in the Go server,
 `PROTOCOL_LEVEL` in the Worker) when servers start to accept a new

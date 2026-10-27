@@ -134,7 +134,7 @@ sh install.sh
 
 #### 从源码构建
 
-需要 Go 1.26 或更新版本。
+需要 Go 1.26 或更新版本。`server/go/go.mod` 中的 `toolchain` 行指定了包含最新安全修复的 Go 版本，本地 Go 较旧时，`go build` 会自动下载该版本。`go version shyake-server` 可以查看构建某个二进制所用的 Go 版本。
 
 1. **构建最新的正式版。** `main` 分支上可能有尚未发布的改动。要构建预发布版本，请切换到它的 tag。
 
