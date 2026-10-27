@@ -98,6 +98,19 @@ static char *config_dir_path(const struct flags *fl)
 }
 
 /* no command: DEFAULT_ACTION picks check inbox, its count, or man */
+/* the config dir, or NULL after saying why it cannot be used; the
+ * library takes no longer path (shyake_init_ctx) */
+static char *usable_config_dir(const struct flags *fl)
+{
+	char *dir = config_dir_path(fl);
+	if (dir && strlen(dir) <= 384)
+		return dir;
+	fprintf(stderr, "The config directory path is %s.\n",
+		dir ? "too long" : "unknown");
+	free(dir);
+	return NULL;
+}
+
 static char **default_argv(int *argc, const struct flags *fl)
 {
 	static char *def_argv_man[] = { "shyake", "man", NULL };
@@ -137,10 +150,12 @@ static int run_early(int argc, char *argv[], const struct flags *fl, int *ret)
 		cli_print_man(argc < 3 ? NULL : argv[2]);
 	else if (strcmp(cmd, "version") == 0)
 		printf("shyake %s\n", SHYAKE_VERSION);
-	else if (strcmp(cmd, "init") == 0)
-		*ret = cmd_init(fl->config_dir) == 0 ? EXIT_SUCCESS :
-						       EXIT_FAILURE;
-	else
+	else if (strcmp(cmd, "init") == 0) {
+		char *dir = usable_config_dir(fl);
+		*ret = dir && cmd_init(fl->config_dir) == 0 ? EXIT_SUCCESS :
+							      EXIT_FAILURE;
+		free(dir);
+	} else
 		return 0;
 	return 1;
 }
@@ -158,14 +173,9 @@ int main(int argc, char *argv[])
 
 	const char *cmd = argv[1];
 	const struct command *c = find_command(cmd);
-	char *config_dir = config_dir_path(&fl);
-	if (!config_dir || strlen(config_dir) > 384) {
-		/* the library takes no longer path (shyake_init_ctx) */
-		fprintf(stderr, "The config directory path is %s.\n",
-			config_dir ? "too long" : "unknown");
-		free(config_dir);
+	char *config_dir = usable_config_dir(&fl);
+	if (!config_dir)
 		return EXIT_FAILURE;
-	}
 	app_config *cfg = cli_read_config(config_dir);
 	/* the flags override the config file */
 	cfg->no_color = cfg->no_color || fl.no_color;

@@ -219,7 +219,7 @@ int cli_set_account(const char *config_dir, const char *username,
 	if (!f)
 		return -1;
 	if (!has_instance)
-		fprintf(f, "INSTANCE=%s\n", instance);
+		fprintf(f, "INSTANCE=%s\nUSERNAME=%s\n", instance, username);
 	fclose(f);
 	return 0;
 }
