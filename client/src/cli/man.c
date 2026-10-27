@@ -295,7 +295,17 @@ static const struct man_entry man_table[] = {
 		  "Options:\n"
 		  "    -r, --raw       Output body only (no header)\n"
 		  "    --flat          Thread without the graph\n"
-		  "    --no-color      Disable colored output\n" },
+		  "    --no-color      Disable colored output\n\n"
+		  "Tips:\n"
+		  "    Export a saved mail with its header:\n"
+		  "        shyake read <id> --no-color > mail.txt\n"
+		  "    Export a whole thread:\n"
+		  "        shyake read thread <id> --no-color > thread.txt\n"
+		  "    Export a draft:\n"
+		  "        shyake read drafts <id> --no-color > draft.txt\n"
+		  "    Saved mail and drafts need your current keys. Export "
+		  "them\n"
+		  "    before 'shyake rotate'.\n" },
 	{ "enc", "shyake enc - Encrypt a file\n\n"
 		 "Usage:\n"
 		 "    shyake enc <file> [-t <username>] [-o <output>]\n\n"

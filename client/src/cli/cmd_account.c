@@ -161,8 +161,7 @@ int cmd_rotate(int argc, char *argv[], const app_config *cfg,
 	       "deleted.\n"
 	       "  - Your saved mail and drafts stay, but the new keys "
 	       "cannot decrypt\n"
-	       "    them. Export them first, for example:\n"
-	       "      shyake read thread <id> --no-color > mail.txt\n");
+	       "    them. Export them first: see 'shyake man read'.\n");
 	if (!confirm_username(cfg->username))
 		return EXIT_FAILURE;
 
