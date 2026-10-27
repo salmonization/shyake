@@ -1,7 +1,7 @@
 CC ?= gcc
 # e.g. EXTRA_CFLAGS=-Werror in CI
 EXTRA_CFLAGS ?=
-VERSION ?= v0.4.1-indev.1
+VERSION ?= v0.4.1-indev.2
 
 # detect OS and architecture
 OS   := $(shell uname -s)
