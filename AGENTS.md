@@ -317,6 +317,9 @@ typedef uintptr_t uptr;
   `chore:`), imperative and lowercase.
 - The only trailer is `Co-Authored-By`. Never add session URLs or
   other trailers to commit messages.
+- Every commit carries
+  `Co-Authored-By: Lachsargument <salmon.caffeine@gmail.com>`,
+  besides the agent's own `Co-Authored-By` line.
 - Keep solutions simple and direct.
 
 ## Documentation
