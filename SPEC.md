@@ -310,8 +310,10 @@ The identifier of a mail.
 
 - The lowercase hex encoding of SHA-256 over the complete encoded envelope, signature included.
 - The same on every instance and every client that holds the mail.
-- A client MAY show and accept a shorter prefix (RECOMMENDED: at least 7 hex digits). A client that
-  accepts a prefix MUST reject it when more than one known mail matches it.
+- A client MUST accept the full Mail ID. A client MAY also accept a shorter prefix
+  (RECOMMENDED: at least 7 hex digits), resolved against the mail the client knows.
+  A client MUST reject a prefix that matches more than one known mail.
+- The HTTP API (Section 9) accepts only full Mail IDs.
 
 #### 4.1.8 Mailbox Entry
 
@@ -340,13 +342,10 @@ Fields:
   - `verified`: the user compared the fingerprint through a trusted channel.
 - `first_seen` (integer, Unix seconds)
 
-Contacts are client state. They are part of an account export (Section 14) and never sent to an
-instance.
-
-<!---
-Lachsargument: really? but the instance can see all the activities so they actually know this.
-               What does this mean to write this here.
---->
+Contacts are client state. A client MUST NOT send contact records to an instance. An instance can
+infer from metadata whom an account mails (Section 3.4), but it MUST NOT learn which contacts the
+user has verified: that would tell an attacker which identity keys it could substitute without
+detection. Contacts are part of an account export (Section 14).
 
 #### 4.1.10 Instance Descriptor
 
