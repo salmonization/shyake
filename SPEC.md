@@ -73,7 +73,7 @@ Important boundary:
 - Key escrow, or any way for an operator or administrator to read mail. The protocol has no such
   mechanism and MUST NOT gain one.
 - Per-message forward secrecy or ratcheting. The protocol does not assume that both parties are
-  are online. Mail can wait unread for weeks.
+  online. Mail can wait unread for weeks.
 - Multi-device accounts. In this version an account is active on one device at a time (Appendix A).
 - Guaranteed deletion of every copy. Burn removes the copies on instances but cannot remove a copy
   that a client has saved.
@@ -229,7 +229,7 @@ Fields:
   - Derived: SHA-256 over a domain-separated encoding of `identity_key` (Section 8).
 
 An identity does not contain an address. The same identity can move to another address (Section
-8). An identity does not change during normal use; a new identity key is a new identity.
+8). An identity does not change during normal use. A new identity key is a new identity.
 
 #### 4.1.3 Key Endorsement
 
@@ -310,9 +310,10 @@ The identifier of a mail.
 
 - The lowercase hex encoding of SHA-256 over the complete encoded envelope, signature included.
 - The same on every instance and every client that holds the mail.
-- A client MUST accept the full Mail ID. A client MAY also accept a shorter prefix
-  (RECOMMENDED: at least 7 hex digits), resolved against the mail the client knows.
-  A client MUST reject a prefix that matches more than one known mail.
+- A client MUST accept the full Mail ID. It MAY also accept a prefix, resolved against the mail the
+  client knows, and MUST reject a prefix that matches more than one known mail.
+- A client that shows a shortened Mail ID MUST show at least 7 hex digits, and more when 7 digits
+  do not tell the known mail apart.
 - The HTTP API (Section 9) accepts only full Mail IDs.
 
 #### 4.1.8 Mailbox Entry
