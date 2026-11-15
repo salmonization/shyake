@@ -375,3 +375,312 @@ Fields:
 - Mail IDs, fingerprints, and key IDs are compared as bytes. Their text form is lowercase hex.
 - All integers on the wire are unsigned and big-endian unless a section says otherwise.
 - All times are Unix seconds in UTC.
+
+<!--- PART 2 --->
+
+## 5. Cryptographic Primitives
+
+### 5.1 Algorithm Suite
+
+Protocol version 1 uses exactly one suite. There is no negotiation.
+
+| Purpose | Algorithm | Standard |
+|---|---|---|
+| Key encapsulation | ML-KEM-768 | FIPS 203 |
+| Signatures | ML-DSA-65 (pure, with context string) | FIPS 204 |
+| Authenticated encryption | ChaCha20-Poly1305 | RFC 8439 |
+| Hash | SHA-256 | FIPS 180-4 |
+| Key derivation | HKDF-SHA-256 | RFC 5869 |
+| Passphrase key derivation | scrypt | RFC 7914 |
+
+Sizes, in bytes:
+
+| Value | Size |
+|---|---|
+| ML-KEM-768 public key | 1184 |
+| ML-KEM-768 ciphertext | 1088 |
+| ML-KEM-768 shared secret | 32 |
+| ML-DSA-65 public key | 1952 |
+| ML-DSA-65 signature | 3309 |
+| ChaCha20-Poly1305 key | 32 |
+| ChaCha20-Poly1305 nonce | 12 |
+| Poly1305 tag | 16 |
+| SHA-256 output | 32 |
+
+Design note: a new suite needs a new protocol version. A single fixed suite keeps every
+implementation small and removes downgrade attacks.
+
+### 5.2 Randomness
+
+- Implementations MUST take every random value from a cryptographically secure random number
+  generator provided by the operating system or the cryptographic library.
+- An operation that cannot get enough random bytes MUST fail. It MUST NOT continue with a partly
+  filled buffer.
+- ML-DSA-65 signing SHOULD use the hedged (randomized) variant of FIPS 204.
+
+### 5.3 Domain Separation
+
+Every signature and every key derivation carries a label. A label is an ASCII string. A value made
+for one purpose cannot be accepted for another, because the label is part of what is signed or
+derived.
+
+| Label | Used for |
+|---|---|
+| `shyake/v1/endorsement` | ML-DSA context of a Key Endorsement (Section 6.4) |
+| `shyake/v1/envelope` | ML-DSA context of an Envelope (Section 6.5) |
+| `shyake/v1/move` | ML-DSA context of an Address Change Statement (Section 6.7) |
+| `shyake/v1/burn` | ML-DSA context of a Burn Statement (Section 6.8) |
+| `shyake/v1/request` | ML-DSA context of a signed HTTP request (Section 9) |
+| `shyake/v1/key-slot` | HKDF `info` prefix for a key slot wrapping key (Section 5.4) |
+| `shyake/v1/fingerprint` | Hash prefix of an identity fingerprint (Section 8) |
+
+Rules:
+
+- A signer MUST pass the label as the FIPS 204 context string `ctx`. A verifier MUST pass the same
+  label and MUST reject the signature otherwise.
+- Implementations MUST NOT sign or verify with an empty context string.
+
+### 5.4 Key Slot Construction
+
+A key slot carries the content key `K` to one endorsed encryption key (Section 4.1.5).
+
+To create a slot for the encryption key `pk` with key ID `kid`:
+
+1. `(ct, ss) = ML-KEM-768.Encaps(pk)`
+2. `wk = HKDF-SHA-256(ikm = ss, salt = empty, info = "shyake/v1/key-slot" ‖ kid ‖ ct, L = 32)`
+3. `wrapped_key = ChaCha20-Poly1305.Seal(key = wk, nonce = 12 zero bytes, aad = header, pt = K)`
+4. The slot is `(kid, ct, wrapped_key)`. `wrapped_key` is 48 bytes.
+
+To open a slot with the secret key `sk` that belongs to `kid`:
+
+1. `ss = ML-KEM-768.Decaps(sk, ct)`
+2. Derive `wk` as above.
+3. `K = ChaCha20-Poly1305.Open(key = wk, nonce = 12 zero bytes, aad = header, ct = wrapped_key)`
+4. If `Open` fails, the slot is invalid. The client MUST NOT try the content with any other key.
+
+`header` is the encoded envelope header (Section 6.5). It binds the slot to this envelope.
+
+Design note: the fixed zero nonce is safe because `wk` comes from a fresh encapsulation and
+encrypts exactly one value.
+
+### 5.5 Content Encryption
+
+- The sender's client MUST generate a fresh 32-byte content key `K` for every envelope.
+- `sealed_content = ChaCha20-Poly1305.Seal(key = K, nonce = 12 zero bytes, aad = header,
+  pt = encoded Sealed Content)` (Section 6.6).
+- `K` MUST encrypt exactly one plaintext. A client MUST NOT reuse `K` for another envelope, a draft,
+  or anything else.
+- A client MAY store `K` itself, wrapped under a local key, so that it can still read a saved mail
+  after the encryption key that the mail was sent to is retired (Section 7).
+
+Design note: the fixed zero nonce is safe for the same reason as in Section 5.4: each `K` encrypts
+exactly one value.
+
+### 5.6 Signatures
+
+- Signatures are ML-DSA-65 in pure mode (not pre-hashed), over the exact bytes that the relevant
+  section of Section 6 names, with the context string from Section 5.3.
+- Every signature in this protocol is made with the signer's identity key.
+- A verifier MUST check the length of a signature (3309 bytes) and of a public key (1952 bytes)
+  before it calls the verify function.
+
+### 5.7 Hashes and Derived Identifiers
+
+| Value | Definition |
+|---|---|
+| Mail ID | `SHA-256(envelope)`, over the complete encoded envelope |
+| Key ID (`kem_key_id`) | first 8 bytes of `SHA-256(kem_key)` |
+| Fingerprint | `SHA-256("shyake/v1/fingerprint" ‖ identity_key)` |
+
+The envelope begins with its own magic number (Section 6.5), so the Mail ID needs no label.
+
+## 6. Wire Format
+
+This section defines the bytes of every signed or encrypted object. Signatures, Mail IDs, and
+key IDs are computed over these bytes. An implementation that encodes or decodes them differently
+does not interoperate.
+
+### 6.1 Encoding Rules
+
+Types:
+
+| Type | Encoding |
+|---|---|
+| `u8`, `u16`, `u32`, `u64` | Unsigned integer, big-endian, 1, 2, 4, or 8 bytes |
+| `bytes[N]` | Exactly `N` bytes, no length prefix |
+| `var8`, `var16`, `var32` | A `u8`, `u16`, or `u32` length `n`, then `n` bytes |
+| `text16` | A `var16` whose bytes are valid UTF-8 |
+| `address` | A `var8` that holds a canonical address in ASCII (Section 4.1.1) |
+| `optional<T>` | A `u8` tag: `0` for none, or `1` followed by a `T` |
+| `list8<T>` | A `u8` count `n`, then `n` values of type `T` |
+
+Fields follow each other with no gaps and no alignment.
+
+Strict decoding:
+
+- A decoder MUST reject an object with bytes left over after its last field.
+- A decoder MUST reject a length that runs past the end of the input.
+- A decoder MUST reject an unknown magic number or version.
+- A decoder MUST reject an `optional` tag other than `0` or `1`.
+- A decoder MUST reject an `address` that is not in canonical form, and a `text16` that is not
+  valid UTF-8 or contains a NUL byte.
+
+Important boundary: every object has exactly one valid encoding. This is what makes the Mail ID
+stable and lets independent implementations agree on what was signed. A decoder that accepts a
+second encoding of the same value breaks this rule.
+
+### 6.2 Text Form
+
+Where JSON (Section 9) or a URI carries binary data:
+
+- Objects, keys, and signatures use base64url without padding (RFC 4648, Section 5).
+- Mail IDs, fingerprints, and key IDs use lowercase hex.
+- A decoder MUST reject padding characters, characters outside the alphabet, and uppercase hex.
+
+### 6.3 Magic Numbers
+
+Every top-level object begins with a 4-byte ASCII magic number and a `u8` version.
+
+| Magic | Object |
+|---|---|
+| `SHYN` | Key Endorsement |
+| `SHYE` | Envelope |
+| `SHYM` | Address Change Statement |
+| `SHYB` | Burn Statement |
+| `SHYX` | Account Export (Section 14) |
+
+Version is `1` for every object in this specification.
+
+### 6.4 Key Endorsement
+
+| Field | Type | Notes |
+|---|---|---|
+| `magic` | `bytes[4]` | `SHYN` |
+| `version` | `u8` | `1` |
+| `kem_key` | `bytes[1184]` | ML-KEM-768 public key |
+| `not_before` | `u64` | |
+| `not_after` | `u64` | MUST be greater than `not_before` |
+| `signature` | `bytes[3309]` | Over all preceding bytes, context `shyake/v1/endorsement` |
+
+Total size: 4518 bytes.
+
+A verifier MUST reject an endorsement whose validity period is longer than the maximum in
+Section 7.
+
+### 6.5 Envelope
+
+The envelope has four parts: header, key slots, sealed content, signature.
+
+Header:
+
+| Field | Type | Notes |
+|---|---|---|
+| `magic` | `bytes[4]` | `SHYE` |
+| `version` | `u8` | `1` |
+| `sender` | `address` | |
+| `recipient` | `address` | |
+| `created_at` | `u64` | Unix seconds, set by the sender's client |
+
+Key slots:
+
+| Field | Type | Notes |
+|---|---|---|
+| `key_slots` | `list8<key_slot>` | 1 to 16 slots |
+
+Each `key_slot`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `kem_key_id` | `bytes[8]` | |
+| `kem_ciphertext` | `bytes[1088]` | |
+| `wrapped_key` | `bytes[48]` | Section 5.4 |
+
+Sealed content and signature:
+
+| Field | Type | Notes |
+|---|---|---|
+| `sealed_content` | `var32` | Ciphertext and tag, Section 5.5 |
+| `signature` | `bytes[3309]` | Over all preceding bytes, context `shyake/v1/envelope` |
+
+Rules:
+
+- The header, encoded exactly as above, is the `aad` for every key slot (Section 5.4) and for the
+  sealed content (Section 5.5).
+- Two key slots in one envelope MUST NOT have the same `kem_key_id`.
+- The length of `sealed_content` MUST be a padded size from Section 6.6 plus 16 bytes. An instance
+  MUST reject an envelope that breaks this rule.
+- The envelope's total size MUST NOT exceed the recipient instance's `max_envelope_size`
+  (Section 4.1.10).
+
+### 6.6 Sealed Content
+
+The plaintext that `sealed_content` encrypts:
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | `u8` | `1` |
+| `subject` | `text16` | At most 256 bytes |
+| `in_reply_to` | `optional<bytes[32]>` | Mail ID of the answered mail |
+| `body` | `var32` | Valid UTF-8, no NUL bytes |
+| `padding` | remaining bytes | All zero |
+
+Padding:
+
+- Let `L` be the encoded length of `version` through `body`.
+- The plaintext length MUST be `padme(max(L, 1024))`, where `padme` is the Padmé function:
+
+```text
+padme(L):
+    E = floor(log2(L))
+    S = floor(log2(E)) + 1
+    z = E - S
+    mask = (1 << z) - 1
+    return (L + mask) & ~mask
+```
+
+- A recipient's client MUST reject sealed content whose padding bytes are not all zero, or whose
+  length is not the padded length of its fields.
+
+Design note: Padmé leaks only the rough order of magnitude of a mail's length, with at most about
+12% overhead. Fixed power-of-two buckets would waste up to half the space.
+
+### 6.7 Address Change Statement
+
+Signed by an identity to announce that it moved from one address to another (Section 8).
+
+| Field | Type | Notes |
+|---|---|---|
+| `magic` | `bytes[4]` | `SHYM` |
+| `version` | `u8` | `1` |
+| `old_address` | `address` | |
+| `new_address` | `address` | MUST differ from `old_address` |
+| `issued_at` | `u64` | |
+| `signature` | `bytes[3309]` | Over all preceding bytes, context `shyake/v1/move` |
+
+### 6.8 Burn Statement
+
+Signed by the sender or the recipient of a mail to burn it on every instance that holds it
+(Section 11).
+
+| Field | Type | Notes |
+|---|---|---|
+| `magic` | `bytes[4]` | `SHYB` |
+| `version` | `u8` | `1` |
+| `mail_id` | `bytes[32]` | |
+| `actor` | `address` | The sender or the recipient of the mail |
+| `issued_at` | `u64` | |
+| `signature` | `bytes[3309]` | Over all preceding bytes, context `shyake/v1/burn` |
+
+### 6.9 Size Summary
+
+A mail between two parties, with two key slots, has this fixed overhead:
+
+| Part | Bytes |
+|---|---|
+| Header | 14 + length of both addresses |
+| Two key slots | 1 + 2 × 1144 = 2289 |
+| Sealed content length prefix and tag | 4 + 16 = 20 |
+| Signature | 3309 |
+| Total fixed overhead | about 5.7 KiB |
+
+The sealed content adds its padded length, at least 1024 bytes.
