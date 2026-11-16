@@ -3,11 +3,11 @@
 .claude
 
 stargazers/
-docs/archives/
-client/obj/
-client/bin/
-client/lib/
-client/tests/accounts/
+legacy/docs/archives/
+legacy/client/obj/
+legacy/client/bin/
+legacy/client/lib/
+legacy/client/tests/accounts/
 
 node_modules/
 dist/
@@ -19,13 +19,13 @@ dist/
 *.key
 
 # rendered by server/cf/deploy.sh from wrangler.template.toml
-server/cf/wrangler.toml
+legacy/server/cf/wrangler.toml
 
 # Go server: local build and default database
-server/go/shyake-server
-server/go/*.db
-server/go/*.db-shm
-server/go/*.db-wal
+legacy/server/go/shyake-server
+legacy/server/go/*.db
+legacy/server/go/*.db-shm
+legacy/server/go/*.db-wal
 # a local server started from the repository root
 /shyake.db
 /shyake.db-shm
