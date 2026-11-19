@@ -105,7 +105,8 @@ Important boundary:
 
 3. `Operator`
    - Deploys and configures an instance.
-   - Chooses the instance policy: open registration, invitation only, or closed; open federation,
+   - Chooses the instance policy: registration (`open`, `invite`, or `closed`) and federation
+     (`open`, `allowlist`, or `off`).
      an allowlist, or none.
    - Has no access to mail content. The operator sees what the instance sees (Section 3.4).
 
