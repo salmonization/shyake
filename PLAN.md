@@ -13,7 +13,7 @@
 | Shyake | C | CLI | POSIX |
 | CocoaShyake | Obj-C | AppKit | macOS |
 | NTShyake | C | Win32 | Windows |
-| GimpShyake | C | GTK3 | Linux, BSD |
+| GTKShyake | C | GTK3 | Linux, BSD |
 | HShyake | Go, TypeScript | HTML5, CSS3 | multi |
 | GPShyake | Rust | GPUI | multi |
 
